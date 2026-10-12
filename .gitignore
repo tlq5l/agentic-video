@@ -1,0 +1,30 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+*.tmp
+*.log
+
+# Local virtual environments.
+.venv/
+.python-runtime/
+
+# Temporary test and benchmark workspaces.
+.tmp/
+.tmp-*/
+
+# Default output of `python -m src.loop check`.
+.agentic-video-check/
+
+# Credentials and machine-local authentication files.
+.env
+.env.*
+**/auth.json
+**/credentials*.json
+**/*.pem
+**/*.key
+**/*.p12
+**/.netrc
+
+# Local session markers.
+:memory:*

@@ -1,0 +1,6 @@
+# Optional local visual retrieval; CLIP weights are approximately 605 MB.
+torch>=2.6,<3
+transformers>=4.45,<5
+Pillow>=10
+# On-screen text matching (count_occurrences text=) uses Apple Vision through pyobjc; macOS only, fully offline.
+pyobjc-framework-Vision>=10; sys_platform == "darwin"

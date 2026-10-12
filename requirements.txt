@@ -1,0 +1,6 @@
+numpy>=1.21
+Pillow>=10
+# Local speech-to-text for the tiny, base and small models (turbo uses whisper.cpp instead; see README).
+faster-whisper>=1.0
+# faster-whisper 1.2.1 passes av.open(metadata_errors=...), which PyAV 19 removed.
+av<19

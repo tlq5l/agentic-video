@@ -1,0 +1,266 @@
+{
+  "benchmark_name": "synthetic_bench_60s",
+  "duration_s": 60.0,
+  "fps": 25,
+  "width": 640,
+  "height": 360,
+  "total_frames": 1500,
+  "events": [
+    {
+      "event_id": "task1_supernova",
+      "task_type": "locate_single_event",
+      "name": "SUPERNOVA_FIRST_OCCURRENCE",
+      "start_s": 14.0,
+      "end_s": 16.0,
+      "description": "First occurrence of the Supernova visual explosion event",
+      "visual_text": "EVENT: SUPERNOVA (STAR BURST)",
+      "visual_color": "#f59e0b",
+      "audio_description": "Ascending high chime tone (880Hz)",
+      "ground_truth_answer": {
+        "timestamp_s": 14.0,
+        "event_name": "SUPERNOVA"
+      }
+    },
+    {
+      "event_id": "task2_seq_pre",
+      "task_type": "temporal_sequence",
+      "name": "PHASE_PRE_BLUE_SQUARE",
+      "start_s": 24.0,
+      "end_s": 25.5,
+      "description": "Preceding event: Blue square phase",
+      "visual_text": "SEQ-1: BLUE SQUARE",
+      "visual_color": "#3b82f6",
+      "audio_description": "Low pulse tone (220Hz)",
+      "ground_truth_answer": {
+        "phase": "PRE",
+        "shape": "BLUE SQUARE",
+        "timestamp_s": 24.0
+      }
+    },
+    {
+      "event_id": "task2_seq_target",
+      "task_type": "temporal_sequence",
+      "name": "PHASE_TARGET_GREEN_CIRCLE",
+      "start_s": 26.0,
+      "end_s": 27.5,
+      "description": "Target reference event: Green circle phase",
+      "visual_text": "SEQ-2: GREEN CIRCLE [TARGET]",
+      "visual_color": "#10b981",
+      "audio_description": "Mid pulse tone (440Hz)",
+      "ground_truth_answer": {
+        "phase": "TARGET",
+        "shape": "GREEN CIRCLE",
+        "timestamp_s": 26.0
+      }
+    },
+    {
+      "event_id": "task2_seq_post",
+      "task_type": "temporal_sequence",
+      "name": "PHASE_POST_RED_TRIANGLE",
+      "start_s": 28.0,
+      "end_s": 29.5,
+      "description": "Succeeding event: Red triangle phase",
+      "visual_text": "SEQ-3: RED TRIANGLE",
+      "visual_color": "#ef4444",
+      "audio_description": "High pulse tone (660Hz)",
+      "ground_truth_answer": {
+        "phase": "POST",
+        "shape": "RED TRIANGLE",
+        "timestamp_s": 28.0
+      }
+    },
+    {
+      "event_id": "task3_transcript_verification",
+      "task_type": "transcript_driven_verification",
+      "name": "PROJECT_CYGNUS_VERIFICATION",
+      "start_s": 34.0,
+      "end_s": 36.5,
+      "description": "Spoken audio mentions 'Project Cygnus' and visual badge reveals verification code",
+      "visual_text": "PROJECT CYGNUS: CODE [CYGNUS-VERIFIED-77]",
+      "visual_color": "#06b6d4",
+      "audio_description": "Spoken phrase / tone burst: Project Cygnus activated",
+      "ground_truth_answer": {
+        "transcript_phrase": "Project Cygnus activated",
+        "timestamp_s": 34.0,
+        "visual_verification_code": "CYGNUS-VERIFIED-77"
+      }
+    },
+    {
+      "event_id": "task4_visual_state_change",
+      "task_type": "visual_only_state_change",
+      "name": "BACKGROUND_CRIMSON_FLIP",
+      "start_s": 39.5,
+      "end_s": 41.5,
+      "description": "Abrupt visual-only background state flip from slate navy to bright crimson (no audio cue)",
+      "visual_text": "STATE CHANGE: CRIMSON ALERT (SUB-SECOND ONSET)",
+      "visual_color": "#e11d48",
+      "audio_description": "Silent (no audio cue, purely visual event)",
+      "ground_truth_answer": {
+        "state_change": "slate_to_crimson",
+        "onset_timestamp_s": 39.5,
+        "duration_s": 2.0
+      }
+    },
+    {
+      "event_id": "task5_recurrence_1",
+      "task_type": "sparse_recurring_event",
+      "name": "PURPLE_DIAMOND_OCCURRENCE_1",
+      "start_s": 7.0,
+      "end_s": 8.0,
+      "description": "First occurrence of sparse flashing purple diamond",
+      "visual_text": "BADGE: PURPLE DIAMOND [1 of 3]",
+      "visual_color": "#a855f7",
+      "audio_description": "Dual chirp tone (520Hz + 780Hz)",
+      "ground_truth_answer": {
+        "occurrence_index": 1,
+        "timestamp_s": 7.0
+      }
+    },
+    {
+      "event_id": "task5_recurrence_2",
+      "task_type": "sparse_recurring_event",
+      "name": "PURPLE_DIAMOND_OCCURRENCE_2",
+      "start_s": 21.0,
+      "end_s": 22.0,
+      "description": "Second occurrence of sparse flashing purple diamond",
+      "visual_text": "BADGE: PURPLE DIAMOND [2 of 3]",
+      "visual_color": "#a855f7",
+      "audio_description": "Dual chirp tone (520Hz + 780Hz)",
+      "ground_truth_answer": {
+        "occurrence_index": 2,
+        "timestamp_s": 21.0
+      }
+    },
+    {
+      "event_id": "task5_recurrence_3",
+      "task_type": "sparse_recurring_event",
+      "name": "PURPLE_DIAMOND_OCCURRENCE_3",
+      "start_s": 48.0,
+      "end_s": 49.0,
+      "description": "Third occurrence of sparse flashing purple diamond",
+      "visual_text": "BADGE: PURPLE DIAMOND [3 of 3]",
+      "visual_color": "#a855f7",
+      "audio_description": "Dual chirp tone (520Hz + 780Hz)",
+      "ground_truth_answer": {
+        "occurrence_index": 3,
+        "timestamp_s": 48.0
+      }
+    }
+  ],
+  "negative_controls": [
+    {
+      "event_id": "task6_negative_emerald_elephant",
+      "task_type": "negative_control",
+      "query": "Does an EMERALD ELEPHANT or CODE_ZEBRA appear in the video?",
+      "ground_truth_found": false,
+      "expected_verdict": "NOT_FOUND",
+      "rationale": "Event was never rendered in the video. Model must reject with not found."
+    },
+    {
+      "event_id": "task6_negative_audio_explosion",
+      "task_type": "negative_control",
+      "query": "At what timestamp does the explosion sound effect occur?",
+      "ground_truth_found": false,
+      "expected_verdict": "NOT_FOUND",
+      "rationale": "Audio contains only tones/beeps/chirps and synthetic voice, never an explosion."
+    }
+  ],
+  "tasks": {
+    "task1_locate_single_event": {
+      "task_type": "locate_single_event",
+      "name": "Locate Supernova Event",
+      "prompt": "When does the SUPERNOVA event first occur in the video?",
+      "target_event_id": "task1_supernova",
+      "ground_truth_timestamp_s": 14.0,
+      "timestamp_tolerance_s": 1.0,
+      "expected_keywords": [
+        "supernova",
+        "14",
+        "star"
+      ]
+    },
+    "task2_temporal_sequence": {
+      "task_type": "temporal_sequence",
+      "name": "Sequence Before and After Green Circle",
+      "prompt": "What visual shape appears immediately before and immediately after the GREEN CIRCLE event?",
+      "target_event_id": "task2_seq_target",
+      "ground_truth": {
+        "before": {
+          "shape": "BLUE SQUARE",
+          "timestamp_s": 24.0
+        },
+        "target": {
+          "shape": "GREEN CIRCLE",
+          "timestamp_s": 26.0
+        },
+        "after": {
+          "shape": "RED TRIANGLE",
+          "timestamp_s": 28.0
+        }
+      },
+      "expected_keywords": [
+        "blue square",
+        "red triangle"
+      ]
+    },
+    "task3_transcript_verification": {
+      "task_type": "transcript_driven_verification",
+      "name": "Verify Project Cygnus Token",
+      "prompt": "Where is 'Project Cygnus' mentioned in audio/transcript, and what visual verification token is shown on screen?",
+      "target_event_id": "task3_transcript_verification",
+      "ground_truth": {
+        "mention_timestamp_s": 34.0,
+        "visual_token": "CYGNUS-VERIFIED-77"
+      },
+      "timestamp_tolerance_s": 1.5,
+      "expected_keywords": [
+        "CYGNUS-VERIFIED-77",
+        "34"
+      ]
+    },
+    "task4_visual_state_change": {
+      "task_type": "visual_only_state_change",
+      "name": "Sub-second Crimson Background Onset",
+      "prompt": "At what exact timestamp does the background color flip to crimson alert?",
+      "target_event_id": "task4_visual_state_change",
+      "ground_truth_timestamp_s": 39.5,
+      "timestamp_tolerance_s": 0.6,
+      "expected_keywords": [
+        "39.5",
+        "crimson"
+      ]
+    },
+    "task5_sparse_recurring_event": {
+      "task_type": "sparse_recurring_event",
+      "name": "Count Purple Diamond Badges",
+      "prompt": "How many times does the flashing PURPLE DIAMOND badge appear in the video, and at what timestamps?",
+      "target_event_ids": [
+        "task5_recurrence_1",
+        "task5_recurrence_2",
+        "task5_recurrence_3"
+      ],
+      "ground_truth_count": 3,
+      "ground_truth_timestamps_s": [
+        7.0,
+        21.0,
+        48.0
+      ],
+      "timestamp_tolerance_s": 1.0
+    },
+    "task6_negative_control": {
+      "task_type": "negative_control",
+      "name": "Negative Control: Emerald Elephant",
+      "prompt": "Does an EMERALD ELEPHANT or CODE_ZEBRA occur at any point in the video?",
+      "ground_truth_present": false,
+      "expected_verdict": "NOT_FOUND",
+      "acceptable_answers": [
+        "not found",
+        "does not occur",
+        "never appears",
+        "absent",
+        "none",
+        "no"
+      ]
+    }
+  }
+}

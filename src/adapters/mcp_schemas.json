@@ -1,0 +1,2487 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AgenticVideoToolSchemas",
+  "version": "3.0.0",
+  "description": "Canonical JSON contract for the tools exposed by src.executor.mcp_server.",
+  "legacy_tools": {
+    "probe_video": {
+      "name": "probe_video",
+      "description": "Extract container and stream metadata including duration, resolution, frame rate, codecs, and audio channel presence.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "Local filesystem path or accessible URI to video file."
+          }
+        },
+        "required": ["source"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "source": { "type": "string" },
+          "duration": { "type": "number", "description": "Duration in seconds" },
+          "resolution": {
+            "type": "object",
+            "properties": {
+              "width": { "type": "integer" },
+              "height": { "type": "integer" }
+            },
+            "required": ["width", "height"],
+            "additionalProperties": false
+          },
+          "fps": { "type": "number", "description": "Frame rate (e.g. 29.97, 30.0, 60.0)" },
+          "total_frames": { "type": "integer" },
+          "codecs": {
+            "type": "object",
+            "properties": {
+              "video": { "type": "string" },
+              "audio": { "type": "string" }
+            },
+            "required": ["video"],
+            "additionalProperties": false
+          },
+          "has_audio": { "type": "boolean" },
+          "bitrate_kbps": { "type": "number" },
+          "format_name": { "type": "string" },
+          "aspect_ratio": { "type": "string" }
+        },
+        "required": [
+          "source",
+          "duration",
+          "resolution",
+          "fps",
+          "total_frames",
+          "codecs",
+          "has_audio",
+          "bitrate_kbps",
+          "format_name",
+          "aspect_ratio"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "transcribe": {
+      "name": "transcribe",
+      "description": "Transcribe spoken audio from the video into time-aligned segments using Whisper.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "Video or audio file path."
+          },
+          "options": {
+            "type": "object",
+            "properties": {
+              "model_size": {
+                "type": "string",
+                "enum": ["tiny", "base", "small", "medium", "large-v3"],
+                "default": "base",
+                "description": "Whisper model size for transcription accuracy vs speed tradeoff."
+              },
+              "language": {
+                "type": "string",
+                "description": "ISO 639-1 language code (e.g. 'en', 'es') or 'auto' for auto-detection."
+              },
+              "vad_filter": {
+                "type": "boolean",
+                "default": true,
+                "description": "Apply Voice Activity Detection filter to exclude background noise and silence."
+              },
+              "word_timestamps": {
+                "type": "boolean",
+                "default": false,
+                "description": "Return precise timestamp for each word in segments."
+              },
+              "time_range": {
+                "type": "object",
+                "properties": {
+                  "start": { "type": "number", "minimum": 0 },
+                  "end": { "type": "number", "minimum": 0 }
+                },
+                "additionalProperties": false,
+                "description": "Optional bounding sub-window to transcribe."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": ["source"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "source": { "type": "string" },
+          "language": { "type": "string" },
+          "duration": { "type": "number" },
+          "segments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "integer" },
+                "timestamp_start": { "type": "number" },
+                "timestamp_end": { "type": "number" },
+                "text": { "type": "string" },
+                "words": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "word": { "type": "string" },
+                      "timestamp_start": { "type": "number" },
+                      "timestamp_end": { "type": "number" },
+                      "probability": { "type": "number" }
+                    },
+                    "required": ["word", "timestamp_start", "timestamp_end", "probability"],
+                    "additionalProperties": false
+                  }
+                },
+                "speaker": { "type": "string" }
+              },
+              "required": ["id", "timestamp_start", "timestamp_end", "text"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["source", "language", "duration", "segments"],
+        "additionalProperties": false
+      }
+    },
+    "search_transcript": {
+      "name": "search_transcript",
+      "description": "Perform lexical or semantic search on video transcripts to find temporal moments corresponding to queries.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "Video source path."
+          },
+          "query": {
+            "type": "string",
+            "description": "Search text or topic to find in speech transcript."
+          },
+          "top_k": {
+            "type": "integer",
+            "default": 5,
+            "minimum": 1,
+            "maximum": 50,
+            "description": "Maximum number of matched segments to return."
+          },
+          "time_range": {
+            "type": "object",
+            "properties": {
+              "start": { "type": "number", "minimum": 0 },
+              "end": { "type": "number", "minimum": 0 }
+            },
+            "additionalProperties": false,
+            "description": "Optional temporal window constraint."
+          },
+          "search_mode": {
+            "type": "string",
+            "enum": ["hybrid", "semantic", "lexical"],
+            "default": "hybrid",
+            "description": "Retrieval ranking algorithm."
+          }
+        },
+        "required": ["source", "query"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string" },
+          "matches": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "segment_id": { "type": "integer" },
+                "timestamp_start": { "type": "number" },
+                "timestamp_end": { "type": "number" },
+                "text": { "type": "string" },
+                "score": { "type": "number", "minimum": 0, "maximum": 1 },
+                "context_before": { "type": "string" },
+                "context_after": { "type": "string" }
+              },
+              "required": ["segment_id", "timestamp_start", "timestamp_end", "text", "score"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["query", "matches"],
+        "additionalProperties": false
+      }
+    },
+    "sample_frames": {
+      "name": "sample_frames",
+      "description": "Sample video frames at uniform intervals or target count, returning file paths with exact timestamps.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "Video source path."
+          },
+          "start": {
+            "type": "number",
+            "minimum": 0,
+            "default": 0,
+            "description": "Start timestamp in seconds."
+          },
+          "end": {
+            "type": "number",
+            "minimum": 0,
+            "description": "End timestamp in seconds (default: video duration)."
+          },
+          "fps": {
+            "type": "number",
+            "minimum": 0.01,
+            "maximum": 30,
+            "description": "Sample frequency (e.g. 0.5 = 1 frame every 2s)."
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500,
+            "description": "Total frames evenly spaced across interval (overrides fps if specified)."
+          },
+          "width": {
+            "type": "integer",
+            "default": 720,
+            "description": "Thumbnail width in pixels preserving aspect ratio."
+          },
+          "quality": {
+            "type": "integer",
+            "default": 85,
+            "minimum": 1,
+            "maximum": 100,
+            "description": "JPEG quality level."
+          },
+          "output_format": {
+            "type": "string",
+            "enum": ["path", "base64", "tool_file"],
+            "default": "path",
+            "description": "Disk paths ('path'), base64 strings ('base64'), or Executor ToolFile ('tool_file')."
+          }
+        },
+        "required": ["source"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "source": { "type": "string" },
+          "frames": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "frame_index": { "type": "integer" },
+                "timestamp": { "type": "number" },
+                "timestamp_formatted": { "type": "string" },
+                "file_path": { "type": "string" },
+                "base64_data": { "type": "string" },
+                "tool_file": { "type": "object" },
+                "width": { "type": "integer" },
+                "height": { "type": "integer" }
+              },
+              "required": [
+                "frame_index",
+                "timestamp",
+                "timestamp_formatted",
+                "file_path",
+                "width",
+                "height"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "total_sampled": { "type": "integer" }
+        },
+        "required": ["source", "frames", "total_sampled"],
+        "additionalProperties": false
+      }
+    },
+    "inspect_window": {
+      "name": "inspect_window",
+      "description": "Densely sample frames within a narrow temporal window (e.g. 1-15s) for fine-grained action or visual inspection.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "Video source path."
+          },
+          "start": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Window start timestamp in seconds."
+          },
+          "end": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Window end timestamp in seconds (max recommended 30s)."
+          },
+          "fps": {
+            "type": "number",
+            "default": 2.0,
+            "minimum": 0.5,
+            "maximum": 10.0,
+            "description": "Dense sampling frame rate (default: 2 fps)."
+          },
+          "width": {
+            "type": "integer",
+            "default": 720,
+            "description": "Frame image width in pixels."
+          },
+          "include_motion": {
+            "type": "boolean",
+            "default": false,
+            "description": "Compute optical flow / motion delta score for each frame."
+          },
+          "output_format": {
+            "type": "string",
+            "enum": ["path", "base64", "tool_file"],
+            "default": "path"
+          }
+        },
+        "required": ["source", "start", "end"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "source": { "type": "string" },
+          "window_start": { "type": "number" },
+          "window_end": { "type": "number" },
+          "duration": { "type": "number" },
+          "frames": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "frame_index": { "type": "integer" },
+                "timestamp": { "type": "number" },
+                "timestamp_formatted": { "type": "string" },
+                "file_path": { "type": "string" },
+                "base64_data": { "type": "string" },
+                "tool_file": { "type": "object" },
+                "motion_score": { "type": "number" }
+              },
+              "required": ["frame_index", "timestamp", "timestamp_formatted", "file_path"],
+              "additionalProperties": false
+            }
+          },
+          "frame_count": { "type": "integer" }
+        },
+        "required": ["source", "window_start", "window_end", "duration", "frames", "frame_count"],
+        "additionalProperties": false
+      }
+    },
+    "build_visual_index": {
+      "name": "build_visual_index",
+      "description": "Start or poll background construction of the local visual frame index. Repeat calls to check progress; frames are processed in bounded chunks.",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "source": { "type": "string", "minLength": 1, "description": "Local filesystem path to video file." } },
+        "required": ["source"],
+        "additionalProperties": false
+      },
+      "outputSchema": { "type": "object", "description": "Background status and indexing progress." }
+    },
+    "search_visual": {
+      "name": "search_visual",
+      "description": "Find when a visible object, person, action, or scene appears. Build the local visual index first if needed, then repeat the same query to poll. Returns ranked hits, merged intervals, and a contact sheet for visual verification. It matches meaning, not letters, so it cannot find on-screen words or numbers (names, scores, jersey or bib numbers): find those with count_occurrences `text`, which reads text in frames, one window of up to 2400 s per call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": { "type": "string", "minLength": 1 },
+          "query": { "type": "string", "minLength": 1, "maxLength": 2000, "description": "Natural-language description of visible content." },
+          "top_k": { "type": "integer", "minimum": 1, "maximum": 20, "default": 5 },
+          "start_sec": { "type": "number", "minimum": 0, "default": 0 },
+          "end_sec": { "type": ["number", "null"], "minimum": 0 }
+        },
+        "required": ["source", "query"],
+        "additionalProperties": false
+      },
+      "outputSchema": { "type": "object", "description": "Search status or ranked hits, merged intervals, and optional contact sheet." }
+    },
+    "contact_sheet": {
+      "name": "contact_sheet",
+      "description": "Render a composite grid image (contact sheet) with burned-in timestamps for rapid visual timeline scanning in a single image.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "Video source path."
+          },
+          "start": {
+            "type": "number",
+            "minimum": 0,
+            "default": 0,
+            "description": "Start timestamp in seconds."
+          },
+          "end": {
+            "type": "number",
+            "minimum": 0,
+            "description": "End timestamp in seconds (default: video duration)."
+          },
+          "samples": {
+            "type": "integer",
+            "default": 16,
+            "minimum": 4,
+            "maximum": 64,
+            "description": "Total thumbnail tiles in contact sheet."
+          },
+          "cols": {
+            "type": "integer",
+            "default": 4,
+            "minimum": 2,
+            "maximum": 8,
+            "description": "Number of columns in tile grid."
+          },
+          "tile_width": {
+            "type": "integer",
+            "default": 320,
+            "description": "Width of each tile thumbnail in pixels."
+          },
+          "show_timestamps": {
+            "type": "boolean",
+            "default": true,
+            "description": "Render timestamp text badge on each thumbnail tile."
+          },
+          "output_format": {
+            "type": "string",
+            "enum": ["path", "base64", "tool_file"],
+            "default": "path"
+          }
+        },
+        "required": ["source"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "source": { "type": "string" },
+          "grid_image_path": { "type": "string" },
+          "base64_data": { "type": "string" },
+          "tool_file": { "type": "object" },
+          "rows": { "type": "integer" },
+          "cols": { "type": "integer" },
+          "tile_count": { "type": "integer" },
+          "timestamps": {
+            "type": "array",
+            "items": { "type": "number" }
+          },
+          "tiles": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "tile_index": { "type": "integer" },
+                "row": { "type": "integer" },
+                "col": { "type": "integer" },
+                "timestamp": { "type": "number" },
+                "timestamp_formatted": { "type": "string" }
+              },
+              "required": ["tile_index", "row", "col", "timestamp", "timestamp_formatted"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "source",
+          "grid_image_path",
+          "rows",
+          "cols",
+          "tile_count",
+          "timestamps",
+          "tiles"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "get_clip": {
+      "name": "get_clip",
+      "description": "Extract a temporal video subclip between start and end timestamps.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "Video source path."
+          },
+          "start": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Start timestamp in seconds."
+          },
+          "end": {
+            "type": "number",
+            "minimum": 0,
+            "description": "End timestamp in seconds."
+          },
+          "re_encode": {
+            "type": "boolean",
+            "default": false,
+            "description": "If false, performs fast stream copy on keyframes; if true, re-encodes for frame-exact trimming."
+          },
+          "output_format": {
+            "type": "string",
+            "enum": ["mp4", "webm"],
+            "default": "mp4",
+            "description": "Container format for extracted subclip."
+          }
+        },
+        "required": ["source", "start", "end"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "clip_path": { "type": "string" },
+          "source": { "type": "string" },
+          "timestamp_start": { "type": "number" },
+          "timestamp_end": { "type": "number" },
+          "duration": { "type": "number" },
+          "file_size_bytes": { "type": "integer" }
+        },
+        "required": [
+          "clip_path",
+          "source",
+          "timestamp_start",
+          "timestamp_end",
+          "duration",
+          "file_size_bytes"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "tools": {
+    "count_repetitions": {
+      "name": "count_repetitions",
+      "description": "Count completed cycles of a repeated visual action (jumps, claps, bounces, swings) inside one window of at most 180 seconds. Give `region` (fractions of the frame: x, y, w, h) to isolate the moving thing. Repeat the same call while status=in_progress; verify peak badges and ambiguous edges with inspect_window. For separate appearances of a specific symbol or exact on-screen text use count_occurrences; to locate one moment use search_visual. For a longer clip call once per window, cutting at pauses between cycles so none straddles an edge. The count is a rough first pass and can be far off on real footage. Before answering, count cycles by eye with inspect_window or contact_sheet over the window; if your count differs, trust your own.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "minLength": 1
+          },
+          "start_sec": {
+            "description": "Start of the window in seconds (default 0). The window may be at most 180 s long.",
+            "type": "number",
+            "minimum": 0,
+            "default": 0
+          },
+          "end_sec": {
+            "description": "End of the window in seconds; defaults to the end of the video. Give both bounds for a video longer than 180 s.",
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "region": {
+            "description": "Rectangle that contains the repeating motion, as fractions of the frame: x, y (top-left) and w, h (size), with x+w <= 1 and y+h <= 1. Uses w/h, not width/height. Omit for the whole frame.",
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "y": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "w": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "h": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            },
+            "required": [
+              "x",
+              "y",
+              "w",
+              "h"
+            ],
+            "additionalProperties": false
+          },
+          "fps": {
+            "description": "Sampling rate, default 10. Larger values than 15 are clamped to 15 and the result says so.",
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 15,
+            "default": 10
+          },
+          "method": {
+            "description": "auto (default) picks between motion, embedding and a periodicity check; motion or embedding forces that amplitude counter alone.",
+            "type": "string",
+            "enum": [
+              "auto",
+              "motion",
+              "embedding"
+            ],
+            "default": "auto"
+          },
+          "min_period_sec": {
+            "description": "Shortest expected cycle in seconds (default 0.4). Bounds the amplitude counter only; the periodicity check ignores it and searches from 0.25 s.",
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "default": 0.4
+          },
+          "max_period_sec": {
+            "description": "Longest expected cycle in seconds (default 3); must exceed min_period_sec. Bounds the amplitude counter only; the periodicity check ignores it.",
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "default": 3
+          },
+          "action_hint": {
+            "description": "Short phrase naming the action being counted, e.g. 'jumping jacks'.",
+            "type": "string",
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "in_progress",
+              "complete",
+              "error"
+            ]
+          },
+          "retry_after_seconds": {
+            "type": "number"
+          },
+          "message": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "cycles": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "index": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "start_sec": {
+                  "type": "number"
+                },
+                "end_sec": {
+                  "type": "number"
+                },
+                "peak_sec": {
+                  "type": "number"
+                },
+                "frame_badge": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "index",
+                "start_sec",
+                "end_sec",
+                "peak_sec"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "period_sec": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "median_period_sec": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "regularity": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "signal_quality": {
+            "type": "string"
+          },
+          "method_used": {
+            "type": "string",
+            "enum": [
+              "motion",
+              "embedding",
+              "periodic"
+            ]
+          },
+          "motion_count": {
+            "type": "integer"
+          },
+          "embedding_count": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "periodic_count": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "contact_sheet": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "count_occurrences": {
+      "name": "count_occurrences",
+      "description": "Count how many separate times a specific symbol/object or exact on-screen text appears. Use for questions like 'how many separate times does the yellow outlined circle appear (ignore other colours)', 'how many times does the exact word RELEASE appear (not RELEASED)', 'how many times does the green diamond cross the screen'. Give `description` (colour and shape words are enforced, so look-alikes in another colour or shape do not count) and/or `text` (whole-word match by offline OCR). Returns `count` plus one span per continuous appearance (start_sec, end_sec, representative_sec, region, travel, weak); gaps of min_gap_sec or more separate spans. Verify a span with inspect_window at its representative_sec. Not for periodic reps or cycles (use count_repetitions) and not for locating one moment (use search_visual, which ranks frames, is capped at top_k 20 and cannot count). No visual index needed. Repeat the same call while status=in_progress. Lists at most max_spans spans (default 20, maximum 100; larger values are clamped and the result says so); `count` includes any omitted. If 100 or more spans match, the description is too broad: `count` is null, `capped` is true and `spans_found` says how many matched, so narrow the description or window and rerun instead of reporting a number. A min_gap_sec above 0.3 can join separate appearances; then `gaps_merged` and `count_without_merges` are set. The count is a rough first pass: it can merge separate appearances that are split by a scene cut, split one appearance into many spans, and count appearances rather than crossings. The result also carries `contact_sheet`, one labeled image with a tile per listed span (the first 24), in span order: a zoomed frame of that span's best detection with the match boxed, labeled like '#2 29.9s'. Before answering, look at each tile and drop any span whose tile is not the asked-for thing; a span with `weak: true` (one detection, a very short span, or a low score; its label ends in *) is likelier false but is still included in `count`. The answer is the number of tiles that match, plus any spans without a tile, and it must respect `capped`, `gaps_merged` and `count_without_merges` above; if your own count by eye differs, trust yours.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": { "type": "string", "minLength": 1 },
+          "description": { "type": "string", "minLength": 1, "maxLength": 500, "description": "Visible thing to count, e.g. 'yellow outlined circle', 'green diamond', 'red star'. Name its colour and shape; text on screen goes in `text`." },
+          "text": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Exact on-screen phrase, matched as whole words (RELEASE matches 'RELEASE' and 'RELEASE NOTES', not 'RELEASED' or 'PRE-RELEASE')." },
+          "case_sensitive": { "type": "boolean", "default": false, "description": "Require the same letter case for `text`." },
+          "start_sec": { "type": "number", "minimum": 0, "default": 0 },
+          "end_sec": { "type": ["number", "null"], "minimum": 0, "description": "Defaults to the end of the video. At most 2400 frames are analyzed per call, so fps is lowered automatically on long windows." },
+          "fps": { "type": "number", "exclusiveMinimum": 0, "maximum": 15, "default": 5, "description": "Sampling rate, default 5. Appearances shorter than 1/fps can be missed; raise it for brief flashes. Larger values than 15 are clamped to 15 and the result says so." },
+          "min_gap_sec": { "type": "number", "exclusiveMinimum": 0, "default": 0.3, "description": "Absence of at least this long starts a new span; shorter dropouts stay inside one span. Raising it above the default 0.3 JOINS separate appearances whose gap is shorter than it (0.8 merges appearances 0.7 s apart); the result reports gaps_merged and count_without_merges when that happens." },
+          "max_spans": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20, "description": "Maximum spans listed (default 20, maximum 100; larger values are clamped to 100 and the result says so). `count` always includes every span." }
+        },
+        "required": ["source"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string", "enum": ["in_progress", "complete", "error"] },
+          "retry_after_seconds": { "type": "number" },
+          "message": { "type": "string" },
+          "count": { "type": ["integer", "null"], "minimum": 0, "description": "Number of separate appearances; null when capped is true." },
+          "capped": { "type": "boolean", "description": "True when 100 or more spans matched: the description is too broad and count is null." },
+          "spans_found": { "type": "integer", "description": "How many spans matched; only set when capped." },
+          "gaps_merged": { "type": "integer", "description": "Appearance pairs joined because min_gap_sec is above the default 0.3; only set when it joined some." },
+          "count_without_merges": { "type": "integer", "description": "The count if those joined pairs were kept apart." },
+          "spans": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "index": { "type": "integer", "minimum": 1 },
+                "start_sec": { "type": "number" },
+                "end_sec": { "type": "number" },
+                "duration_sec": { "type": "number" },
+                "score": { "type": "number", "minimum": 0, "maximum": 1 },
+                "representative_sec": { "type": "number" },
+                "frame_badge": { "type": "string" },
+                "region": {
+                  "type": "object",
+                  "properties": { "x": { "type": "number" }, "y": { "type": "number" }, "w": { "type": "number" }, "h": { "type": "number" } },
+                  "required": ["x", "y", "w", "h"]
+                },
+                "travel": { "type": "string", "enum": ["stationary", "left_to_right", "right_to_left", "top_to_bottom", "bottom_to_top"] },
+                "weak": { "type": "boolean", "description": "True for a single detection, a span shorter than 0.5 s, or a score below 75% of the median span score. Weak spans are still counted; their tile label ends in *." }
+              },
+              "required": ["index", "start_sec", "end_sec", "representative_sec"],
+              "additionalProperties": false
+            }
+          },
+          "spans_returned": { "type": "integer" },
+          "spans_omitted": { "type": "integer" },
+          "window": { "type": "object" },
+          "fps_used": { "type": "number" },
+          "frames_sampled": { "type": "integer" },
+          "frames_analyzed": { "type": "integer" },
+          "checks": { "type": "object" },
+          "contact_sheet": { "type": ["object", "null"], "description": "One image (file_path, tool_file) with a labeled tile per listed span, in span order, up to 24: a zoomed frame of the span's best detection with the match boxed. `labels` lists the tile labels, e.g. '#2* 29.9s' (* = weak).", "properties": { "labels": { "type": "array", "items": { "type": "string" } } } },
+          "verify": { "type": "string" },
+          "note": { "type": "string" }
+        },
+        "required": ["status"],
+        "additionalProperties": true
+      }
+    },
+    "probe_video": {
+      "name": "probe_video",
+      "description": "Read a video's duration, frame rate, resolution, codecs, and whether it has an audio track. Call this first: duration_sec bounds every start_sec/end_sec you pass to other tools, and has_audio tells you whether transcribe and the audio tools (audio_onsets, loudness_timeline, spectrogram_window, sync_check) can work. `source` is a local file path and is the same in every tool.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": { "type": "string", "minLength": 1, "description": "Local filesystem path to video file." }
+        },
+        "required": ["source"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "note": { "type": "string", "description": "Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument." },
+          "source_path": { "type": "string" },
+          "duration_sec": { "type": "number" },
+          "width": { "type": "integer" },
+          "height": { "type": "integer" },
+          "fps": { "type": "number" },
+          "format_name": { "type": "string" },
+          "size_bytes": { "type": "integer" },
+          "has_audio": { "type": "boolean" },
+          "audio_codec": { "type": ["string", "null"] },
+          "video_codec": { "type": ["string", "null"] },
+          "fingerprint": { "type": "string" }
+        },
+        "required": ["source_path", "duration_sec", "width", "height", "fps", "format_name", "size_bytes", "has_audio", "audio_codec", "video_codec", "fingerprint"],
+        "additionalProperties": false
+      }
+    },
+    "transcribe": {
+      "name": "transcribe",
+      "description": "Get the full speech transcript as timestamped segments (cached after the first run). To find where a specific word or phrase is spoken, use search_transcript instead of reading it all. If the requested model is not cached, returns another cached transcript with cached_model_size and requested_model_cached=false while one background job runs; with no transcript cached, returns status=in_progress and retry_after_seconds, so repeat the same call after that delay. model_size: tiny, base or small (more accurate, slower on the CPU), or turbo (Whisper large-v3-turbo on the GPU via whisper.cpp: the most accurate and, where installed, the fastest, about 1 minute per hour of audio). Omit model_size to get turbo where it is installed, else tiny. Long audio is decoded in 60-second chunks. Lines repeated 3 or more times in a row carry `suspect` and `notice` names them: speech models often invent such lines over music or silence, though a real chant can repeat too. A line without `suspect` is not verified.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": { "type": "string", "minLength": 1, "description": "Local filesystem path to video file." },
+          "model_size": { "type": "string", "enum": ["tiny", "base", "small", "turbo"] }
+        },
+        "required": ["source"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "note": { "type": "string", "description": "Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument." },
+          "source_path": { "type": "string" },
+          "language": { "type": "string" },
+          "duration_sec": { "type": "number" },
+          "segment_count": { "type": "integer" },
+          "segments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "integer" },
+                "start_sec": { "type": "number" },
+                "end_sec": { "type": "number" },
+                "text": { "type": "string" },
+                "start_timecode": { "type": "string" },
+                "end_timecode": { "type": "string" },
+                "confidence": { "type": ["number", "null"] },
+                "suspect": { "type": "string", "description": "Only on a flagged line: why it may be invented (the same line 3 or more times in a row). A line without it is not verified." }
+              },
+              "required": ["id", "start_sec", "end_sec", "text", "start_timecode", "end_timecode", "confidence"],
+              "additionalProperties": false
+            }
+          },
+          "has_speech": { "type": "boolean" },
+          "notice": { "type": "string" },
+          "confidence": { "type": ["number", "null"] },
+          "uncertainty": { "type": "string" },
+          "requested_model_size": { "type": "string", "enum": ["tiny", "base", "small", "turbo"] },
+          "cached_model_size": { "type": "string", "enum": ["tiny", "base", "small", "turbo"] },
+          "requested_model_cached": { "type": "boolean" },
+          "transcription_status": { "type": "string", "enum": ["started", "in_progress", "busy", "start_failed", "failed"] },
+          "retry_after_seconds": { "type": "integer", "minimum": 0 },
+          "transcription_message": { "type": "string" },
+          "status": { "type": "string", "enum": ["in_progress", "busy", "start_failed", "failed"] }
+        },
+        "oneOf": [
+          { "required": ["source_path", "language", "duration_sec", "segment_count", "segments", "has_speech", "notice", "confidence", "uncertainty"] },
+          { "required": ["status", "requested_model_size", "requested_model_cached", "transcription_status", "retry_after_seconds", "transcription_message"] }
+        ],
+        "additionalProperties": false
+      }
+    },
+    "search_transcript": {
+      "name": "search_transcript",
+      "description": "Find when a word or phrase is SPOKEN (lexical match on the speech transcript: a multi-word query matches the exact phrase or every content word within one segment). Returns up to top_k timestamped segments (default 5, maximum 50; larger values are clamped and the result says so; `note` says when more matches exist). For text shown on screen use count_occurrences, and for visible things use search_visual. If ASR is needed, starts or joins background transcription and returns status=in_progress with retry_after_seconds instead of waiting; repeat the same call after that delay. A hit on a flagged line carries `suspect` (see transcribe).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": { "type": "string", "minLength": 1, "description": "Local filesystem path to video file." },
+          "query": { "type": "string", "minLength": 1, "description": "Words or a phrase to find in the speech, e.g. 'launch date'. Punctuation and case are ignored." },
+          "top_k": { "type": "integer", "minimum": 1, "maximum": 50, "default": 5, "description": "Maximum hits (default 5, maximum 50; larger values are clamped to 50 and the result says so)." }
+        },
+        "required": ["source", "query"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "note": { "type": "string", "description": "Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument." },
+          "top_k_clamped_from": { "type": "number", "description": "The value you requested for top_k before it was lowered to its cap." },
+          "hits": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "segment_id": { "type": "integer" },
+                "start_sec": { "type": "number" },
+                "end_sec": { "type": "number" },
+                "text": { "type": "string" },
+                "score": { "type": "number", "minimum": 0, "maximum": 1 },
+                "start_timecode": { "type": "string" },
+                "end_timecode": { "type": "string" },
+                "context": { "type": "string" },
+                "suspect": { "type": "string", "description": "Only when the matched line is flagged; see transcribe." }
+              },
+              "required": ["segment_id", "start_sec", "end_sec", "text", "score", "start_timecode", "end_timecode", "context"],
+              "additionalProperties": false
+            }
+          },
+          "total": { "type": "integer", "minimum": 0 },
+          "status": { "type": "string", "enum": ["in_progress", "busy", "start_failed", "failed"] },
+          "requested_model_size": { "type": "string", "enum": ["tiny", "base", "small", "turbo"] },
+          "cached_model_size": { "type": "string", "enum": ["tiny", "base", "small", "turbo"] },
+          "requested_model_cached": { "type": "boolean" },
+          "transcription_status": { "type": "string", "enum": ["started", "in_progress", "busy", "start_failed", "failed"] },
+          "retry_after_seconds": { "type": "integer", "minimum": 0 },
+          "transcription_message": { "type": "string" }
+        },
+        "oneOf": [
+          { "required": ["hits", "total"] },
+          { "required": ["status", "requested_model_size", "requested_model_cached", "transcription_status", "retry_after_seconds", "transcription_message"] }
+        ],
+        "additionalProperties": false
+      }
+    },
+    "build_visual_index": {
+      "name": "build_visual_index",
+      "description": "Start or poll construction of the local visual frame index that search_visual needs. Call it once, then repeat the same call (or search_visual, which reports status=index_required or partial) until the status is complete; frames are processed in bounded chunks. count_occurrences, contact_sheet and the inspect tools do not need the index.",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "source": { "type": "string", "minLength": 1, "description": "Local filesystem path to video file." } },
+        "required": ["source"],
+        "additionalProperties": false
+      },
+      "outputSchema": { "type": "object", "description": "Background status and indexing progress." }
+    },
+    "search_visual": {
+      "name": "search_visual",
+      "description": "Find WHEN something visible happens: an object, person, action or scene (semantic match between the query and sampled frames). It matches meaning, not letters, so it cannot find on-screen words or numbers (names, scores, jersey or bib numbers): find those with count_occurrences `text`, which reads text in frames, one window of up to 2400 s per call. Returns up to top_k ranked frame hits (default 5, maximum 20; larger values are clamped and the result says so), merged intervals, and a contact sheet to verify them. It ranks frames, so it cannot count: to count separate appearances of a symbol or exact on-screen text use count_occurrences, for a repeated action use count_repetitions, for spoken words use search_transcript. Build the local visual index first (build_visual_index), then repeat the same query to poll until complete. Use start_sec/end_sec to search one range at a time.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": { "type": "string", "minLength": 1 },
+          "query": { "type": "string", "minLength": 1, "maxLength": 2000, "description": "Natural-language description of visible content." },
+          "top_k": { "type": "integer", "minimum": 1, "maximum": 20, "default": 5, "description": "Maximum frame hits (default 5, maximum 20; larger values are clamped to 20 and the result says so). This ranks frames and cannot count: use count_occurrences for counts." },
+          "start_sec": { "type": "number", "minimum": 0, "default": 0, "description": "Inclusive start of the range to search, in seconds." },
+          "end_sec": { "type": ["number", "null"], "minimum": 0, "description": "Exclusive end of the range to search, in seconds; defaults to the end of the video." }
+        },
+        "required": ["source", "query"],
+        "additionalProperties": false
+      },
+      "outputSchema": { "type": "object", "description": "Search status or ranked hits, merged intervals, and optional contact sheet." }
+    },
+    "contact_sheet": {
+      "name": "contact_sheet",
+      "description": "Get ONE grid image of evenly spaced frames, with burned timestamp badges, across the whole video or a start_sec/end_sec range: the cheapest way to see what a video contains before searching. Default 12 samples, at most 150 (larger values are clamped and the result says so). Use it to survey; use search_visual to find a specific thing, overview_chunks to survey a long video as ordered sheets, and inspect_window or inspect_windows for dense consecutive frames of a short span.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": { "type": "string", "minLength": 1, "description": "Local filesystem path to video file." },
+          "samples": { "type": "integer", "minimum": 1, "default": 12, "description": "Requested number of thumbnails; values above 150 are accepted and clamped to 150." },
+          "cols": { "type": "integer", "minimum": 1, "default": 4, "description": "Grid columns (default 4)." },
+          "start_sec": { "type": "number", "minimum": 0, "description": "Optional inclusive start of the overview range in absolute video seconds." },
+          "end_sec": { "type": "number", "minimum": 0, "description": "Optional exclusive end of the overview range in absolute video seconds." }
+        },
+        "required": ["source"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "file_path": { "type": "string" },
+          "sample_count": { "type": "integer" },
+          "rows": { "type": "integer" },
+          "cols": { "type": "integer" },
+          "start_sec": { "type": "number" },
+          "end_sec": { "type": "number" },
+          "timestamps": { "type": "array", "items": { "type": "number" } },
+          "frame_width": { "type": "integer" },
+          "frame_height": { "type": "integer" },
+          "samples_clamped_from": { "type": "integer" },
+          "note": { "type": "string" },
+          "tool_file": { "type": "object" }
+        },
+        "required": ["file_path", "sample_count", "rows", "cols", "start_sec", "end_sec", "timestamps", "frame_width", "frame_height"],
+        "additionalProperties": false
+      }
+    },
+    "overview_chunks": {
+      "name": "overview_chunks",
+      "description": "Survey a long video as consecutive contact sheets, one per chunk_sec (default 60 s), so every stretch is covered in order. At most max_chunks sheets per call (default and maximum 32): for a longer video raise chunk_sec or page through it with start_sec/end_sec; a call over budget fails and says what chunk_sec would fit. samples_per_chunk defaults to 8 (maximum 150, larger values are clamped). Use contact_sheet instead when one sheet is enough.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": { "type": "string", "minLength": 1, "description": "Local filesystem path to video file." },
+          "chunk_sec": { "type": "number", "exclusiveMinimum": 0, "maximum": 600, "default": 60, "description": "Seconds covered by each sheet (default 60, maximum 600)." },
+          "samples_per_chunk": { "type": "integer", "minimum": 1, "maximum": 150, "default": 8, "description": "Thumbnails per sheet (default 8; values above 150 are clamped to 150 and the result says so)." },
+          "cols": { "type": "integer", "minimum": 1, "default": 4 },
+          "start_sec": { "type": "number", "minimum": 0, "description": "Optional inclusive start in absolute video seconds." },
+          "end_sec": { "type": "number", "minimum": 0, "description": "Optional exclusive end in absolute video seconds; defaults to the end of the video." },
+          "max_chunks": { "type": "integer", "minimum": 1, "maximum": 32, "default": 32, "description": "Most sheets in one call (default and maximum 32; larger values are clamped). The call fails if the range needs more chunks: raise chunk_sec or narrow the range." }
+        },
+        "required": ["source"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "note": { "type": "string", "description": "Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument." },
+          "samples_per_chunk_clamped_from": { "type": "number", "description": "The value you requested for samples_per_chunk before it was lowered to its cap." },
+          "max_chunks_clamped_from": { "type": "number", "description": "The value you requested for max_chunks before it was lowered to its cap." },
+          "chunks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "index": { "type": "integer", "minimum": 1 },
+                "range_start_sec": { "type": "number" },
+                "range_end_sec": { "type": "number" },
+                "file_path": { "type": "string" },
+                "sample_count": { "type": "integer" },
+                "rows": { "type": "integer" },
+                "cols": { "type": "integer" },
+                "start_sec": { "type": "number" },
+                "end_sec": { "type": "number" },
+                "timestamps": { "type": "array", "items": { "type": "number" } },
+                "frame_width": { "type": "integer" },
+                "frame_height": { "type": "integer" },
+                "tool_file": { "type": "object" }
+              },
+              "required": ["index", "range_start_sec", "range_end_sec", "file_path", "sample_count", "rows", "cols", "start_sec", "end_sec", "timestamps", "frame_width", "frame_height"],
+              "additionalProperties": false
+            }
+          },
+          "total": { "type": "integer", "minimum": 1 },
+          "start_sec": { "type": "number" },
+          "end_sec": { "type": "number" },
+          "chunk_sec": { "type": "number" }
+        },
+        "required": ["chunks", "total", "start_sec", "end_sec", "chunk_sec"],
+        "additionalProperties": false
+      }
+    },
+    "refine_temporal_beam": {
+      "name": "refine_temporal_beam",
+      "description": "Zoom into candidate time windows: splits each window into `fanout` contiguous child ranges and returns one timestamped contact sheet per child, without ranking relevance. Use it after contact_sheet or search_visual has narrowed the answer to a few windows and you want to localize inside them; use inspect_windows for dense consecutive frames instead. Budget: windows x fanout x samples_per_child must be at most max_total_samples (default 96, maximum 300); a call over budget fails and says which of the three to lower.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": { "type": "string", "minLength": 1 },
+          "windows": { "type": "array", "minItems": 1, "items": { "type": "object", "properties": { "start_sec": { "type": "number", "minimum": 0 }, "end_sec": { "type": "number", "minimum": 0 } }, "required": ["start_sec", "end_sec"], "additionalProperties": false }, "description": "Absolute time ranges to zoom into, e.g. [{\"start_sec\": 10, \"end_sec\": 40}], each within the video." },
+          "fanout": { "type": "integer", "minimum": 2, "maximum": 8, "default": 4, "description": "Child ranges per window (default 4, maximum 8; larger values are clamped and the result says so)." },
+          "samples_per_child": { "type": "integer", "minimum": 1, "maximum": 12, "default": 3, "description": "Thumbnails per child range (default 3, maximum 12; larger values are clamped and the result says so)." },
+          "cols": { "type": "integer", "minimum": 1, "default": 3 },
+          "context_sec": { "type": "number", "minimum": 0, "default": 0, "description": "Seconds of padding added to each side of every window (default 0)." },
+          "max_total_samples": { "type": "integer", "minimum": 1, "maximum": 300, "default": 96, "description": "Frame budget: windows x fanout x samples_per_child must not exceed it (default 96, maximum 300; larger values are clamped and the result says so)." },
+          "align_to_cuts": { "type": "boolean", "default": false },
+          "compact_parent_sheet": { "type": "boolean", "default": false }
+        },
+        "required": ["source", "windows"], "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object", "properties": {
+          "note": { "type": "string", "description": "Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument." },
+          "fanout_clamped_from": { "type": "number", "description": "The value you requested for fanout before it was lowered to its cap." },
+          "samples_per_child_clamped_from": { "type": "number", "description": "The value you requested for samples_per_child before it was lowered to its cap." },
+          "max_total_samples_clamped_from": { "type": "number", "description": "The value you requested for max_total_samples before it was lowered to its cap." },
+          "parents": { "type": "array", "items": { "type": "object", "properties": {
+            "parent_index": { "type": "integer", "minimum": 1 }, "input_start_sec": { "type": "number" }, "input_end_sec": { "type": "number" }, "start_sec": { "type": "number" }, "end_sec": { "type": "number" }, "compact_contact_sheet_path": { "type": "string" }, "compact_sample_timestamps": { "type": "array", "items": { "type": "number" } }, "compact_sample_count": { "type": "integer", "minimum": 0 }, "compact_tool_file": { "type": "object" },
+            "children": { "type": "array", "items": { "type": "object", "properties": { "child_index": { "type": "integer", "minimum": 1 }, "start_sec": { "type": "number" }, "end_sec": { "type": "number" }, "sample_timestamps": { "type": "array", "items": { "type": "number" } }, "contact_sheet_path": { "type": "string" }, "sample_count": { "type": "integer" }, "tool_file": { "type": "object" } }, "required": ["child_index", "start_sec", "end_sec", "sample_timestamps", "contact_sheet_path", "sample_count"], "additionalProperties": false } }
+          }, "required": ["parent_index", "input_start_sec", "input_end_sec", "start_sec", "end_sec", "children"], "additionalProperties": false } },
+          "total_samples": { "type": "integer", "minimum": 0 }, "estimated_vision_tokens": { "type": "integer", "minimum": 0 }
+        },
+        "required": ["parents", "total_samples", "estimated_vision_tokens"], "additionalProperties": false
+      }
+    },
+    "track_region_changes": {
+      "name": "track_region_changes",
+      "description": "Watch one fixed rectangle of the frame (region: x, y, width, height as fractions 0-1) from start_sec to end_sec (both required) and rank the moments its pixels change most, as candidates to verify with inspect_moments or inspect_window. Use for a scoreboard, counter, indicator light or door. Slow continuous motion ranks no candidates: read steady_change.detected for that. Returns ranked candidates, not a count: for a bounded count of state transitions use track_region_events. Budget: about (end_sec - start_sec) x sample_fps frames, at most max_total_frames (default 600, maximum 2000); a call over budget fails and says the sample_fps that fits. This tool's region uses width/height (count_repetitions uses w/h).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": { "type": "string", "minLength": 1 },
+          "start_sec": { "type": "number", "minimum": 0, "description": "Start of the range in seconds." },
+          "end_sec": { "type": "number", "minimum": 0, "description": "End of the range in seconds; must be within the video." },
+          "region": { "type": "object", "properties": { "x": { "type": "number", "minimum": 0, "maximum": 1 }, "y": { "type": "number", "minimum": 0, "maximum": 1 }, "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }, "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 } }, "required": ["x", "y", "width", "height"], "additionalProperties": false, "description": "Rectangle to watch, as fractions of the frame: x, y (top-left) and width, height, with x+width <= 1 and y+height <= 1. Uses width/height, not w/h." },
+          "sample_fps": { "type": "number", "exclusiveMinimum": 0, "maximum": 10, "default": 0.25, "description": "Sampling rate (default 0.25, maximum 10; larger values are clamped and the result says so). Changes shorter than 1/sample_fps can be missed." },
+          "frame_width": { "type": "integer", "minimum": 64, "maximum": 1920, "default": 640, "description": "Decoded frame width in pixels (default 640, maximum 1920; larger values are clamped)." },
+          "min_change_score": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.02 },
+          "robust_sigma": { "type": "number", "minimum": 0, "default": 6.0 },
+          "min_separation_sec": { "type": "number", "minimum": 0, "default": 2.0 },
+          "max_candidates": { "type": "integer", "minimum": 1, "maximum": 128, "default": 32, "description": "Most candidates returned (default 32, maximum 128; larger values are clamped). Raise min_change_score to keep only stronger ones." },
+          "max_total_frames": { "type": "integer", "minimum": 2, "maximum": 2000, "default": 600, "description": "Frame budget for the whole range (default 600, maximum 2000; larger values are clamped). The call fails when (end_sec - start_sec) x sample_fps exceeds it." }
+        },
+        "required": ["source", "start_sec", "end_sec", "region"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "note": { "type": "string", "description": "Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument." },
+          "sample_fps_clamped_from": { "type": "number", "description": "The value you requested for sample_fps before it was lowered to its cap." },
+          "frame_width_clamped_from": { "type": "number", "description": "The value you requested for frame_width before it was lowered to its cap." },
+          "max_candidates_clamped_from": { "type": "number", "description": "The value you requested for max_candidates before it was lowered to its cap." },
+          "max_total_frames_clamped_from": { "type": "number", "description": "The value you requested for max_total_frames before it was lowered to its cap." },
+          "region": { "type": "object", "properties": { "x": { "type": "number" }, "y": { "type": "number" }, "width": { "type": "number" }, "height": { "type": "number" } }, "required": ["x", "y", "width", "height"], "additionalProperties": false },
+          "start_sec": { "type": "number" },
+          "end_sec": { "type": "number" },
+          "sample_fps": { "type": "number" },
+          "sample_count": { "type": "integer", "minimum": 2 },
+          "temporal_resolution_sec": { "type": "number", "exclusiveMinimum": 0 },
+          "scan_segments": { "type": "array", "items": { "type": "object", "properties": { "start_sec": { "type": "number" }, "end_sec": { "type": "number" }, "sample_count": { "type": "integer", "minimum": 0 } }, "required": ["start_sec", "end_sec", "sample_count"], "additionalProperties": false } },
+          "threshold": { "type": "number", "minimum": 0, "maximum": 1 },
+          "baseline_median": { "type": "number", "minimum": 0, "maximum": 1 },
+          "baseline_mad": { "type": "number", "minimum": 0, "maximum": 1 },
+          "steady_change": { "type": "object", "properties": { "detected": { "type": "boolean" }, "active_fraction": { "type": "number", "minimum": 0, "maximum": 1 }, "activity_floor": { "type": "number", "minimum": 0, "maximum": 1 }, "note": { "type": "string" } }, "required": ["detected", "active_fraction", "activity_floor", "note"], "additionalProperties": false },
+          "samples": { "type": "array", "items": { "type": "object", "properties": { "from_timestamp_sec": { "type": "number" }, "timestamp_sec": { "type": "number" }, "from_timestamp_provenance": { "type": "object", "properties": { "requested_timestamp": { "type": ["number", "null"] }, "decoded_timestamp": { "type": ["number", "null"] }, "timestamp_delta": { "type": ["number", "null"] } }, "required": ["requested_timestamp", "decoded_timestamp", "timestamp_delta"], "additionalProperties": false }, "timestamp_provenance": { "type": "object", "properties": { "requested_timestamp": { "type": ["number", "null"] }, "decoded_timestamp": { "type": ["number", "null"] }, "timestamp_delta": { "type": ["number", "null"] } }, "required": ["requested_timestamp", "decoded_timestamp", "timestamp_delta"], "additionalProperties": false }, "change_score": { "type": "number" }, "mean_abs_diff": { "type": "number" }, "changed_fraction": { "type": "number" } }, "required": ["from_timestamp_sec", "timestamp_sec", "from_timestamp_provenance", "timestamp_provenance", "change_score", "mean_abs_diff", "changed_fraction"], "additionalProperties": false } },
+          "candidates": { "type": "array", "items": { "type": "object", "properties": { "from_timestamp_sec": { "type": "number" }, "timestamp_sec": { "type": "number" }, "from_timestamp_provenance": { "type": "object", "properties": { "requested_timestamp": { "type": ["number", "null"] }, "decoded_timestamp": { "type": ["number", "null"] }, "timestamp_delta": { "type": ["number", "null"] } }, "required": ["requested_timestamp", "decoded_timestamp", "timestamp_delta"], "additionalProperties": false }, "timestamp_provenance": { "type": "object", "properties": { "requested_timestamp": { "type": ["number", "null"] }, "decoded_timestamp": { "type": ["number", "null"] }, "timestamp_delta": { "type": ["number", "null"] } }, "required": ["requested_timestamp", "decoded_timestamp", "timestamp_delta"], "additionalProperties": false }, "change_score": { "type": "number" }, "mean_abs_diff": { "type": "number" }, "changed_fraction": { "type": "number" }, "rank": { "type": "integer", "minimum": 1 } }, "required": ["from_timestamp_sec", "timestamp_sec", "from_timestamp_provenance", "timestamp_provenance", "change_score", "mean_abs_diff", "changed_fraction", "rank"], "additionalProperties": false } }
+        },
+        "required": ["region", "start_sec", "end_sec", "sample_fps", "sample_count", "temporal_resolution_sec", "scan_segments", "threshold", "baseline_median", "baseline_mad", "steady_change", "samples", "candidates"],
+        "additionalProperties": false
+      }
+    },
+    "track_region_events": {
+      "name": "track_region_events",
+      "description": "Count discrete state changes (transitions) inside one fixed rectangle of the frame (region: x, y, width, height as fractions 0-1) between start_sec and end_sec (both required). Returns event_count plus before/after evidence moments to verify. Use for 'how many times did the light turn on' or 'how often does the counter change'. For ranked change candidates without a count use track_region_changes; for a periodic action use count_repetitions; for a symbol appearing anywhere on screen use count_occurrences. Budget: about (end_sec - start_sec) x sample_fps frames, at most max_total_frames (default 600, maximum 2000); a call over budget fails and says the sample_fps that fits. This tool's region uses width/height (count_repetitions uses w/h).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": { "type": "string", "minLength": 1 },
+          "start_sec": { "type": "number", "minimum": 0, "description": "Start of the range in seconds." },
+          "end_sec": { "type": "number", "minimum": 0, "description": "End of the range in seconds; must be within the video." },
+          "region": { "type": "object", "properties": { "x": { "type": "number", "minimum": 0, "maximum": 1 }, "y": { "type": "number", "minimum": 0, "maximum": 1 }, "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }, "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 } }, "required": ["x", "y", "width", "height"], "additionalProperties": false, "description": "Rectangle to watch, as fractions of the frame: x, y (top-left) and width, height, with x+width <= 1 and y+height <= 1. Uses width/height, not w/h." },
+          "sample_fps": { "type": "number", "exclusiveMinimum": 0, "maximum": 10, "default": 0.25, "description": "Sampling rate (default 0.25, maximum 10; larger values are clamped and the result says so). Transitions shorter than 1/sample_fps can be missed." },
+          "frame_width": { "type": "integer", "minimum": 64, "maximum": 1920, "default": 640, "description": "Decoded frame width in pixels (default 640, maximum 1920; larger values are clamped)." },
+          "change_threshold": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.02 },
+          "ambiguity_margin": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.01 },
+          "min_separation_sec": { "type": "number", "minimum": 0, "default": 2.0 },
+          "max_events": { "type": "integer", "minimum": 1, "maximum": 128, "default": 32, "description": "Most events returned (default 32, maximum 128; larger values are clamped). Raise change_threshold to keep only stronger ones." },
+          "max_total_frames": { "type": "integer", "minimum": 2, "maximum": 2000, "default": 600, "description": "Frame budget for the whole range (default 600, maximum 2000; larger values are clamped). The call fails when (end_sec - start_sec) x sample_fps exceeds it." }
+        },
+        "required": ["source", "start_sec", "end_sec", "region"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "note": { "type": "string", "description": "Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument." },
+          "sample_fps_clamped_from": { "type": "number", "description": "The value you requested for sample_fps before it was lowered to its cap." },
+          "frame_width_clamped_from": { "type": "number", "description": "The value you requested for frame_width before it was lowered to its cap." },
+          "max_events_clamped_from": { "type": "number", "description": "The value you requested for max_events before it was lowered to its cap." },
+          "max_total_frames_clamped_from": { "type": "number", "description": "The value you requested for max_total_frames before it was lowered to its cap." },
+          "region": { "type": "object", "properties": { "x": { "type": "number" }, "y": { "type": "number" }, "width": { "type": "number" }, "height": { "type": "number" } }, "required": ["x", "y", "width", "height"], "additionalProperties": false },
+          "start_sec": { "type": "number" },
+          "end_sec": { "type": "number" },
+          "sample_fps": { "type": "number", "exclusiveMinimum": 0 },
+          "sample_count": { "type": "integer", "minimum": 0 },
+          "temporal_resolution_sec": { "type": "number", "exclusiveMinimum": 0 },
+          "scan_segments": { "type": "array", "items": { "type": "object", "properties": { "start_sec": { "type": "number" }, "end_sec": { "type": "number" }, "sample_count": { "type": "integer", "minimum": 0 } }, "required": ["start_sec", "end_sec", "sample_count"], "additionalProperties": false } },
+          "transitions": { "type": "array", "items": { "type": "object", "properties": {
+            "from_timestamp_sec": { "type": "number" }, "timestamp_sec": { "type": "number" }, "from_timestamp_provenance": { "type": "object", "properties": { "requested_timestamp": { "type": ["number", "null"] }, "decoded_timestamp": { "type": ["number", "null"] }, "timestamp_delta": { "type": ["number", "null"] } }, "required": ["requested_timestamp", "decoded_timestamp", "timestamp_delta"], "additionalProperties": false }, "timestamp_provenance": { "type": "object", "properties": { "requested_timestamp": { "type": ["number", "null"] }, "decoded_timestamp": { "type": ["number", "null"] }, "timestamp_delta": { "type": ["number", "null"] } }, "required": ["requested_timestamp", "decoded_timestamp", "timestamp_delta"], "additionalProperties": false }, "change_score": { "type": "number", "minimum": 0, "maximum": 1 }, "mean_abs_diff": { "type": "number", "minimum": 0, "maximum": 1 }, "changed_fraction": { "type": "number", "minimum": 0, "maximum": 1 }, "evidence_moments": { "type": "object", "properties": { "before": { "type": "object", "properties": { "timestamp_sec": { "type": "number" }, "timestamp_provenance": { "type": "object", "properties": { "requested_timestamp": { "type": ["number", "null"] }, "decoded_timestamp": { "type": ["number", "null"] }, "timestamp_delta": { "type": ["number", "null"] } }, "required": ["requested_timestamp", "decoded_timestamp", "timestamp_delta"], "additionalProperties": false } }, "required": ["timestamp_sec", "timestamp_provenance"], "additionalProperties": false }, "after": { "type": "object", "properties": { "timestamp_sec": { "type": "number" }, "timestamp_provenance": { "type": "object", "properties": { "requested_timestamp": { "type": ["number", "null"] }, "decoded_timestamp": { "type": ["number", "null"] }, "timestamp_delta": { "type": ["number", "null"] } }, "required": ["requested_timestamp", "decoded_timestamp", "timestamp_delta"], "additionalProperties": false } }, "required": ["timestamp_sec", "timestamp_provenance"], "additionalProperties": false } }, "required": ["before", "after"], "additionalProperties": false }, "rank": { "type": "integer", "minimum": 1 }
+          }, "required": ["from_timestamp_sec", "timestamp_sec", "from_timestamp_provenance", "timestamp_provenance", "change_score", "mean_abs_diff", "changed_fraction", "evidence_moments", "rank"], "additionalProperties": false } },
+          "event_count": { "type": ["integer", "null"], "minimum": 0 },
+          "uncertain": { "type": "boolean" },
+          "incomplete": { "type": "boolean" },
+          "uncertainty_reason": { "type": ["string", "null"] }
+        },
+        "required": ["region", "start_sec", "end_sec", "sample_fps", "sample_count", "temporal_resolution_sec", "scan_segments", "transitions", "event_count", "uncertain", "incomplete", "uncertainty_reason"],
+        "additionalProperties": false
+      }
+    },
+    "inspect_moments": {
+      "name": "inspect_moments",
+      "description": "Look closely around specific instants: for each moment (timestamp_sec, optional label) returns a contact sheet of frames before, at and after it (default 4 s before and 4 s after, samples_per_moment 9). Use it to verify a hit from search_visual, search_transcript, detect_cuts, audio_onsets or track_region_changes. At most 16 moments per call and max_total_samples frames in all (default 144, maximum 400); a call over budget fails and says what to lower. For one continuous span of frames use inspect_window.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": { "type": "string", "minLength": 1 },
+          "moments": { "type": "array", "minItems": 1, "maxItems": 16, "items": { "type": "object", "properties": { "timestamp_sec": { "type": "number", "minimum": 0 }, "label": { "type": "string", "minLength": 1, "maxLength": 80 } }, "required": ["timestamp_sec"], "additionalProperties": false }, "description": "Instants to inspect, e.g. [{\"timestamp_sec\": 12.5, \"label\": \"door opens\"}], at most 16, each within the video." },
+          "before_sec": { "type": "number", "minimum": 0, "default": 4.0, "description": "Seconds of context before each moment (default 4)." },
+          "after_sec": { "type": "number", "minimum": 0, "default": 4.0, "description": "Seconds of context after each moment (default 4)." },
+          "samples_per_moment": { "type": "integer", "minimum": 3, "maximum": 25, "default": 9, "description": "Frames per moment, an odd number 3-25 (default 9; larger values are clamped to 25)." },
+          "cols": { "type": "integer", "minimum": 1, "default": 3 },
+          "max_moments": { "type": "integer", "minimum": 1, "maximum": 16, "default": 16, "description": "Most moments accepted (default and maximum 16; larger values are clamped)." },
+          "max_total_samples": { "type": "integer", "minimum": 1, "maximum": 400, "default": 144, "description": "Frame budget: moments x samples_per_moment must not exceed it (default 144, maximum 400; larger values are clamped)." }
+        },
+        "required": ["source", "moments"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "note": { "type": "string", "description": "Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument." },
+          "samples_per_moment_clamped_from": { "type": "number", "description": "The value you requested for samples_per_moment before it was lowered to its cap." },
+          "max_moments_clamped_from": { "type": "number", "description": "The value you requested for max_moments before it was lowered to its cap." },
+          "max_total_samples_clamped_from": { "type": "number", "description": "The value you requested for max_total_samples before it was lowered to its cap." },
+          "moments": { "type": "array", "items": { "type": "object", "properties": {
+            "index": { "type": "integer", "minimum": 1 },
+            "timestamp_sec": { "type": "number" },
+            "label": { "type": ["string", "null"] },
+            "start_sec": { "type": "number" },
+            "end_sec": { "type": "number" },
+            "anchor_sample_index": { "type": "integer", "minimum": 1 },
+            "sample_timestamps": { "type": "array", "items": { "type": "number" } },
+            "relative_offsets_sec": { "type": "array", "items": { "type": "number" } },
+            "contact_sheet_path": { "type": "string" },
+            "sample_count": { "type": "integer", "minimum": 1 },
+            "tool_file": { "type": "object" }
+          }, "required": ["index", "timestamp_sec", "label", "start_sec", "end_sec", "anchor_sample_index", "sample_timestamps", "relative_offsets_sec", "contact_sheet_path", "sample_count"], "additionalProperties": false } },
+          "total": { "type": "integer", "minimum": 1 },
+          "total_samples": { "type": "integer", "minimum": 1 },
+          "estimated_vision_tokens": { "type": "integer", "minimum": 0 }
+        },
+        "required": ["moments", "total", "total_samples", "estimated_vision_tokens"],
+        "additionalProperties": false
+      }
+    },
+    "inspect_windows": {
+      "name": "inspect_windows",
+      "description": "Dense consecutive frames (default 4 fps) for several time ranges in one call, with optional context_sec padding and merging of overlapping windows. At most 16 windows and max_total_frames frames in all (default 150, maximum 500); a call over budget fails and says to lower fps or shorten the windows. For one range use inspect_window, for a coarse survey use contact_sheet, for frames around single instants use inspect_moments.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": { "type": "string", "minLength": 1, "description": "Local filesystem path to video file." },
+          "windows": {
+            "description": "Time ranges to inspect, e.g. [{\"start_sec\": 10, \"end_sec\": 14}], at most 16, each within the video.",
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 16,
+            "items": {
+              "type": "object",
+              "properties": {
+                "start_sec": { "type": "number", "minimum": 0 },
+                "end_sec": { "type": "number", "minimum": 0 }
+              },
+              "required": ["start_sec", "end_sec"],
+              "additionalProperties": false
+            }
+          },
+          "fps": { "type": "number", "minimum": 0.01, "maximum": 30, "default": 4.0, "description": "Sampling rate (default 4, maximum 30; larger values are clamped)." },
+          "context_sec": { "type": "number", "minimum": 0, "default": 0.0, "description": "Seconds of padding added to each side of every window (default 0)." },
+          "merge_overlaps": { "type": "boolean", "default": true, "description": "Merge overlapping windows into one (default true)." },
+          "max_windows": { "type": "integer", "minimum": 1, "maximum": 16, "default": 16, "description": "Most windows accepted (default and maximum 16; larger values are clamped)." },
+          "max_total_frames": { "type": "integer", "minimum": 1, "maximum": 500, "default": 150, "description": "Frame budget for all windows together (default 150, maximum 500; larger values are clamped). Lower fps or shorten the windows to fit." }
+        },
+        "required": ["source", "windows"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "note": { "type": "string", "description": "Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument." },
+          "fps_clamped_from": { "type": "number", "description": "The value you requested for fps before it was lowered to its cap." },
+          "max_windows_clamped_from": { "type": "number", "description": "The value you requested for max_windows before it was lowered to its cap." },
+          "max_total_frames_clamped_from": { "type": "number", "description": "The value you requested for max_total_frames before it was lowered to its cap." },
+          "windows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "index": { "type": "integer", "minimum": 1 },
+                "input_indices": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
+                "start_sec": { "type": "number" },
+                "end_sec": { "type": "number" },
+                "fps": { "type": "number" },
+                "frames": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "index": { "type": "integer" },
+                      "timestamp_sec": { "type": "number" },
+                      "timecode": { "type": "string" },
+                      "file_path": { "type": "string" },
+                      "width": { "type": "integer" },
+                      "height": { "type": "integer" },
+                      "requested_timestamp": { "type": ["number", "null"] },
+                      "decoded_timestamp": { "type": ["number", "null"] },
+                      "timestamp_delta": { "type": ["number", "null"] }
+                    },
+                    "required": ["index", "timestamp_sec", "timecode", "file_path", "width", "height", "requested_timestamp", "decoded_timestamp", "timestamp_delta"],
+                    "additionalProperties": false
+                  }
+                },
+                "contact_sheet_path": { "type": ["string", "null"] },
+                "estimated_vision_tokens": { "type": "integer" },
+                "tool_file": { "type": "object" }
+              },
+              "required": ["index", "input_indices", "start_sec", "end_sec", "fps", "frames", "contact_sheet_path", "estimated_vision_tokens"],
+              "additionalProperties": false
+            }
+          },
+          "total": { "type": "integer", "minimum": 1 },
+          "total_frames": { "type": "integer", "minimum": 0 },
+          "estimated_vision_tokens": { "type": "integer", "minimum": 0 }
+        },
+        "required": ["windows", "total", "total_frames", "estimated_vision_tokens"],
+        "additionalProperties": false
+      }
+    },
+    "inspect_window": {
+      "name": "inspect_window",
+      "description": "Dense consecutive frames of ONE short window [start_sec, end_sec] (both required) with timestamp overlays, as a contact sheet plus frame list. Default 4 fps, maximum 30 (larger values are clamped). At most about 150 frames and 600 seconds per call: frames = fps x duration, so a 10 s window allows at most 15 fps; a call over budget fails and says the fps that fits. Use it to verify a moment or a count. For a wide overview use contact_sheet; for several ranges use inspect_windows.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": { "type": "string", "minLength": 1, "description": "Local filesystem path to video file." },
+          "start_sec": { "type": "number", "minimum": 0, "description": "Start of the window in seconds." },
+          "end_sec": { "type": "number", "minimum": 0, "description": "End of the window in seconds; must be within the video." },
+          "fps": { "type": "number", "minimum": 0.01, "maximum": 30, "default": 4.0, "description": "Sampling rate (default 4, maximum 30; larger values are clamped). Frames = fps x duration and must stay within about 150." }
+        },
+        "required": ["source", "start_sec", "end_sec"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "note": { "type": "string", "description": "Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument." },
+          "fps_clamped_from": { "type": "number", "description": "The value you requested for fps before it was lowered to its cap." },
+          "source_path": { "type": "string" },
+          "start_sec": { "type": "number" },
+          "end_sec": { "type": "number" },
+          "fps": { "type": "number" },
+          "frames": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "index": { "type": "integer" },
+                "timestamp_sec": { "type": "number" },
+                "timecode": { "type": "string" },
+                "file_path": { "type": "string" },
+                "width": { "type": "integer" },
+                "height": { "type": "integer" },
+                "requested_timestamp": { "type": ["number", "null"] },
+                "decoded_timestamp": { "type": ["number", "null"] },
+                "timestamp_delta": { "type": ["number", "null"] }
+              },
+              "required": ["index", "timestamp_sec", "timecode", "file_path", "width", "height", "requested_timestamp", "decoded_timestamp", "timestamp_delta"],
+              "additionalProperties": false
+            }
+          },
+          "contact_sheet_path": { "type": ["string", "null"] },
+          "estimated_vision_tokens": { "type": "integer" },
+          "tool_file": { "type": "object" }
+        },
+        "required": ["source_path", "start_sec", "end_sec", "fps", "frames", "contact_sheet_path", "estimated_vision_tokens"],
+        "additionalProperties": false
+      }
+    },
+    "detect_cuts": {
+      "name": "detect_cuts",
+      "description": "List scene changes (timestamp_sec, score, kind) in the whole video or a start_sec/end_sec range. Hard cuts and animated changes (fades, dissolves, slides, wipes, zooms) are both returned; `kind` tells them apart: \"cut\" or \"transition\". A transition's timestamp is its middle. Scores of the two kinds are not comparable. threshold 0-1 (default 0.25) applies to hard cuts only: raise it to keep only stronger cuts. A hard cut between two similar pictures is found by a second check and listed as a cut with a score below the default threshold; any threshold above 0.25 leaves these out. A change that is over within about 4 frames (a very fast wipe) is listed as a cut, and a few similar-picture cuts still come back as a transition. Film footage with heavy motion can still give false transitions; check a doubtful one with inspect_moments. At most 500 cuts are listed; `total` is the full count and the result says how to see the rest. Use it to segment a video into shots or find edit points; use audio_onsets for sounds and sync_check to compare both.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": { "type": "string", "minLength": 1, "description": "Local filesystem path to video file." },
+          "threshold": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.25, "description": "Cut strength cutoff 0-1 (default 0.25). Raise it to keep only stronger cuts." },
+          "start_sec": { "type": "number", "minimum": 0, "description": "Optional inclusive start of the cut-search range in absolute video seconds." },
+          "end_sec": { "type": "number", "minimum": 0, "description": "Optional exclusive end of the cut-search range in absolute video seconds." }
+        },
+        "required": ["source"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "note": { "type": "string", "description": "Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument." },
+          "cuts_omitted": { "type": "integer", "minimum": 1, "description": "How many cuts entries were left out of the list." },
+          "cuts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "timestamp_sec": { "type": "number", "description": "Time of the change in seconds. For a cut this is the first frame of the new shot; for a transition it is the middle." },
+                "score": { "type": "number", "description": "Detector strength 0-1. Not comparable between kinds. A cut between two similar pictures can score below the threshold." },
+                "kind": { "type": "string", "enum": ["cut", "transition"], "description": "\"cut\" for a hard cut, \"transition\" for an animated change (fade, dissolve, slide, wipe, zoom)." }
+              },
+              "required": ["timestamp_sec", "score", "kind"],
+              "additionalProperties": false
+            }
+          },
+          "total": { "type": "integer", "minimum": 0 }
+        },
+        "required": ["cuts", "total"],
+        "additionalProperties": false
+      }
+    },
+    "audio_onsets": {
+      "name": "audio_onsets",
+      "description": "List non-speech sound attacks (hits, claps, beats) with millisecond timestamps and five-band energy profiles, optionally restricted to a frequency band (band_hz: sub, low_mid, mid, high, air, or [low_hz, high_hz]) and compared with another source (compare_to). min_strength 0-1 (default 0.12): raise it for only strong onsets. At most 500 onsets are listed; `total` is the full count and the result says how to see the rest. Needs an audio track (probe_video has_audio). For level over time use loudness_timeline; for speech use transcribe.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "minLength": 1
+          },
+          "start_sec": {
+            "description": "Optional inclusive start in seconds; omit to analyze from the beginning.",
+            "type": "number",
+            "minimum": 0
+          },
+          "end_sec": {
+            "description": "Optional exclusive end in seconds; omit to analyze to the end.",
+            "type": "number",
+            "minimum": 0
+          },
+          "min_strength": {
+            "description": "Onset strength cutoff 0-1 (default 0.12). Raise it to keep only stronger onsets.",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.12
+          },
+          "band_hz": {
+            "description": "Restrict to a named band (sub, low_mid, mid, high, air) or a [low_hz, high_hz] range.",
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "sub",
+                  "low_mid",
+                  "mid",
+                  "high",
+                  "air"
+                ]
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 2,
+                "maxItems": 2
+              }
+            ]
+          },
+          "compare_to": {
+            "description": "Path of another media file whose in-band energy is compared at each onset.",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "note": { "type": "string", "description": "Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument." },
+          "onsets_omitted": { "type": "integer", "minimum": 1, "description": "How many onsets entries were left out of the list." },
+          "source_path": {
+            "type": "string"
+          },
+          "start_sec": {
+            "type": "number"
+          },
+          "end_sec": {
+            "type": "number"
+          },
+          "sample_rate": {
+            "type": "integer"
+          },
+          "hop_samples": {
+            "type": "integer"
+          },
+          "time_resolution_ms": {
+            "type": "number"
+          },
+          "min_strength": {
+            "type": "number"
+          },
+          "onsets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "time_sec": {
+                  "type": "number"
+                },
+                "strength": {
+                  "type": "number"
+                },
+                "band_db": {
+                  "type": "object",
+                  "properties": {
+                    "sub": {
+                      "type": "number"
+                    },
+                    "low_mid": {
+                      "type": "number"
+                    },
+                    "mid": {
+                      "type": "number"
+                    },
+                    "high": {
+                      "type": "number"
+                    },
+                    "air": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "sub",
+                    "low_mid",
+                    "mid",
+                    "high",
+                    "air"
+                  ],
+                  "additionalProperties": false
+                },
+                "band_energy_db": {
+                  "type": "number"
+                },
+                "compare_band_energy_db": {
+                  "type": "number"
+                },
+                "compare_delta_db": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "time_sec",
+                "strength",
+                "band_db"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "total": {
+            "type": "integer"
+          },
+          "band_hz": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "enum": [
+                      "sub",
+                      "low_mid",
+                      "mid",
+                      "high",
+                      "air",
+                      null
+                    ]
+                  },
+                  "low_hz": {
+                    "type": "number"
+                  },
+                  "high_hz": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "name",
+                  "low_hz",
+                  "high_hz"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "compare_to": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "compare_min_delta_db": {
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "source_path",
+          "start_sec",
+          "end_sec",
+          "sample_rate",
+          "hop_samples",
+          "time_resolution_ms",
+          "min_strength",
+          "onsets",
+          "total",
+          "band_hz",
+          "compare_to",
+          "compare_min_delta_db"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "loudness_timeline": {
+      "name": "loudness_timeline",
+      "description": "Measure loudness over time: RMS, peak, band energies, spectral centroid, silence gaps, and band-energy outliers classified as steps, ramps or transients, in fixed windows (window_sec 0.01-600, default 0.25) or beat-length windows (bpm 20-300; give one or the other). At most 500 windows are listed in `windows` (`total` is the full count; `outliers` and `silence_gaps` always cover the whole range); use a larger window_sec or a start_sec/end_sec range for the rest. Ranges needing over 50,000 windows are rejected with the window_sec that fits. Needs an audio track. For discrete hits use audio_onsets. `peak_dbfs` (top level, with `peak_sec`, and per window) is the loudest sample on any channel, as ffmpeg reports sample peak; `rms_dbfs` and `band_db` are measured on the mono mix (L+R)/1.414, so on centred stereo they read up to 3 dB above a per-channel meter.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "minLength": 1
+          },
+          "window_sec": {
+            "description": "Fixed window length in seconds, 0.01-600 (default 0.25). Larger values than 600 are clamped to 600. Give this or bpm, not both.",
+            "type": "number",
+            "minimum": 0.01,
+            "maximum": 600
+          },
+          "bpm": {
+            "description": "Use one-beat windows at this tempo, 20-300. Give this or window_sec, not both.",
+            "type": "number",
+            "minimum": 20,
+            "maximum": 300
+          },
+          "start_sec": {
+            "description": "Optional inclusive start in seconds; omit to analyze from the beginning.",
+            "type": "number",
+            "minimum": 0
+          },
+          "end_sec": {
+            "description": "Optional exclusive end in seconds; omit to analyze to the end.",
+            "type": "number",
+            "minimum": 0
+          },
+          "ignore_ranges": {
+            "description": "Ranges with a reason (e.g. an intentional silence) that are excluded from outlier detection.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "start_sec": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "end_sec": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                }
+              },
+              "required": [
+                "start_sec",
+                "end_sec",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "note": { "type": "string", "description": "Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument." },
+          "window_sec_clamped_from": { "type": "number", "description": "The value you requested for window_sec before it was lowered to its cap." },
+          "windows_omitted": { "type": "integer", "minimum": 1, "description": "How many windows entries were left out of the list." },
+          "source_path": {
+            "type": "string"
+          },
+          "start_sec": {
+            "type": "number"
+          },
+          "end_sec": {
+            "type": "number"
+          },
+          "window_sec": {
+            "type": "number"
+          },
+          "bpm": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "silence_threshold_dbfs": {
+            "type": "number"
+          },
+          "peak_dbfs": {
+            "type": "number",
+            "description": "Loudest sample on any channel in the range (sample peak, as ffmpeg astats/ebur128 report it)."
+          },
+          "peak_sec": {
+            "type": "number",
+            "description": "Time of that loudest sample."
+          },
+          "windows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "start_sec": {
+                  "type": "number"
+                },
+                "end_sec": {
+                  "type": "number"
+                },
+                "rms_dbfs": {
+                  "type": "number"
+                },
+                "peak_dbfs": {
+                  "type": "number"
+                },
+                "band_db": {
+                  "type": "object",
+                  "properties": {
+                    "sub": {
+                      "type": "number"
+                    },
+                    "low_mid": {
+                      "type": "number"
+                    },
+                    "mid": {
+                      "type": "number"
+                    },
+                    "high": {
+                      "type": "number"
+                    },
+                    "air": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "sub",
+                    "low_mid",
+                    "mid",
+                    "high",
+                    "air"
+                  ],
+                  "additionalProperties": false
+                },
+                "spectral_centroid_hz": {
+                  "type": "number"
+                },
+                "silent": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "start_sec",
+                "end_sec",
+                "rms_dbfs",
+                "peak_dbfs",
+                "band_db",
+                "spectral_centroid_hz",
+                "silent"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "outliers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "start_sec": {
+                  "type": "number"
+                },
+                "end_sec": {
+                  "type": "number"
+                },
+                "band": {
+                  "type": "string",
+                  "enum": [
+                    "sub",
+                    "low_mid",
+                    "mid",
+                    "high",
+                    "air"
+                  ]
+                },
+                "energy_db": {
+                  "type": "number"
+                },
+                "baseline_db": {
+                  "type": "number"
+                },
+                "delta_db": {
+                  "type": "number"
+                },
+                "window_count": {
+                  "type": "integer"
+                },
+                "direction": {
+                  "type": "string",
+                  "enum": [
+                    "boost",
+                    "cut"
+                  ]
+                },
+                "shape": {
+                  "type": "string",
+                  "enum": [
+                    "step",
+                    "ramp",
+                    "transient"
+                  ]
+                },
+                "classification": {
+                  "type": "string",
+                  "enum": [
+                    "fault",
+                    "informational"
+                  ]
+                },
+                "fault_level": {
+                  "type": "boolean"
+                },
+                "ignored": {
+                  "type": "boolean"
+                },
+                "ignore_reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "min_delta_db": {
+                  "type": "number"
+                },
+                "max_delta_db": {
+                  "type": "number"
+                },
+                "energy_start_db": {
+                  "type": "number"
+                },
+                "energy_end_db": {
+                  "type": "number"
+                },
+                "entry_jump_db": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "exit_jump_db": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "internal_range_db": {
+                  "type": "number"
+                },
+                "trend_db": {
+                  "type": "number"
+                },
+                "monotonic_fraction": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "start_sec",
+                "end_sec",
+                "band",
+                "energy_db",
+                "baseline_db",
+                "delta_db",
+                "window_count",
+                "direction",
+                "shape",
+                "classification",
+                "fault_level",
+                "ignored",
+                "ignore_reason",
+                "min_delta_db",
+                "max_delta_db",
+                "energy_start_db",
+                "energy_end_db",
+                "entry_jump_db",
+                "exit_jump_db",
+                "internal_range_db",
+                "trend_db",
+                "monotonic_fraction"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "silence_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "start_sec": {
+                  "type": "number"
+                },
+                "end_sec": {
+                  "type": "number"
+                },
+                "duration_sec": {
+                  "type": "number"
+                },
+                "threshold_dbfs": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "start_sec",
+                "end_sec",
+                "duration_sec",
+                "threshold_dbfs"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "total": {
+            "type": "integer"
+          },
+          "ignore_ranges": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "start_sec": {
+                  "type": "number"
+                },
+                "end_sec": {
+                  "type": "number"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "start_sec",
+                "end_sec",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "source_path",
+          "start_sec",
+          "end_sec",
+          "window_sec",
+          "bpm",
+          "silence_threshold_dbfs",
+          "peak_dbfs",
+          "peak_sec",
+          "windows",
+          "outliers",
+          "silence_gaps",
+          "total",
+          "ignore_ranges"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "spectrogram_window": {
+      "name": "spectrogram_window",
+      "description": "Render a log-frequency dB spectrogram PNG for [start_sec, end_sec] (both required, at most 600 s) with absolute timecode badges and optional event marks (time_sec + label). Use a short window (a few seconds) to look at one sound; find candidate times with audio_onsets or loudness_timeline first. Needs an audio track.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "minLength": 1
+          },
+          "start_sec": {
+            "description": "Start of the window in seconds.",
+            "type": "number",
+            "minimum": 0
+          },
+          "end_sec": {
+            "description": "End of the window in seconds; the window may be at most 600 s long.",
+            "type": "number",
+            "minimum": 0
+          },
+          "marks": {
+            "description": "Optional event markers drawn on the image, e.g. [{\"time_sec\": 12.5, \"label\": \"kick\"}].",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "time_sec": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "label": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "time_sec",
+                "label"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "source",
+          "start_sec",
+          "end_sec"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "note": { "type": "string", "description": "Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument." },
+          "source_path": {
+            "type": "string"
+          },
+          "start_sec": {
+            "type": "number"
+          },
+          "end_sec": {
+            "type": "number"
+          },
+          "file_path": {
+            "type": "string"
+          },
+          "width": {
+            "type": "integer"
+          },
+          "height": {
+            "type": "integer"
+          },
+          "sample_rate": {
+            "type": "integer"
+          },
+          "hop_samples": {
+            "type": "integer"
+          },
+          "timecode_badges": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "marks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "time_sec": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "label": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "time_sec",
+                "label"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "tool_file": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "mimeType": {
+                "type": "string"
+              },
+              "encoding": {
+                "type": "string"
+              },
+              "data": {
+                "type": "string"
+              },
+              "byteLength": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "_tag",
+              "mimeType",
+              "encoding",
+              "data",
+              "byteLength"
+            ],
+            "additionalProperties": true
+          },
+          "frequency_ticks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "frequency_hz": {
+                  "type": "number"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "y_px": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "frequency_hz",
+                "label",
+                "y_px"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "source_path",
+          "start_sec",
+          "end_sec",
+          "file_path",
+          "width",
+          "height",
+          "sample_rate",
+          "hop_samples",
+          "timecode_badges",
+          "marks",
+          "frequency_ticks"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "sync_check": {
+      "name": "sync_check",
+      "description": "Check audio/video sync: compares visual cuts with measured audio onsets, and optionally with intended sound cues (time_sec, label, optional band_hz), within tolerance_ms (0-5000, default 80). Returns per-cut and per-cue matches and unmatched strong onsets (each list shows at most 500 items; total_cuts and total_cues are the full counts). Needs an audio track. To look at the two signals separately use detect_cuts and audio_onsets.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "minLength": 1
+          },
+          "cues": {
+            "description": "Intended sound cues to check, e.g. [{\"time_sec\": 12.5, \"label\": \"hit\"}]. Omit to compare cuts with onsets only.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "time_sec": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "t": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "label": {
+                  "type": "string"
+                },
+                "band_hz": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "sub",
+                        "low_mid",
+                        "mid",
+                        "high",
+                        "air"
+                      ]
+                    },
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      },
+                      "minItems": 2,
+                      "maxItems": 2
+                    }
+                  ]
+                }
+              },
+              "anyOf": [
+                {
+                  "required": [
+                    "time_sec"
+                  ]
+                },
+                {
+                  "required": [
+                    "t"
+                  ]
+                }
+              ],
+              "additionalProperties": false
+            }
+          },
+          "tolerance_ms": {
+            "description": "Match window in milliseconds (default 80, maximum 5000; larger values are clamped).",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 5000,
+            "default": 80
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "note": { "type": "string", "description": "Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument." },
+          "tolerance_ms_clamped_from": { "type": "number", "description": "The value you requested for tolerance_ms before it was lowered to its cap." },
+          "cuts_omitted": { "type": "integer", "minimum": 1, "description": "How many cuts entries were left out of the list." },
+          "unmatched_strong_onsets_omitted": { "type": "integer", "minimum": 1, "description": "How many unmatched_strong_onsets entries were left out of the list." },
+          "source_path": {
+            "type": "string"
+          },
+          "tolerance_ms": {
+            "type": "number"
+          },
+          "cue_recovery_window_ms": {
+            "type": "number"
+          },
+          "cuts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "time_sec": {
+                  "type": "number"
+                },
+                "score": {
+                  "type": "number"
+                },
+                "nearest_onset": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "properties": {
+                    "time_sec": {
+                      "type": "number"
+                    },
+                    "strength": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "time_sec",
+                    "strength"
+                  ],
+                  "additionalProperties": false
+                },
+                "offset_ms": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "time_sec",
+                "score",
+                "nearest_onset",
+                "offset_ms"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "cues": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "time_sec": {
+                  "type": "number"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "ok",
+                    "early",
+                    "late",
+                    "missing"
+                  ]
+                },
+                "matched_onset_time_sec": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "offset_ms": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "band_hz": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "sub",
+                        "low_mid",
+                        "mid",
+                        "high",
+                        "air"
+                      ]
+                    },
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      },
+                      "minItems": 2,
+                      "maxItems": 2
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "time_sec",
+                "label",
+                "status",
+                "matched_onset_time_sec",
+                "offset_ms"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "unmatched_strong_onsets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "time_sec": {
+                  "type": "number"
+                },
+                "strength": {
+                  "type": "number"
+                },
+                "band_db": {
+                  "type": "object",
+                  "properties": {
+                    "sub": {
+                      "type": "number"
+                    },
+                    "low_mid": {
+                      "type": "number"
+                    },
+                    "mid": {
+                      "type": "number"
+                    },
+                    "high": {
+                      "type": "number"
+                    },
+                    "air": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "sub",
+                    "low_mid",
+                    "mid",
+                    "high",
+                    "air"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "time_sec",
+                "strength",
+                "band_db"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "strong_onset_threshold": {
+            "type": "number"
+          },
+          "total_cuts": {
+            "type": "integer"
+          },
+          "total_cues": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "source_path",
+          "tolerance_ms",
+          "cue_recovery_window_ms",
+          "cuts",
+          "cues",
+          "unmatched_strong_onsets",
+          "strong_onset_threshold",
+          "total_cuts",
+          "total_cues"
+        ],
+        "additionalProperties": false
+      }
+    }
+  }
+}
