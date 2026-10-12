@@ -350,6 +350,11 @@ def _sandbox_profile(sealed_dir: Path, data_dir: Path, video_path: Path | None, 
         f'(deny file-read* (subpath "{q(runs_dir)}"))',
         f'(deny file-write* (subpath "{q(videos_dir)}"))',
     ])
+    # Earlier runs written with --out sit beside runs/ (runs-v2, runs-fresh1) and hold prior answers too.
+    if data_dir.is_dir():
+        for sibling in sorted(data_dir.glob("runs*")):
+            if sibling.is_dir() and sibling.resolve() != runs_dir.resolve():
+                rules.append(f'(deny file-read* (subpath "{q(sibling)}"))')
     if videos_dir.is_dir():
         for sibling in videos_dir.iterdir():
             if sibling.is_file() and (video_path is None or sibling.resolve() != video_path.resolve()):
@@ -766,7 +771,7 @@ def main() -> int:
     parser.add_argument("--question-file", type=Path, default=None)
     parser.add_argument("--out", type=Path, default=None, help="Output directory; defaults to the standard runs/<contestant> directory")
     parser.add_argument("--model", default=None, help="Codex model; default gpt-6-luna")
-    parser.add_argument("--effort", default="medium", choices=("low", "medium", "high", "xhigh"))
+    parser.add_argument("--effort", default="medium", choices=("low", "medium", "high", "xhigh", "max"))
     parser.add_argument("--gemini-model", default="gemini-3.8-flash")
     parser.add_argument("--timeout-sec", type=int, default=900)
     parser.add_argument("--codex-overhead-file", type=Path, default=None, help="Read/write the one-time Codex input-token overhead calibration")

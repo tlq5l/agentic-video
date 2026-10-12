@@ -171,6 +171,16 @@ def test_sandbox_denies_configured_key_target_and_directory_as_well_as_default(m
             assert f'(deny {action} (subpath "{path.parent}"))' in profile
 
 
+def test_sandbox_denies_prior_answers_in_sibling_run_folders(tmp_path):
+    data = tmp_path / "data"
+    earlier_run = data / "runs-fresh1"
+    earlier_run.mkdir(parents=True)
+
+    profile = run_contestant._sandbox_profile(tmp_path / "sealed", data, tmp_path / "video.mp4")
+
+    assert f'(deny file-read* (subpath "{earlier_run.resolve()}"))' in profile
+
+
 def test_runner_ingests_selected_videos_and_records_ingest_separately(monkeypatch, tmp_path):
     root = tmp_path / "bench-data"
     root.mkdir()
