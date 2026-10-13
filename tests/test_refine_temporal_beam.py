@@ -1,5 +1,4 @@
 """Focused tests for refine_temporal_beam."""
-from pathlib import Path
 
 import pytest
 

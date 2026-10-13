@@ -10,7 +10,6 @@ import sys
 import tempfile
 import threading
 import time
-import wave
 from pathlib import Path
 from typing import Optional, List, Tuple, Dict, Any
 from src.core.config import Config

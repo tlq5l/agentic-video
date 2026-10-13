@@ -1,13 +1,10 @@
-import pytest
 from pathlib import Path
 from src.core.config import Config
 from src.core.cache import MediaCache
-from src.core.types import VideoMetadata, TranscriptSegment
 from src.media.probe import probe_video
 from src.media.frames import extract_single_frame, extract_window_frames
 from src.media.contact_sheet import build_contact_sheet, generate_video_overview
-from src.media.scene import detect_scenes
-from src.transcript.asr import transcribe_video, parse_srt_or_vtt
+from src.transcript.asr import parse_srt_or_vtt
 from src.transcript.search import search_transcript
 from src.retrieval.engine import AgenticVideoEngine
 from src.executor.mcp_server import handle_call

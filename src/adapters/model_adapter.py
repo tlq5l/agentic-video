@@ -3,9 +3,9 @@
 Connects ordinary Vision-Language Models (Gemini Flash, Claude 3.5 Sonnet, GPT-4o)
 to video understanding without requiring native video ingestion.
 """
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any
 from src.retrieval.engine import AgenticVideoEngine
-from src.core.types import EvidenceItem, SearchResult
+from src.core.types import SearchResult
 
 class AgenticVideoModelAdapter:
     """Orchestrates programmatic video reasoning for standard Text+Vision models."""

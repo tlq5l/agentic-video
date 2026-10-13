@@ -12,7 +12,6 @@ from src.core.types import FrameInfo, format_timestamp
 from src.core.cache import MediaCache
 from src.media.seeking import build_seek_arguments
 from src.media.overlay import apply_overlay_to_file
-from src.media.probe import probe_video
 from src.media.timing import parse_selected_frame_timestamp
 
 

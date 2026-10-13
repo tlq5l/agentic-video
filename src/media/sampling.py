@@ -1,5 +1,4 @@
 import math
-import os
 import threading
 import subprocess
 import hashlib
@@ -21,7 +20,7 @@ from src.core.errors import SubprocessTimeoutError, MediaCorruptError, Dependenc
 from src.core.types import FrameInfo, InspectionWindowResult, format_timestamp
 from src.core.cache import MediaCache
 from src.media.probe import probe_video
-from src.media.seeking import extract_single_frame, build_seek_arguments
+from src.media.seeking import build_seek_arguments
 from src.media.overlay import apply_overlay_to_file
 
 

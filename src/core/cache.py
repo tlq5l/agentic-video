@@ -2,11 +2,10 @@
 import hashlib
 import json
 import os
-import shutil
 import time
 import uuid
 from pathlib import Path
-from typing import Optional, Any, Dict, List
+from typing import Optional, Any, Dict
 from src.core.config import Config
 from src.core.errors import ExtractionBoundsError, CacheWriteError
 
