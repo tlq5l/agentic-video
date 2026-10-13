@@ -1,7 +1,6 @@
 """Pytest integration for the 12 Adversarial Failure Injection Modes."""
 
 import pytest
-from pathlib import Path
 from evals.adversarial_runner import AdversarialFailureHarness, SANDBOX_DIR
 
 @pytest.fixture(scope="module")

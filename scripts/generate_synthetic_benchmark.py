@@ -16,7 +16,6 @@ import json
 import math
 import struct
 import subprocess
-import sys
 import wave
 from dataclasses import asdict, dataclass
 from pathlib import Path

@@ -1,7 +1,6 @@
 """Focused tests for per-cache fingerprint memoization."""
 import builtins
 import hashlib
-import os
 
 from src.core.cache import MediaCache
 

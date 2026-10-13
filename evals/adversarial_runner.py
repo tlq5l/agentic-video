@@ -37,19 +37,16 @@ if sys.platform == "win32":
 
 from PIL import Image
 
-from src.core.config import Config
 from src.core.errors import (
     AgenticVideoError,
     DependencyNotFoundError,
     MediaCorruptError,
-    MediaNotFoundError,
     SubprocessTimeoutError,
 )
 from src.core.types import TranscriptResult
 from src.executor.mcp_server import handle_call
 from src.media.frames import extract_single_frame
 from src.media.probe import probe_video
-from src.media.sampling import sample_dense_window, sample_sparse_frames
 from src.media.scene import detect_scenes
 from src.media.seeking import build_seek_arguments
 from src.retrieval.engine import AgenticVideoEngine

@@ -1,6 +1,5 @@
 """Tests for media cache and fail-safe bounds enforcement."""
 import pytest
-from pathlib import Path
 from src.core.cache import MediaCache
 from src.core.errors import ExtractionBoundsError
 

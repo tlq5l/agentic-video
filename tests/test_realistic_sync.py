@@ -1,6 +1,5 @@
 """AAC cue matching against layered, quiet, reverberant synthetic mixes."""
 
-import math
 import subprocess
 import wave
 from pathlib import Path
