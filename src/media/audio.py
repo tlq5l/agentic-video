@@ -2894,7 +2894,6 @@ def sync_check(
                     and _cosine(left_model["profile"], right_model["profile"]) >= 0.94):
                 tied_groups.add((left_index, right_index))
 
-    cue_results: List[Dict[str, Any]] = []
     selected_onsets: Dict[int, Optional[Dict[str, Any]]] = {}
     ambiguous_reasons: Dict[int, Optional[str]] = {}
     signature_scores: Dict[int, Optional[float]] = {}
@@ -3393,8 +3392,6 @@ def sync_check(
         else:
             same["also_matches"].append(item["group"])
     uncued_sounds = sorted(merged, key=lambda item: item["time_sec"])
-
-    silence_gaps = _silence_gaps(samples, 0.0, len(samples) / float(SAMPLE_RATE)) if normalized else []
 
     strong_threshold = 0.5
     unmatched = [dict(item) for index, item in enumerate(broad_onsets)

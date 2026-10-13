@@ -143,7 +143,6 @@ def sample_sparse_frames(
     cache.validate_extraction_bounds(fps=fps, duration_sec=window_duration)
 
     fingerprint = meta.fingerprint
-    overlay_tag = "ts" if overlay_timestamp else "raw"
     tag = _request_tag(
         "sparse",
         {
@@ -271,7 +270,6 @@ def sample_dense_window(
     cache.validate_extraction_bounds(fps=fps, duration_sec=duration)
 
     fingerprint = meta.fingerprint
-    overlay_tag = "ts" if overlay_timestamp else "raw"
     tag = _request_tag(
         "dense",
         {

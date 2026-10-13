@@ -412,7 +412,7 @@ def generate_benchmark_suite(
     print(f"[1/4] Generating synthetic audio ({duration_s}s)...")
     generate_audio_wav(wav_path, duration_s=duration_s)
 
-    print(f"[2/4] Generating subtitles (VTT & SRT)...")
+    print("[2/4] Generating subtitles (VTT & SRT)...")
     generate_subtitles(output_dir)
 
     print(f"[3/4] Rendering video frames ({int(duration_s * fps)} frames @ {fps}fps) via FFmpeg pipe...")
