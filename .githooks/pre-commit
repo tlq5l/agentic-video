@@ -1,0 +1,3 @@
+#!/bin/sh
+# Lint before each commit. Turn on once per clone: git config core.hooksPath .githooks
+exec uvx ruff check .

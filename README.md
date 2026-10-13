@@ -31,6 +31,8 @@ uv pip install --python .venv/bin/python -r requirements.txt pytest
 .venv/bin/python -m pytest -q
 ```
 
+To lint before every commit (`uvx ruff check .`, the core rules in `ruff.toml`), turn the hook on once per clone: `git config core.hooksPath .githooks`.
+
 What is macOS-only:
 
 - On-screen text matching in `count_occurrences` (`text=`) uses Apple Vision through pyobjc.
