@@ -58,12 +58,33 @@ export interface ToolFile {
   readonly byteLength: number;
 }
 
+/** Added to every successful result when `source` was a URL. */
+export interface UrlSourceFields {
+  /** The URL passed as `source`. */
+  source_url?: string;
+  /** Cached local copy of the URL; reuse it with other tools or ffmpeg. */
+  local_path?: string;
+}
+
+/** Returned by any tool while a URL `source` is still downloading; call again with the same source. */
+export interface SourceDownloadPending {
+  status: "in_progress";
+  retry_after_seconds: number;
+  source_url: string;
+  note: string;
+}
+
+export type WithUrlSource<T> = (T & UrlSourceFields) | SourceDownloadPending;
+
 // ============================================================================
 // Tool 1: probe_video
 // ============================================================================
 
 export interface ProbeVideoInput {
-  /** Local filesystem path to the video file; every other tool takes the same path. */
+  /**
+   * Local video file path, or a video URL (X/Twitter post, YouTube link, other yt-dlp sites, direct .mp4 link);
+   * every other tool takes the same value. A URL is downloaded once and cached.
+   */
   source: string;
 }
 
@@ -827,7 +848,7 @@ export interface AudioOnsetsInput {
   min_strength?: number;
   /** Restrict onset detection to a named band or [low_hz, high_hz]. */
   band_hz?: AudioBandSelection;
-  /** Return only source onsets that are new or materially louder in-band than this source. */
+  /** Return only source onsets that are new or materially louder in-band than this source (a path or video URL). */
   compare_to?: string;
 }
 
@@ -1023,77 +1044,77 @@ export interface AgenticVideoIntegration {
    * Read duration, resolution, fps, codecs, and audio presence. Call first: duration bounds every start_sec/end_sec
    * and has_audio says whether transcribe and the audio tools can work.
    */
-  probe_video(input: ProbeVideoInput): Promise<ToolResult<ProbeVideoOutput>>;
+  probe_video(input: ProbeVideoInput): Promise<ToolResult<WithUrlSource<ProbeVideoOutput>>>;
 
   /**
    * Full speech transcript as timestamped segments. To find a phrase use search_transcript. Repeat the same call
    * while status is in_progress.
    */
-  transcribe(input: TranscribeInput): Promise<ToolResult<TranscribeOutput>>;
+  transcribe(input: TranscribeInput): Promise<ToolResult<WithUrlSource<TranscribeOutput>>>;
 
   /**
    * Find when a word or phrase is spoken (lexical match). For on-screen text use count_occurrences; for visible
    * things use search_visual.
    */
-  search_transcript(input: SearchTranscriptInput): Promise<ToolResult<SearchTranscriptOutput>>;
+  search_transcript(input: SearchTranscriptInput): Promise<ToolResult<WithUrlSource<SearchTranscriptOutput>>>;
 
   /** Start or poll bounded background construction of the local visual index. */
-  build_visual_index(input: BuildVisualIndexInput): Promise<ToolResult<BuildVisualIndexOutput>>;
+  build_visual_index(input: BuildVisualIndexInput): Promise<ToolResult<WithUrlSource<BuildVisualIndexOutput>>>;
 
   /**
    * Find when something visible happens; returns ranked frames (top_k up to 20). It ranks frames and cannot count:
    * use count_occurrences for separate appearances and count_repetitions for repeated actions.
    */
-  search_visual(input: SearchVisualInput): Promise<ToolResult<SearchVisualOutput>>;
+  search_visual(input: SearchVisualInput): Promise<ToolResult<WithUrlSource<SearchVisualOutput>>>;
 
   /** Count cycles of a repeated visual action inside a window of at most 180 s. */
-  count_repetitions(input: CountRepetitionsInput): Promise<ToolResult<CountRepetitionsOutput>>;
+  count_repetitions(input: CountRepetitionsInput): Promise<ToolResult<WithUrlSource<CountRepetitionsOutput>>>;
 
   /** Count separate appearances of a described symbol or exact on-screen text; no visual index needed. */
-  count_occurrences(input: CountOccurrencesInput): Promise<ToolResult<CountOccurrencesOutput>>;
+  count_occurrences(input: CountOccurrencesInput): Promise<ToolResult<WithUrlSource<CountOccurrencesOutput>>>;
 
   /**
    * List hard scene cuts and transitions (at most 500 listed; total is the full count).
    */
-  detect_cuts(input: DetectCutsInput): Promise<ToolResult<DetectCutsOutput>>;
+  detect_cuts(input: DetectCutsInput): Promise<ToolResult<WithUrlSource<DetectCutsOutput>>>;
 
   /** Split candidate windows into contiguous child ranges with one contact sheet each (budget: windows x fanout x samples_per_child). */
-  refine_temporal_beam(input: RefineTemporalBeamInput): Promise<ToolResult<RefineTemporalBeamOutput>>;
+  refine_temporal_beam(input: RefineTemporalBeamInput): Promise<ToolResult<WithUrlSource<RefineTemporalBeamOutput>>>;
 
   /** Rank the moments a fixed frame rectangle changes most; candidates only, not a count. */
-  track_region_changes(input: TrackRegionChangesInput): Promise<ToolResult<TrackRegionChangesOutput>>;
+  track_region_changes(input: TrackRegionChangesInput): Promise<ToolResult<WithUrlSource<TrackRegionChangesOutput>>>;
 
   /** Count state transitions inside a fixed frame rectangle, with before/after evidence moments. */
-  track_region_events(input: TrackRegionEventsInput): Promise<ToolResult<TrackRegionEventsOutput>>;
+  track_region_events(input: TrackRegionEventsInput): Promise<ToolResult<WithUrlSource<TrackRegionEventsOutput>>>;
 
   /** Contact sheets of frames before, at and after specific instants (at most 16 moments per call). */
-  inspect_moments(input: InspectMomentsInput): Promise<ToolResult<InspectMomentsOutput>>;
+  inspect_moments(input: InspectMomentsInput): Promise<ToolResult<WithUrlSource<InspectMomentsOutput>>>;
 
   /** Dense frames for several time ranges under one frame budget. */
-  inspect_windows(input: InspectWindowsInput): Promise<ToolResult<InspectWindowsOutput>>;
+  inspect_windows(input: InspectWindowsInput): Promise<ToolResult<WithUrlSource<InspectWindowsOutput>>>;
 
   /** Dense consecutive frames of one short window (about 150 frames per call). */
-  inspect_window(input: InspectWindowInput): Promise<ToolResult<InspectWindowOutput>>;
+  inspect_window(input: InspectWindowInput): Promise<ToolResult<WithUrlSource<InspectWindowOutput>>>;
 
   /**
    * One grid image of evenly spaced frames with timestamps: the cheapest way to survey a video (samples up to 150).
    */
-  contact_sheet(input: ContactSheetInput): Promise<ToolResult<ContactSheetOutput>>;
+  contact_sheet(input: ContactSheetInput): Promise<ToolResult<WithUrlSource<ContactSheetOutput>>>;
 
   /** Survey a long video as consecutive contact sheets (at most 32 per call). */
-  overview_chunks(input: OverviewChunksInput): Promise<ToolResult<OverviewChunksOutput>>;
+  overview_chunks(input: OverviewChunksInput): Promise<ToolResult<WithUrlSource<OverviewChunksOutput>>>;
 
   /** List non-speech sound attacks with band profiles (at most 500 listed; total is the full count). */
-  audio_onsets(input: AudioOnsetsInput): Promise<ToolResult<AudioOnsetsOutput>>;
+  audio_onsets(input: AudioOnsetsInput): Promise<ToolResult<WithUrlSource<AudioOnsetsOutput>>>;
 
   /** Measure loudness in fixed or beat-length windows and report silence and band outliers (at most 500 windows listed). */
-  loudness_timeline(input: LoudnessTimelineInput): Promise<ToolResult<LoudnessTimelineOutput>>;
+  loudness_timeline(input: LoudnessTimelineInput): Promise<ToolResult<WithUrlSource<LoudnessTimelineOutput>>>;
 
   /** Render a timecoded log-frequency spectrogram as a PNG ToolFile (window of at most 600 s). */
-  spectrogram_window(input: SpectrogramWindowInput): Promise<ToolResult<SpectrogramWindowOutput>>;
+  spectrogram_window(input: SpectrogramWindowInput): Promise<ToolResult<WithUrlSource<SpectrogramWindowOutput>>>;
 
   /** Compare visual cut times, sound onsets and optional intended cues (each list shows at most 500 items). */
-  sync_check(input: SyncCheckInput): Promise<ToolResult<SyncCheckOutput>>;
+  sync_check(input: SyncCheckInput): Promise<ToolResult<WithUrlSource<SyncCheckOutput>>>;
 
 }
 

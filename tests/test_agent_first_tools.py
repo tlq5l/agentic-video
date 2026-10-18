@@ -203,7 +203,7 @@ def test_omission_fields_are_declared_in_every_definition():
 def test_missing_required_argument_names_it_and_the_required_set():
     with pytest.raises(ValueError, match=r"search_visual is missing required argument\(s\): query. Required: source, query"):
         handle_call("search_visual", {"source": "clip.mp4"})
-    with pytest.raises(ValueError, match="`source` is the path of a local video file"):
+    with pytest.raises(ValueError, match="`source` is a local video file path or a video URL"):
         handle_call("probe_video", {})
 
 

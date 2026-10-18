@@ -572,10 +572,7 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "source": {
-            "type": "string",
-            "minLength": 1
-          },
+          "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
           "start_sec": {
             "description": "Start of the window in seconds (default 0). The window may be at most 180 s long.",
             "type": "number",
@@ -666,6 +663,8 @@
       "outputSchema": {
         "type": "object",
         "properties": {
+          "source_url": { "type": "string", "description": "The video URL you passed as `source`; only present when `source` was a URL." },
+          "local_path": { "type": "string", "description": "Cached local copy of `source_url`; pass it to other tools or ffmpeg to skip the URL lookup." },
           "status": {
             "type": "string",
             "enum": [
@@ -773,9 +772,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "status"
-        ],
+        "anyOf": [{ "required": ["status"] }, { "required": ["status", "source_url", "retry_after_seconds"], "not": { "required": ["local_path"] } }],
         "additionalProperties": true
       }
     },
@@ -785,7 +782,7 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "source": { "type": "string", "minLength": 1 },
+          "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
           "description": { "type": "string", "minLength": 1, "maxLength": 500, "description": "Visible thing to count, e.g. 'yellow outlined circle', 'green diamond', 'red star'. Name its colour and shape; text on screen goes in `text`." },
           "text": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Exact on-screen phrase, matched as whole words (RELEASE matches 'RELEASE' and 'RELEASE NOTES', not 'RELEASED' or 'PRE-RELEASE')." },
           "case_sensitive": { "type": "boolean", "default": false, "description": "Require the same letter case for `text`." },
@@ -801,6 +798,8 @@
       "outputSchema": {
         "type": "object",
         "properties": {
+          "source_url": { "type": "string", "description": "The video URL you passed as `source`; only present when `source` was a URL." },
+          "local_path": { "type": "string", "description": "Cached local copy of `source_url`; pass it to other tools or ffmpeg to skip the URL lookup." },
           "status": { "type": "string", "enum": ["in_progress", "complete", "error"] },
           "retry_after_seconds": { "type": "number" },
           "message": { "type": "string" },
@@ -844,17 +843,17 @@
           "verify": { "type": "string" },
           "note": { "type": "string" }
         },
-        "required": ["status"],
+        "anyOf": [{ "required": ["status"] }, { "required": ["status", "source_url", "retry_after_seconds"], "not": { "required": ["local_path"] } }],
         "additionalProperties": true
       }
     },
     "probe_video": {
       "name": "probe_video",
-      "description": "Read a video's duration, frame rate, resolution, codecs, and whether it has an audio track. Call this first: duration_sec bounds every start_sec/end_sec you pass to other tools, and has_audio tells you whether transcribe and the audio tools (audio_onsets, loudness_timeline, spectrogram_window, sync_check) can work. `source` is a local file path and is the same in every tool.",
+      "description": "Read a video's duration, frame rate, resolution, codecs, and whether it has an audio track. Call this first: duration_sec bounds every start_sec/end_sec you pass to other tools, and has_audio tells you whether transcribe and the audio tools (audio_onsets, loudness_timeline, spectrogram_window, sync_check) can work. `source` is a local file path or a video URL and is the same in every tool: an x.com / Twitter post with a video, a YouTube link, another site yt-dlp supports, or a direct .mp4 link. A URL is downloaded once (up to 1080p) and cached; the result gives source_url and local_path, and while the download runs it is status=in_progress, so call again.",
       "inputSchema": {
         "type": "object",
         "properties": {
-          "source": { "type": "string", "minLength": 1, "description": "Local filesystem path to video file." }
+          "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." }
         },
         "required": ["source"],
         "additionalProperties": false
@@ -862,6 +861,10 @@
       "outputSchema": {
         "type": "object",
         "properties": {
+          "source_url": { "type": "string", "description": "The video URL you passed as `source`; only present when `source` was a URL." },
+          "local_path": { "type": "string", "description": "Cached local copy of `source_url`; pass it to other tools or ffmpeg to skip the URL lookup." },
+          "status": { "type": "string", "enum": ["in_progress"] },
+          "retry_after_seconds": { "type": "integer", "minimum": 0 },
           "note": { "type": "string", "description": "Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument." },
           "source_path": { "type": "string" },
           "duration_sec": { "type": "number" },
@@ -875,7 +878,7 @@
           "video_codec": { "type": ["string", "null"] },
           "fingerprint": { "type": "string" }
         },
-        "required": ["source_path", "duration_sec", "width", "height", "fps", "format_name", "size_bytes", "has_audio", "audio_codec", "video_codec", "fingerprint"],
+        "anyOf": [{ "required": ["source_path", "duration_sec", "width", "height", "fps", "format_name", "size_bytes", "has_audio", "audio_codec", "video_codec", "fingerprint"] }, { "required": ["status", "source_url", "retry_after_seconds"], "not": { "required": ["local_path"] } }],
         "additionalProperties": false
       }
     },
@@ -885,7 +888,7 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "source": { "type": "string", "minLength": 1, "description": "Local filesystem path to video file." },
+          "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
           "model_size": { "type": "string", "enum": ["tiny", "base", "small", "turbo"] }
         },
         "required": ["source"],
@@ -894,6 +897,8 @@
       "outputSchema": {
         "type": "object",
         "properties": {
+          "source_url": { "type": "string", "description": "The video URL you passed as `source`; only present when `source` was a URL." },
+          "local_path": { "type": "string", "description": "Cached local copy of `source_url`; pass it to other tools or ffmpeg to skip the URL lookup." },
           "note": { "type": "string", "description": "Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument." },
           "source_path": { "type": "string" },
           "language": { "type": "string" },
@@ -931,7 +936,8 @@
         },
         "oneOf": [
           { "required": ["source_path", "language", "duration_sec", "segment_count", "segments", "has_speech", "notice", "confidence", "uncertainty"] },
-          { "required": ["status", "requested_model_size", "requested_model_cached", "transcription_status", "retry_after_seconds", "transcription_message"] }
+          { "required": ["status", "requested_model_size", "requested_model_cached", "transcription_status", "retry_after_seconds", "transcription_message"] },
+          { "required": ["status", "source_url", "retry_after_seconds"], "not": { "required": ["local_path"] } }
         ],
         "additionalProperties": false
       }
@@ -942,7 +948,7 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "source": { "type": "string", "minLength": 1, "description": "Local filesystem path to video file." },
+          "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
           "query": { "type": "string", "minLength": 1, "description": "Words or a phrase to find in the speech, e.g. 'launch date'. Punctuation and case are ignored." },
           "top_k": { "type": "integer", "minimum": 1, "maximum": 50, "default": 5, "description": "Maximum hits (default 5, maximum 50; larger values are clamped to 50 and the result says so)." }
         },
@@ -952,6 +958,8 @@
       "outputSchema": {
         "type": "object",
         "properties": {
+          "source_url": { "type": "string", "description": "The video URL you passed as `source`; only present when `source` was a URL." },
+          "local_path": { "type": "string", "description": "Cached local copy of `source_url`; pass it to other tools or ffmpeg to skip the URL lookup." },
           "note": { "type": "string", "description": "Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument." },
           "top_k_clamped_from": { "type": "number", "description": "The value you requested for top_k before it was lowered to its cap." },
           "hits": {
@@ -984,7 +992,8 @@
         },
         "oneOf": [
           { "required": ["hits", "total"] },
-          { "required": ["status", "requested_model_size", "requested_model_cached", "transcription_status", "retry_after_seconds", "transcription_message"] }
+          { "required": ["status", "requested_model_size", "requested_model_cached", "transcription_status", "retry_after_seconds", "transcription_message"] },
+          { "required": ["status", "source_url", "retry_after_seconds"], "not": { "required": ["local_path"] } }
         ],
         "additionalProperties": false
       }
@@ -994,7 +1003,7 @@
       "description": "Start or poll construction of the local visual frame index that search_visual needs. Call it once, then repeat the same call (or search_visual, which reports status=index_required or partial) until the status is complete; frames are processed in bounded chunks. count_occurrences, contact_sheet and the inspect tools do not need the index.",
       "inputSchema": {
         "type": "object",
-        "properties": { "source": { "type": "string", "minLength": 1, "description": "Local filesystem path to video file." } },
+        "properties": { "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." } },
         "required": ["source"],
         "additionalProperties": false
       },
@@ -1006,7 +1015,7 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "source": { "type": "string", "minLength": 1 },
+          "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
           "query": { "type": "string", "minLength": 1, "maxLength": 2000, "description": "Natural-language description of visible content." },
           "top_k": { "type": "integer", "minimum": 1, "maximum": 20, "default": 5, "description": "Maximum frame hits (default 5, maximum 20; larger values are clamped to 20 and the result says so). This ranks frames and cannot count: use count_occurrences for counts." },
           "start_sec": { "type": "number", "minimum": 0, "default": 0, "description": "Inclusive start of the range to search, in seconds." },
@@ -1023,7 +1032,7 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "source": { "type": "string", "minLength": 1, "description": "Local filesystem path to video file." },
+          "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
           "samples": { "type": "integer", "minimum": 1, "default": 12, "description": "Requested number of thumbnails; values above 150 are accepted and clamped to 150." },
           "cols": { "type": "integer", "minimum": 1, "default": 4, "description": "Grid columns (default 4)." },
           "start_sec": { "type": "number", "minimum": 0, "description": "Optional inclusive start of the overview range in absolute video seconds." },
@@ -1035,6 +1044,10 @@
       "outputSchema": {
         "type": "object",
         "properties": {
+          "source_url": { "type": "string", "description": "The video URL you passed as `source`; only present when `source` was a URL." },
+          "local_path": { "type": "string", "description": "Cached local copy of `source_url`; pass it to other tools or ffmpeg to skip the URL lookup." },
+          "status": { "type": "string", "enum": ["in_progress"] },
+          "retry_after_seconds": { "type": "integer", "minimum": 0 },
           "file_path": { "type": "string" },
           "sample_count": { "type": "integer" },
           "rows": { "type": "integer" },
@@ -1048,7 +1061,7 @@
           "note": { "type": "string" },
           "tool_file": { "type": "object" }
         },
-        "required": ["file_path", "sample_count", "rows", "cols", "start_sec", "end_sec", "timestamps", "frame_width", "frame_height"],
+        "anyOf": [{ "required": ["file_path", "sample_count", "rows", "cols", "start_sec", "end_sec", "timestamps", "frame_width", "frame_height"] }, { "required": ["status", "source_url", "retry_after_seconds"], "not": { "required": ["local_path"] } }],
         "additionalProperties": false
       }
     },
@@ -1058,7 +1071,7 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "source": { "type": "string", "minLength": 1, "description": "Local filesystem path to video file." },
+          "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
           "chunk_sec": { "type": "number", "exclusiveMinimum": 0, "maximum": 600, "default": 60, "description": "Seconds covered by each sheet (default 60, maximum 600)." },
           "samples_per_chunk": { "type": "integer", "minimum": 1, "maximum": 150, "default": 8, "description": "Thumbnails per sheet (default 8; values above 150 are clamped to 150 and the result says so)." },
           "cols": { "type": "integer", "minimum": 1, "default": 4 },
@@ -1072,6 +1085,10 @@
       "outputSchema": {
         "type": "object",
         "properties": {
+          "source_url": { "type": "string", "description": "The video URL you passed as `source`; only present when `source` was a URL." },
+          "local_path": { "type": "string", "description": "Cached local copy of `source_url`; pass it to other tools or ffmpeg to skip the URL lookup." },
+          "status": { "type": "string", "enum": ["in_progress"] },
+          "retry_after_seconds": { "type": "integer", "minimum": 0 },
           "note": { "type": "string", "description": "Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument." },
           "samples_per_chunk_clamped_from": { "type": "number", "description": "The value you requested for samples_per_chunk before it was lowered to its cap." },
           "max_chunks_clamped_from": { "type": "number", "description": "The value you requested for max_chunks before it was lowered to its cap." },
@@ -1103,7 +1120,7 @@
           "end_sec": { "type": "number" },
           "chunk_sec": { "type": "number" }
         },
-        "required": ["chunks", "total", "start_sec", "end_sec", "chunk_sec"],
+        "anyOf": [{ "required": ["chunks", "total", "start_sec", "end_sec", "chunk_sec"] }, { "required": ["status", "source_url", "retry_after_seconds"], "not": { "required": ["local_path"] } }],
         "additionalProperties": false
       }
     },
@@ -1113,7 +1130,7 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "source": { "type": "string", "minLength": 1 },
+          "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
           "windows": { "type": "array", "minItems": 1, "items": { "type": "object", "properties": { "start_sec": { "type": "number", "minimum": 0 }, "end_sec": { "type": "number", "minimum": 0 } }, "required": ["start_sec", "end_sec"], "additionalProperties": false }, "description": "Absolute time ranges to zoom into, e.g. [{\"start_sec\": 10, \"end_sec\": 40}], each within the video." },
           "fanout": { "type": "integer", "minimum": 2, "maximum": 8, "default": 4, "description": "Child ranges per window (default 4, maximum 8; larger values are clamped and the result says so)." },
           "samples_per_child": { "type": "integer", "minimum": 1, "maximum": 12, "default": 3, "description": "Thumbnails per child range (default 3, maximum 12; larger values are clamped and the result says so)." },
@@ -1127,6 +1144,10 @@
       },
       "outputSchema": {
         "type": "object", "properties": {
+          "source_url": { "type": "string", "description": "The video URL you passed as `source`; only present when `source` was a URL." },
+          "local_path": { "type": "string", "description": "Cached local copy of `source_url`; pass it to other tools or ffmpeg to skip the URL lookup." },
+          "status": { "type": "string", "enum": ["in_progress"] },
+          "retry_after_seconds": { "type": "integer", "minimum": 0 },
           "note": { "type": "string", "description": "Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument." },
           "fanout_clamped_from": { "type": "number", "description": "The value you requested for fanout before it was lowered to its cap." },
           "samples_per_child_clamped_from": { "type": "number", "description": "The value you requested for samples_per_child before it was lowered to its cap." },
@@ -1137,7 +1158,7 @@
           }, "required": ["parent_index", "input_start_sec", "input_end_sec", "start_sec", "end_sec", "children"], "additionalProperties": false } },
           "total_samples": { "type": "integer", "minimum": 0 }, "estimated_vision_tokens": { "type": "integer", "minimum": 0 }
         },
-        "required": ["parents", "total_samples", "estimated_vision_tokens"], "additionalProperties": false
+        "anyOf": [{ "required": ["parents", "total_samples", "estimated_vision_tokens"] }, { "required": ["status", "source_url", "retry_after_seconds"], "not": { "required": ["local_path"] } }], "additionalProperties": false
       }
     },
     "track_region_changes": {
@@ -1146,7 +1167,7 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "source": { "type": "string", "minLength": 1 },
+          "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
           "start_sec": { "type": "number", "minimum": 0, "description": "Start of the range in seconds." },
           "end_sec": { "type": "number", "minimum": 0, "description": "End of the range in seconds; must be within the video." },
           "region": { "type": "object", "properties": { "x": { "type": "number", "minimum": 0, "maximum": 1 }, "y": { "type": "number", "minimum": 0, "maximum": 1 }, "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }, "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 } }, "required": ["x", "y", "width", "height"], "additionalProperties": false, "description": "Rectangle to watch, as fractions of the frame: x, y (top-left) and width, height, with x+width <= 1 and y+height <= 1. Uses width/height, not w/h." },
@@ -1164,6 +1185,10 @@
       "outputSchema": {
         "type": "object",
         "properties": {
+          "source_url": { "type": "string", "description": "The video URL you passed as `source`; only present when `source` was a URL." },
+          "local_path": { "type": "string", "description": "Cached local copy of `source_url`; pass it to other tools or ffmpeg to skip the URL lookup." },
+          "status": { "type": "string", "enum": ["in_progress"] },
+          "retry_after_seconds": { "type": "integer", "minimum": 0 },
           "note": { "type": "string", "description": "Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument." },
           "sample_fps_clamped_from": { "type": "number", "description": "The value you requested for sample_fps before it was lowered to its cap." },
           "frame_width_clamped_from": { "type": "number", "description": "The value you requested for frame_width before it was lowered to its cap." },
@@ -1183,7 +1208,7 @@
           "samples": { "type": "array", "items": { "type": "object", "properties": { "from_timestamp_sec": { "type": "number" }, "timestamp_sec": { "type": "number" }, "from_timestamp_provenance": { "type": "object", "properties": { "requested_timestamp": { "type": ["number", "null"] }, "decoded_timestamp": { "type": ["number", "null"] }, "timestamp_delta": { "type": ["number", "null"] } }, "required": ["requested_timestamp", "decoded_timestamp", "timestamp_delta"], "additionalProperties": false }, "timestamp_provenance": { "type": "object", "properties": { "requested_timestamp": { "type": ["number", "null"] }, "decoded_timestamp": { "type": ["number", "null"] }, "timestamp_delta": { "type": ["number", "null"] } }, "required": ["requested_timestamp", "decoded_timestamp", "timestamp_delta"], "additionalProperties": false }, "change_score": { "type": "number" }, "mean_abs_diff": { "type": "number" }, "changed_fraction": { "type": "number" } }, "required": ["from_timestamp_sec", "timestamp_sec", "from_timestamp_provenance", "timestamp_provenance", "change_score", "mean_abs_diff", "changed_fraction"], "additionalProperties": false } },
           "candidates": { "type": "array", "items": { "type": "object", "properties": { "from_timestamp_sec": { "type": "number" }, "timestamp_sec": { "type": "number" }, "from_timestamp_provenance": { "type": "object", "properties": { "requested_timestamp": { "type": ["number", "null"] }, "decoded_timestamp": { "type": ["number", "null"] }, "timestamp_delta": { "type": ["number", "null"] } }, "required": ["requested_timestamp", "decoded_timestamp", "timestamp_delta"], "additionalProperties": false }, "timestamp_provenance": { "type": "object", "properties": { "requested_timestamp": { "type": ["number", "null"] }, "decoded_timestamp": { "type": ["number", "null"] }, "timestamp_delta": { "type": ["number", "null"] } }, "required": ["requested_timestamp", "decoded_timestamp", "timestamp_delta"], "additionalProperties": false }, "change_score": { "type": "number" }, "mean_abs_diff": { "type": "number" }, "changed_fraction": { "type": "number" }, "rank": { "type": "integer", "minimum": 1 } }, "required": ["from_timestamp_sec", "timestamp_sec", "from_timestamp_provenance", "timestamp_provenance", "change_score", "mean_abs_diff", "changed_fraction", "rank"], "additionalProperties": false } }
         },
-        "required": ["region", "start_sec", "end_sec", "sample_fps", "sample_count", "temporal_resolution_sec", "scan_segments", "threshold", "baseline_median", "baseline_mad", "steady_change", "samples", "candidates"],
+        "anyOf": [{ "required": ["region", "start_sec", "end_sec", "sample_fps", "sample_count", "temporal_resolution_sec", "scan_segments", "threshold", "baseline_median", "baseline_mad", "steady_change", "samples", "candidates"] }, { "required": ["status", "source_url", "retry_after_seconds"], "not": { "required": ["local_path"] } }],
         "additionalProperties": false
       }
     },
@@ -1193,7 +1218,7 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "source": { "type": "string", "minLength": 1 },
+          "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
           "start_sec": { "type": "number", "minimum": 0, "description": "Start of the range in seconds." },
           "end_sec": { "type": "number", "minimum": 0, "description": "End of the range in seconds; must be within the video." },
           "region": { "type": "object", "properties": { "x": { "type": "number", "minimum": 0, "maximum": 1 }, "y": { "type": "number", "minimum": 0, "maximum": 1 }, "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }, "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 } }, "required": ["x", "y", "width", "height"], "additionalProperties": false, "description": "Rectangle to watch, as fractions of the frame: x, y (top-left) and width, height, with x+width <= 1 and y+height <= 1. Uses width/height, not w/h." },
@@ -1211,6 +1236,10 @@
       "outputSchema": {
         "type": "object",
         "properties": {
+          "source_url": { "type": "string", "description": "The video URL you passed as `source`; only present when `source` was a URL." },
+          "local_path": { "type": "string", "description": "Cached local copy of `source_url`; pass it to other tools or ffmpeg to skip the URL lookup." },
+          "status": { "type": "string", "enum": ["in_progress"] },
+          "retry_after_seconds": { "type": "integer", "minimum": 0 },
           "note": { "type": "string", "description": "Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument." },
           "sample_fps_clamped_from": { "type": "number", "description": "The value you requested for sample_fps before it was lowered to its cap." },
           "frame_width_clamped_from": { "type": "number", "description": "The value you requested for frame_width before it was lowered to its cap." },
@@ -1231,7 +1260,7 @@
           "incomplete": { "type": "boolean" },
           "uncertainty_reason": { "type": ["string", "null"] }
         },
-        "required": ["region", "start_sec", "end_sec", "sample_fps", "sample_count", "temporal_resolution_sec", "scan_segments", "transitions", "event_count", "uncertain", "incomplete", "uncertainty_reason"],
+        "anyOf": [{ "required": ["region", "start_sec", "end_sec", "sample_fps", "sample_count", "temporal_resolution_sec", "scan_segments", "transitions", "event_count", "uncertain", "incomplete", "uncertainty_reason"] }, { "required": ["status", "source_url", "retry_after_seconds"], "not": { "required": ["local_path"] } }],
         "additionalProperties": false
       }
     },
@@ -1241,7 +1270,7 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "source": { "type": "string", "minLength": 1 },
+          "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
           "moments": { "type": "array", "minItems": 1, "maxItems": 16, "items": { "type": "object", "properties": { "timestamp_sec": { "type": "number", "minimum": 0 }, "label": { "type": "string", "minLength": 1, "maxLength": 80 } }, "required": ["timestamp_sec"], "additionalProperties": false }, "description": "Instants to inspect, e.g. [{\"timestamp_sec\": 12.5, \"label\": \"door opens\"}], at most 16, each within the video." },
           "before_sec": { "type": "number", "minimum": 0, "default": 4.0, "description": "Seconds of context before each moment (default 4)." },
           "after_sec": { "type": "number", "minimum": 0, "default": 4.0, "description": "Seconds of context after each moment (default 4)." },
@@ -1256,6 +1285,10 @@
       "outputSchema": {
         "type": "object",
         "properties": {
+          "source_url": { "type": "string", "description": "The video URL you passed as `source`; only present when `source` was a URL." },
+          "local_path": { "type": "string", "description": "Cached local copy of `source_url`; pass it to other tools or ffmpeg to skip the URL lookup." },
+          "status": { "type": "string", "enum": ["in_progress"] },
+          "retry_after_seconds": { "type": "integer", "minimum": 0 },
           "note": { "type": "string", "description": "Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument." },
           "samples_per_moment_clamped_from": { "type": "number", "description": "The value you requested for samples_per_moment before it was lowered to its cap." },
           "max_moments_clamped_from": { "type": "number", "description": "The value you requested for max_moments before it was lowered to its cap." },
@@ -1277,7 +1310,7 @@
           "total_samples": { "type": "integer", "minimum": 1 },
           "estimated_vision_tokens": { "type": "integer", "minimum": 0 }
         },
-        "required": ["moments", "total", "total_samples", "estimated_vision_tokens"],
+        "anyOf": [{ "required": ["moments", "total", "total_samples", "estimated_vision_tokens"] }, { "required": ["status", "source_url", "retry_after_seconds"], "not": { "required": ["local_path"] } }],
         "additionalProperties": false
       }
     },
@@ -1287,7 +1320,7 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "source": { "type": "string", "minLength": 1, "description": "Local filesystem path to video file." },
+          "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
           "windows": {
             "description": "Time ranges to inspect, e.g. [{\"start_sec\": 10, \"end_sec\": 14}], at most 16, each within the video.",
             "type": "array",
@@ -1315,6 +1348,10 @@
       "outputSchema": {
         "type": "object",
         "properties": {
+          "source_url": { "type": "string", "description": "The video URL you passed as `source`; only present when `source` was a URL." },
+          "local_path": { "type": "string", "description": "Cached local copy of `source_url`; pass it to other tools or ffmpeg to skip the URL lookup." },
+          "status": { "type": "string", "enum": ["in_progress"] },
+          "retry_after_seconds": { "type": "integer", "minimum": 0 },
           "note": { "type": "string", "description": "Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument." },
           "fps_clamped_from": { "type": "number", "description": "The value you requested for fps before it was lowered to its cap." },
           "max_windows_clamped_from": { "type": "number", "description": "The value you requested for max_windows before it was lowered to its cap." },
@@ -1360,7 +1397,7 @@
           "total_frames": { "type": "integer", "minimum": 0 },
           "estimated_vision_tokens": { "type": "integer", "minimum": 0 }
         },
-        "required": ["windows", "total", "total_frames", "estimated_vision_tokens"],
+        "anyOf": [{ "required": ["windows", "total", "total_frames", "estimated_vision_tokens"] }, { "required": ["status", "source_url", "retry_after_seconds"], "not": { "required": ["local_path"] } }],
         "additionalProperties": false
       }
     },
@@ -1370,7 +1407,7 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "source": { "type": "string", "minLength": 1, "description": "Local filesystem path to video file." },
+          "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
           "start_sec": { "type": "number", "minimum": 0, "description": "Start of the window in seconds." },
           "end_sec": { "type": "number", "minimum": 0, "description": "End of the window in seconds; must be within the video." },
           "fps": { "type": "number", "minimum": 0.01, "maximum": 30, "default": 4.0, "description": "Sampling rate (default 4, maximum 30; larger values are clamped). Frames = fps x duration and must stay within about 150." }
@@ -1381,6 +1418,10 @@
       "outputSchema": {
         "type": "object",
         "properties": {
+          "source_url": { "type": "string", "description": "The video URL you passed as `source`; only present when `source` was a URL." },
+          "local_path": { "type": "string", "description": "Cached local copy of `source_url`; pass it to other tools or ffmpeg to skip the URL lookup." },
+          "status": { "type": "string", "enum": ["in_progress"] },
+          "retry_after_seconds": { "type": "integer", "minimum": 0 },
           "note": { "type": "string", "description": "Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument." },
           "fps_clamped_from": { "type": "number", "description": "The value you requested for fps before it was lowered to its cap." },
           "source_path": { "type": "string" },
@@ -1410,7 +1451,7 @@
           "estimated_vision_tokens": { "type": "integer" },
           "tool_file": { "type": "object" }
         },
-        "required": ["source_path", "start_sec", "end_sec", "fps", "frames", "contact_sheet_path", "estimated_vision_tokens"],
+        "anyOf": [{ "required": ["source_path", "start_sec", "end_sec", "fps", "frames", "contact_sheet_path", "estimated_vision_tokens"] }, { "required": ["status", "source_url", "retry_after_seconds"], "not": { "required": ["local_path"] } }],
         "additionalProperties": false
       }
     },
@@ -1420,7 +1461,7 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "source": { "type": "string", "minLength": 1, "description": "Local filesystem path to video file." },
+          "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
           "threshold": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.25, "description": "Cut strength cutoff 0-1 (default 0.25). Raise it to keep only stronger cuts." },
           "start_sec": { "type": "number", "minimum": 0, "description": "Optional inclusive start of the cut-search range in absolute video seconds." },
           "end_sec": { "type": "number", "minimum": 0, "description": "Optional exclusive end of the cut-search range in absolute video seconds." }
@@ -1431,6 +1472,10 @@
       "outputSchema": {
         "type": "object",
         "properties": {
+          "source_url": { "type": "string", "description": "The video URL you passed as `source`; only present when `source` was a URL." },
+          "local_path": { "type": "string", "description": "Cached local copy of `source_url`; pass it to other tools or ffmpeg to skip the URL lookup." },
+          "status": { "type": "string", "enum": ["in_progress"] },
+          "retry_after_seconds": { "type": "integer", "minimum": 0 },
           "note": { "type": "string", "description": "Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument." },
           "cuts_omitted": { "type": "integer", "minimum": 1, "description": "How many cuts entries were left out of the list." },
           "cuts": {
@@ -1448,7 +1493,7 @@
           },
           "total": { "type": "integer", "minimum": 0 }
         },
-        "required": ["cuts", "total"],
+        "anyOf": [{ "required": ["cuts", "total"] }, { "required": ["status", "source_url", "retry_after_seconds"], "not": { "required": ["local_path"] } }],
         "additionalProperties": false
       }
     },
@@ -1458,10 +1503,7 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "source": {
-            "type": "string",
-            "minLength": 1
-          },
+          "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
           "start_sec": {
             "description": "Optional inclusive start in seconds; omit to analyze from the beginning.",
             "type": "number",
@@ -1502,11 +1544,7 @@
               }
             ]
           },
-          "compare_to": {
-            "description": "Path of another media file whose in-band energy is compared at each onset.",
-            "type": "string",
-            "minLength": 1
-          }
+          "compare_to": { "type": "string", "minLength": 1, "description": "Path or video URL of another media file whose in-band energy is compared at each onset." }
         },
         "required": [
           "source"
@@ -1516,6 +1554,10 @@
       "outputSchema": {
         "type": "object",
         "properties": {
+          "source_url": { "type": "string", "description": "The video URL you passed as `source`; only present when `source` was a URL." },
+          "local_path": { "type": "string", "description": "Cached local copy of `source_url`; pass it to other tools or ffmpeg to skip the URL lookup." },
+          "status": { "type": "string", "enum": ["in_progress"] },
+          "retry_after_seconds": { "type": "integer", "minimum": 0 },
           "note": { "type": "string", "description": "Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument." },
           "onsets_omitted": { "type": "integer", "minimum": 1, "description": "How many onsets entries were left out of the list." },
           "source_path": {
@@ -1650,20 +1692,7 @@
             ]
           }
         },
-        "required": [
-          "source_path",
-          "start_sec",
-          "end_sec",
-          "sample_rate",
-          "hop_samples",
-          "time_resolution_ms",
-          "min_strength",
-          "onsets",
-          "total",
-          "band_hz",
-          "compare_to",
-          "compare_min_delta_db"
-        ],
+        "anyOf": [{ "required": ["source_path", "start_sec", "end_sec", "sample_rate", "hop_samples", "time_resolution_ms", "min_strength", "onsets", "total", "band_hz", "compare_to", "compare_min_delta_db"] }, { "required": ["status", "source_url", "retry_after_seconds"], "not": { "required": ["local_path"] } }],
         "additionalProperties": false
       }
     },
@@ -1673,10 +1702,7 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "source": {
-            "type": "string",
-            "minLength": 1
-          },
+          "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
           "window_sec": {
             "description": "Fixed window length in seconds, 0.01-600 (default 0.25). Larger values than 600 are clamped to 600. Give this or bpm, not both.",
             "type": "number",
@@ -1736,6 +1762,10 @@
       "outputSchema": {
         "type": "object",
         "properties": {
+          "source_url": { "type": "string", "description": "The video URL you passed as `source`; only present when `source` was a URL." },
+          "local_path": { "type": "string", "description": "Cached local copy of `source_url`; pass it to other tools or ffmpeg to skip the URL lookup." },
+          "status": { "type": "string", "enum": ["in_progress"] },
+          "retry_after_seconds": { "type": "integer", "minimum": 0 },
           "note": { "type": "string", "description": "Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument." },
           "window_sec_clamped_from": { "type": "number", "description": "The value you requested for window_sec before it was lowered to its cap." },
           "windows_omitted": { "type": "integer", "minimum": 1, "description": "How many windows entries were left out of the list." },
@@ -2014,21 +2044,7 @@
             }
           }
         },
-        "required": [
-          "source_path",
-          "start_sec",
-          "end_sec",
-          "window_sec",
-          "bpm",
-          "silence_threshold_dbfs",
-          "peak_dbfs",
-          "peak_sec",
-          "windows",
-          "outliers",
-          "silence_gaps",
-          "total",
-          "ignore_ranges"
-        ],
+        "anyOf": [{ "required": ["source_path", "start_sec", "end_sec", "window_sec", "bpm", "silence_threshold_dbfs", "peak_dbfs", "peak_sec", "windows", "outliers", "silence_gaps", "total", "ignore_ranges"] }, { "required": ["status", "source_url", "retry_after_seconds"], "not": { "required": ["local_path"] } }],
         "additionalProperties": false
       }
     },
@@ -2038,10 +2054,7 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "source": {
-            "type": "string",
-            "minLength": 1
-          },
+          "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
           "start_sec": {
             "description": "Start of the window in seconds.",
             "type": "number",
@@ -2084,6 +2097,10 @@
       "outputSchema": {
         "type": "object",
         "properties": {
+          "source_url": { "type": "string", "description": "The video URL you passed as `source`; only present when `source` was a URL." },
+          "local_path": { "type": "string", "description": "Cached local copy of `source_url`; pass it to other tools or ffmpeg to skip the URL lookup." },
+          "status": { "type": "string", "enum": ["in_progress"] },
+          "retry_after_seconds": { "type": "integer", "minimum": 0 },
           "note": { "type": "string", "description": "Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument." },
           "source_path": {
             "type": "string"
@@ -2190,19 +2207,7 @@
             }
           }
         },
-        "required": [
-          "source_path",
-          "start_sec",
-          "end_sec",
-          "file_path",
-          "width",
-          "height",
-          "sample_rate",
-          "hop_samples",
-          "timecode_badges",
-          "marks",
-          "frequency_ticks"
-        ],
+        "anyOf": [{ "required": ["source_path", "start_sec", "end_sec", "file_path", "width", "height", "sample_rate", "hop_samples", "timecode_badges", "marks", "frequency_ticks"] }, { "required": ["status", "source_url", "retry_after_seconds"], "not": { "required": ["local_path"] } }],
         "additionalProperties": false
       }
     },
@@ -2212,10 +2217,7 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "source": {
-            "type": "string",
-            "minLength": 1
-          },
+          "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
           "cues": {
             "description": "Intended sound cues to check, e.g. [{\"time_sec\": 12.5, \"label\": \"hit\"}]. Omit to compare cuts with onsets only.",
             "type": "array",
@@ -2287,6 +2289,10 @@
       "outputSchema": {
         "type": "object",
         "properties": {
+          "source_url": { "type": "string", "description": "The video URL you passed as `source`; only present when `source` was a URL." },
+          "local_path": { "type": "string", "description": "Cached local copy of `source_url`; pass it to other tools or ffmpeg to skip the URL lookup." },
+          "status": { "type": "string", "enum": ["in_progress"] },
+          "retry_after_seconds": { "type": "integer", "minimum": 0 },
           "note": { "type": "string", "description": "Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument." },
           "tolerance_ms_clamped_from": { "type": "number", "description": "The value you requested for tolerance_ms before it was lowered to its cap." },
           "cuts_omitted": { "type": "integer", "minimum": 1, "description": "How many cuts entries were left out of the list." },
@@ -2469,17 +2475,7 @@
             "type": "integer"
           }
         },
-        "required": [
-          "source_path",
-          "tolerance_ms",
-          "cue_recovery_window_ms",
-          "cuts",
-          "cues",
-          "unmatched_strong_onsets",
-          "strong_onset_threshold",
-          "total_cuts",
-          "total_cues"
-        ],
+        "anyOf": [{ "required": ["source_path", "tolerance_ms", "cue_recovery_window_ms", "cuts", "cues", "unmatched_strong_onsets", "strong_onset_threshold", "total_cuts", "total_cues"] }, { "required": ["status", "source_url", "retry_after_seconds"], "not": { "required": ["local_path"] } }],
         "additionalProperties": false
       }
     }

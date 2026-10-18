@@ -10,6 +10,7 @@ from typing import Dict, Any, Iterator, List, Optional
 from src.retrieval.engine import AgenticVideoEngine
 from src.core.config import Config
 from src.core.errors import AgenticVideoError, MediaNotFoundError
+from src.media import fetch
 from src.transcript import asr
 
 # Readable fallback kept for source compatibility; runtime discovery below is
@@ -267,7 +268,7 @@ def format_tool_error(exc: Exception, tool: Optional[str] = None) -> str:
     if isinstance(exc, AgenticVideoError):
         text = f"{type(exc).__name__}: {exc.message}"
         if isinstance(exc, MediaNotFoundError):
-            text += ". Pass the path of an existing local video file as `source`."
+            text += ". Pass the path of an existing local video file, or a video URL, as `source`."
         if exc.details:
             text += " | details: " + json.dumps(exc.details, default=str)[:600]
         return text
@@ -428,7 +429,7 @@ def fit_response(data: Dict[str, Any]) -> int:
     return shrunk
 
 def handle_call(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
-    """Validate the call, clamp over-cap arguments, and dispatch to AgenticVideoEngine."""
+    """Validate the call, download URL sources, clamp over-cap arguments, and dispatch to AgenticVideoEngine."""
     if name not in _TOOL_SCHEMAS:
         return {"ok": False, "error": {"code": "unknown_tool", "message": f"Tool '{name}' not found; available tools: {', '.join(sorted(_TOOL_SCHEMAS))}"}}
     if not isinstance(args, dict):
@@ -437,13 +438,27 @@ def handle_call(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
     required = schema.get("required", [])
     missing = [key for key in required if args.get(key) in (None, "")]
     if missing:
-        hint = " `source` is the path of a local video file." if "source" in missing else ""
+        hint = (" `source` is a local video file path or a video URL (X post, YouTube, direct link)."
+                if "source" in missing else "")
         raise ValueError(f"{name} is missing required argument(s): {', '.join(missing)}. Required: {', '.join(required)}.{hint}")
     unknown = sorted(set(args) - set(schema.get("properties", {})))
+    source_url = args.get("source") if isinstance(args.get("source"), str) and fetch.is_url(args["source"]) else None
+    for key in ("source", "compare_to"):
+        value = args.get(key)
+        if isinstance(value, str) and fetch.is_url(value):
+            try:
+                local = fetch.resolve_url(value)
+            except fetch.DownloadError as exc:
+                return {"ok": False, "error": {"code": "download_failed", "message": str(exc)}}
+            if local is None:
+                return {"ok": True, "data": fetch.pending_result(value)}
+            args = {**args, key: str(local)}
     args, clamped = _clamp_args(name, args)
     outcome = _dispatch(name, args)
     if outcome.get("ok") and isinstance(outcome.get("data"), dict):
         data = outcome["data"] = dict(outcome["data"])
+        if source_url:
+            data.update(source_url=source_url, local_path=args["source"])
         _report_clamps(name, data, clamped)
         if unknown:
             _add_note(data, f"Ignored unknown argument(s): {', '.join(unknown)}. Valid arguments: {', '.join(schema.get('properties', {}))}.")

@@ -69,7 +69,7 @@ def test_transcribe_contract_documents_cached_fallback_and_progress_result():
     assert "background" in transcribe["description"]
     assert "retry_after_seconds" in transcribe["description"]
     output = transcribe["outputSchema"]
-    assert len(output["oneOf"]) == 2
+    assert len(output["oneOf"]) == 3  # transcript, ASR progress, URL download progress
     assert "cached_model_size" in output["properties"]
     assert "requested_model_size" in output["properties"]
 
@@ -151,8 +151,10 @@ def test_contact_sheet_clamp_request_and_response_match_canonical_schema():
     _assert_schema_accepts(tool["outputSchema"], response)
     assert response["sample_count"] == min(request["samples"], 150)
     assert response["samples_clamped_from"] == request["samples"]
-    assert "samples_clamped_from" not in tool["outputSchema"]["required"]
-    assert "note" not in tool["outputSchema"]["required"]
+    ready_required = tool["outputSchema"]["anyOf"][0]["required"]  # anyOf[1] is the URL download progress
+    assert set(ready_required) <= set(response)
+    assert "samples_clamped_from" not in ready_required
+    assert "note" not in ready_required
 
     definitions = ZOD_TS.read_text(encoding="utf-8")
     contact_input = re.search(
