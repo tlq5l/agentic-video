@@ -5,6 +5,7 @@ import re
 import subprocess
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Sequence
@@ -565,7 +566,9 @@ def _scan_scene_changes(video_path: str, start_sec: float, duration_sec: Optiona
     strong = [[round(float(t), 6), round(float(s), 6)] for t, s in zip(times, scores) if s > SCAN_SCORE_FLOOR]
     transitions = _find_transitions(*_lag_curves(rgb), start_sec)
     windows = [_step_window(times, when) for when, _ in transitions]
-    stretches = [None if w is None else _gray_frames(video_path, times, w[0] - 1, w[1]) for w in windows]
+    with ThreadPoolExecutor(max_workers=min(4, os.cpu_count() or 1)) as pool:
+        pending = [None if w is None else pool.submit(_gray_frames, video_path, times, w[0] - 1, w[1]) for w in windows]
+        stretches = [None if job is None else job.result() for job in pending]
     if any(w is not None and f is None for w, f in zip(windows, stretches)):
         # A stretch that cannot be read on its own: scan again with every frame.
         times, scores, rgb, gray = _scan_frames(video_path, start_sec, duration_sec, timeout)
