@@ -23,3 +23,10 @@ decoder is the bottleneck when 8 parts run at once: scan wall 5 s -> 7.5 s on a 
 video (1 part: 23 s), which would push an hour-long video past the 60 s Executor limit
 (software 8 parts: about 43 s; hardware: about 64 s). Using hardware for only 2 of 8 parts
 keeps the wall but saves under 5% CPU. Undone.
+
+## 3. contact_sheet: one decode thread per frame ffmpeg, 8 at a time instead of 4 (KEPT)
+Idea: a one-frame extraction gets nothing from frame threads (default = all cores), so
+`threads=1` cuts CPU, and 8 side by side keeps the wall time down. Sheet md5 identical.
+4 pairs, contact_sheet CPU s, prev -> new: x_post_127s 7.0/6.7/7.2/6.9 -> 4.8/5.3/5.2/5.1 (-25%, 4/4);
+fixture_60s 1.77/1.81/2.05/1.94 -> 1.48/1.89/1.61/1.63 (3/4). In-process (generate_video_overview, 24 samples):
+x_post wall 0.90 -> 0.77 s, CPU 6.85 -> 4.8; clip_415s wall 0.61 -> 0.51 s, CPU 4.2 -> 3.0. No QUALITY_FAIL.
