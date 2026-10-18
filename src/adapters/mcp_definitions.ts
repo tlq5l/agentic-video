@@ -8,27 +8,33 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
+/** Every tool's `source`: a local path, or a URL that the server downloads once and caches. */
+const SourceSchema = z.string().trim().min(1).describe(
+  "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). " +
+  "A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source.",
+);
+
 export const ProbeVideoInputSchema = {
-  source: z.string().trim().min(1),
+  source: SourceSchema,
 };
 
 export const TranscribeInputSchema = {
-  source: z.string().trim().min(1),
+  source: SourceSchema,
   model_size: z.enum(["tiny", "base", "small", "turbo"]).optional(),
 };
 
 export const SearchTranscriptInputSchema = {
-  source: z.string().trim().min(1),
+  source: SourceSchema,
   query: z.string().trim().min(1).describe("Words or a phrase to find in the speech, e.g. 'launch date'. Punctuation and case are ignored."),
   top_k: z.number().int().min(1).max(50).describe("Maximum hits (default 5, maximum 50; larger values are clamped to 50 and the result says so).").optional(),
 };
 
 export const BuildVisualIndexInputSchema = {
-  source: z.string().trim().min(1),
+  source: SourceSchema,
 };
 
 export const SearchVisualInputSchema = {
-  source: z.string().trim().min(1),
+  source: SourceSchema,
   query: z.string().trim().min(1).max(2000).describe("Natural-language description of visible content."),
   top_k: z.number().int().min(1).max(20).describe("Maximum frame hits (default 5, maximum 20; larger values are clamped to 20 and the result says so). This ranks frames and cannot count: use count_occurrences for counts.").optional(),
   start_sec: z.number().min(0).describe("Inclusive start of the range to search, in seconds.").optional(),
@@ -36,7 +42,7 @@ export const SearchVisualInputSchema = {
 };
 
 export const CountRepetitionsInputSchema = {
-  source: z.string().trim().min(1),
+  source: SourceSchema,
   start_sec: z.number().min(0).describe("Start of the window in seconds (default 0). The window may be at most 180 s long.").optional(),
   end_sec: z.number().min(0).nullable().describe("End of the window in seconds; defaults to the end of the video. Give both bounds for a video longer than 180 s.").optional(),
   region: z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1), w: z.number().min(0).max(1), h: z.number().min(0).max(1) }).describe("Rectangle that contains the repeating motion, as fractions of the frame: x, y (top-left) and w, h (size), with x+w <= 1 and y+h <= 1. Uses w/h, not width/height. Omit for the whole frame.").optional(),
@@ -48,7 +54,7 @@ export const CountRepetitionsInputSchema = {
 };
 
 export const CountOccurrencesInputSchema = {
-  source: z.string().trim().min(1),
+  source: SourceSchema,
   description: z.string().min(1).max(500).describe("Visible thing to count, e.g. 'yellow outlined circle', 'green diamond', 'red star'. Name its colour and shape; text on screen goes in `text`.").optional(),
   text: z.string().min(1).max(200).describe("Exact on-screen phrase, matched as whole words (RELEASE matches 'RELEASE' and 'RELEASE NOTES', not 'RELEASED' or 'PRE-RELEASE').").optional(),
   case_sensitive: z.boolean().describe("Require the same letter case for `text`.").optional(),
@@ -60,7 +66,7 @@ export const CountOccurrencesInputSchema = {
 };
 
 export const ContactSheetInputSchema = {
-  source: z.string().trim().min(1),
+  source: SourceSchema,
   samples: z.number().int().min(1).describe("Requested number of thumbnails; values above 150 are accepted and clamped to 150.").optional(),
   cols: z.number().int().min(1).describe("Grid columns (default 4).").optional(),
   start_sec: z.number().min(0).describe("Optional inclusive start of the overview range in absolute video seconds.").optional(),
@@ -68,7 +74,7 @@ export const ContactSheetInputSchema = {
 };
 
 export const OverviewChunksInputSchema = {
-  source: z.string().trim().min(1),
+  source: SourceSchema,
   chunk_sec: z.number().positive().max(600).describe("Seconds covered by each sheet (default 60, maximum 600).").optional(),
   samples_per_chunk: z.number().int().min(1).max(150).describe("Thumbnails per sheet (default 8; values above 150 are clamped to 150 and the result says so).").optional(),
   cols: z.number().int().min(1).optional(),
@@ -78,7 +84,7 @@ export const OverviewChunksInputSchema = {
 };
 
 export const RefineTemporalBeamInputSchema = {
-  source: z.string().trim().min(1),
+  source: SourceSchema,
   windows: z.array(z.object({ start_sec: z.number().min(0), end_sec: z.number().min(0) })).min(1).describe("Absolute time ranges to zoom into, e.g. [{\"start_sec\": 10, \"end_sec\": 40}], each within the video."),
   fanout: z.number().int().min(2).max(8).describe("Child ranges per window (default 4, maximum 8; larger values are clamped and the result says so).").optional(),
   samples_per_child: z.number().int().min(1).max(12).describe("Thumbnails per child range (default 3, maximum 12; larger values are clamped and the result says so).").optional(),
@@ -89,7 +95,7 @@ export const RefineTemporalBeamInputSchema = {
   compact_parent_sheet: z.boolean().optional(),
 };
 export const TrackRegionChangesInputSchema = {
-  source: z.string().trim().min(1),
+  source: SourceSchema,
   start_sec: z.number().min(0).describe("Start of the range in seconds."),
   end_sec: z.number().min(0).describe("End of the range in seconds; must be within the video."),
   region: z.object({
@@ -108,7 +114,7 @@ export const TrackRegionChangesInputSchema = {
 };
 
 export const TrackRegionEventsInputSchema = {
-  source: z.string().trim().min(1),
+  source: SourceSchema,
   start_sec: z.number().min(0).describe("Start of the range in seconds."),
   end_sec: z.number().min(0).describe("End of the range in seconds; must be within the video."),
   region: z.object({
@@ -127,7 +133,7 @@ export const TrackRegionEventsInputSchema = {
 };
 
 export const InspectMomentsInputSchema = {
-  source: z.string().trim().min(1),
+  source: SourceSchema,
   moments: z.array(z.object({
     timestamp_sec: z.number().min(0),
     label: z.string().trim().min(1).max(80).optional(),
@@ -141,7 +147,7 @@ export const InspectMomentsInputSchema = {
 };
 
 export const InspectWindowsInputSchema = {
-  source: z.string().trim().min(1),
+  source: SourceSchema,
   windows: z.array(z.object({
     start_sec: z.number().min(0),
     end_sec: z.number().min(0),
@@ -154,14 +160,14 @@ export const InspectWindowsInputSchema = {
 };
 
 export const InspectWindowInputSchema = {
-  source: z.string().trim().min(1),
+  source: SourceSchema,
   start_sec: z.number().min(0).describe("Start of the window in seconds."),
   end_sec: z.number().min(0).describe("End of the window in seconds; must be within the video."),
   fps: z.number().min(0.01).max(30).describe("Sampling rate (default 4, maximum 30; larger values are clamped). Frames = fps x duration and must stay within about 150.").optional(),
 };
 
 export const DetectCutsInputSchema = {
-  source: z.string().trim().min(1),
+  source: SourceSchema,
   threshold: z.number().min(0).max(1).describe("Cut strength cutoff 0-1 (default 0.25). Raise it to keep only stronger cuts.").optional(),
   start_sec: z.number().min(0).describe("Optional inclusive start of the cut-search range in absolute video seconds.").optional(),
   end_sec: z.number().min(0).describe("Optional exclusive end of the cut-search range in absolute video seconds.").optional(),
@@ -173,16 +179,16 @@ const AudioBandSelectionSchema = z.union([
 ]);
 
 export const AudioOnsetsInputSchema = {
-  source: z.string().trim().min(1),
+  source: SourceSchema,
   start_sec: z.number().min(0).describe("Optional inclusive start in seconds; omit to analyze from the beginning.").optional(),
   end_sec: z.number().min(0).describe("Optional exclusive end in seconds; omit to analyze to the end.").optional(),
   min_strength: z.number().min(0).max(1).describe("Onset strength cutoff 0-1 (default 0.12). Raise it to keep only stronger onsets.").optional(),
   band_hz: AudioBandSelectionSchema.describe("Restrict to a named band (sub, low_mid, mid, high, air) or a [low_hz, high_hz] range.").optional(),
-  compare_to: z.string().trim().min(1).describe("Path of another media file whose in-band energy is compared at each onset.").optional(),
+  compare_to: z.string().trim().min(1).describe("Path or video URL of another media file whose in-band energy is compared at each onset.").optional(),
 };
 
 export const LoudnessTimelineInputSchema = {
-  source: z.string().trim().min(1),
+  source: SourceSchema,
   window_sec: z.number().min(0.01).max(600).describe("Fixed window length in seconds, 0.01-600 (default 0.25). Larger values than 600 are clamped to 600. Give this or bpm, not both.").optional(),
   bpm: z.number().min(20).max(300).describe("Use one-beat windows at this tempo, 20-300. Give this or window_sec, not both.").optional(),
   start_sec: z.number().min(0).describe("Optional inclusive start in seconds; omit to analyze from the beginning.").optional(),
@@ -195,7 +201,7 @@ export const LoudnessTimelineInputSchema = {
 };
 
 export const SpectrogramWindowInputSchema = {
-  source: z.string().trim().min(1),
+  source: SourceSchema,
   start_sec: z.number().min(0).describe("Start of the window in seconds."),
   end_sec: z.number().min(0).describe("End of the window in seconds; the window may be at most 600 s long."),
   marks: z.array(z.object({
@@ -206,7 +212,7 @@ export const SpectrogramWindowInputSchema = {
 };
 
 export const SyncCheckInputSchema = {
-  source: z.string().trim().min(1),
+  source: SourceSchema,
   cues: z.array(z.object({
     time_sec: z.number().min(0).optional(),
     t: z.number().min(0).optional(),
@@ -241,7 +247,7 @@ export interface AgenticVideoHandlers {
 
 export function registerAgenticVideoTools(server: McpServer, handlers: AgenticVideoHandlers): void {
   const definitions: Array<[string, Record<string, unknown>, (input: any) => Promise<any>]> = [
-    ["probe_video", { description: "Read a video's duration, frame rate, resolution, codecs, and whether it has an audio track. Call this first: duration_sec bounds every start_sec/end_sec you pass to other tools, and has_audio tells you whether transcribe and the audio tools (audio_onsets, loudness_timeline, spectrogram_window, sync_check) can work. `source` is a local file path and is the same in every tool.", inputSchema: ProbeVideoInputSchema }, handlers.probe_video],
+    ["probe_video", { description: "Read a video's duration, frame rate, resolution, codecs, and whether it has an audio track. Call this first: duration_sec bounds every start_sec/end_sec you pass to other tools, and has_audio tells you whether transcribe and the audio tools (audio_onsets, loudness_timeline, spectrogram_window, sync_check) can work. `source` is a local file path or a video URL and is the same in every tool: an x.com / Twitter post with a video, a YouTube link, another site yt-dlp supports, or a direct .mp4 link. A URL is downloaded once (up to 1080p) and cached; the result gives source_url and local_path, and while the download runs it is status=in_progress, so call again.", inputSchema: ProbeVideoInputSchema }, handlers.probe_video],
     ["transcribe", { description: "Get the full speech transcript as timestamped segments (cached after the first run). To find where a specific word or phrase is spoken, use search_transcript instead of reading it all. If the requested model is not cached, returns another cached transcript with cached_model_size and requested_model_cached=false while one background job runs; with no transcript cached, returns status=in_progress and retry_after_seconds, so repeat the same call after that delay. model_size: tiny, base or small (more accurate, slower on the CPU), or turbo (Whisper large-v3-turbo on the GPU via whisper.cpp: the most accurate and, where installed, the fastest, about 1 minute per hour of audio). Omit model_size to get turbo where it is installed, else tiny. Long audio is decoded in 60-second chunks. Lines repeated 3 or more times in a row carry `suspect` and `notice` names them: speech models often invent such lines over music or silence, though a real chant can repeat too. A line without `suspect` is not verified.", inputSchema: TranscribeInputSchema }, handlers.transcribe],
     ["search_transcript", { description: "Find when a word or phrase is SPOKEN (lexical match on the speech transcript: a multi-word query matches the exact phrase or every content word within one segment). Returns up to top_k timestamped segments (default 5, maximum 50; larger values are clamped and the result says so; `note` says when more matches exist). For text shown on screen use count_occurrences, and for visible things use search_visual. If ASR is needed, starts or joins background transcription and returns status=in_progress with retry_after_seconds instead of waiting; repeat the same call after that delay. A hit on a flagged line carries `suspect` (see transcribe).", inputSchema: SearchTranscriptInputSchema }, handlers.search_transcript],
     ["build_visual_index", { description: "Start or poll construction of the local visual frame index that search_visual needs. Call it once, then repeat the same call (or search_visual, which reports status=index_required or partial) until the status is complete; frames are processed in bounded chunks. count_occurrences, contact_sheet and the inspect tools do not need the index.", inputSchema: BuildVisualIndexInputSchema }, handlers.build_visual_index],
