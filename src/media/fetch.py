@@ -134,10 +134,10 @@ def _run_job(url: str, target: Path, job: _Job) -> None:
         job.done.set()
 
 
-def resolve_url(url: str, wait_sec: Optional[float] = None) -> Optional[Path]:
+def resolve_url(url: str) -> Optional[Path]:
     """Return the local file for ``url``, or None while the download is still running.
 
-    Starts (or joins) one background download per URL and waits up to ``wait_sec``.
+    Starts (or joins) one background download per URL and waits up to ``WAIT_SEC``.
     Raises DownloadError when the download failed; the next call starts a fresh attempt.
     """
     target = cached_path(url)
@@ -149,7 +149,7 @@ def resolve_url(url: str, wait_sec: Optional[float] = None) -> Optional[Path]:
             job = _JOBS[target] = _Job()
             threading.Thread(target=_run_job, args=(url, target, job),
                              name=f"agentic-video-download-{target.stem[:12]}", daemon=True).start()
-    if not job.done.wait(WAIT_SEC if wait_sec is None else wait_sec):
+    if not job.done.wait(WAIT_SEC):
         return None
     with _JOBS_LOCK:
         if _JOBS.get(target) is job:

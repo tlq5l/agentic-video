@@ -442,7 +442,7 @@ def handle_call(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
                 if "source" in missing else "")
         raise ValueError(f"{name} is missing required argument(s): {', '.join(missing)}. Required: {', '.join(required)}.{hint}")
     unknown = sorted(set(args) - set(schema.get("properties", {})))
-    source_url = args.get("source") if isinstance(args.get("source"), str) and fetch.is_url(args["source"]) else None
+    source_url = None
     for key in ("source", "compare_to"):
         value = args.get(key)
         if isinstance(value, str) and fetch.is_url(value):
@@ -453,6 +453,8 @@ def handle_call(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
             if local is None:
                 return {"ok": True, "data": fetch.pending_result(value)}
             args = {**args, key: str(local)}
+            if key == "source":
+                source_url = value
     args, clamped = _clamp_args(name, args)
     outcome = _dispatch(name, args)
     if outcome.get("ok") and isinstance(outcome.get("data"), dict):
