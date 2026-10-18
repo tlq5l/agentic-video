@@ -185,6 +185,9 @@ SCAN_SPLIT_MIN_SEC = 240
 SCAN_MIN_PART_SEC = 60
 SCAN_MAX_PARTS = 8
 SCAN_PAD_SEC = 1
+# Below this (pixels per frame x seconds) scaling every frame to gray in the scan
+# costs less than a decode per change; above it the changes are settled later.
+SCAN_SMALL_PIXEL_SEC = 60_000_000
 
 
 def _range_key(start_sec: float, duration_sec: Optional[float]) -> str:
@@ -560,14 +563,28 @@ def _sharp_step(times, frames, first: int) -> Optional[tuple]:
     return first + lo, first + hi
 
 
+def _scan_is_small(video_path: str, start_sec: float, duration_sec: Optional[float]) -> bool:
+    """True when scaling every frame is cheaper than one short decode per change."""
+    try:
+        from src.media.probe import probe_video
+        info = probe_video(video_path)
+        span = duration_sec or float(info.duration_sec) - start_sec
+        return info.width * info.height * span < SCAN_SMALL_PIXEL_SEC
+    except Exception:
+        return False
+
+
 def _scan_scene_changes(video_path: str, start_sec: float, duration_sec: Optional[float], timeout: float):
     """One decode: every frame's scene score above the floor, and the soft scene changes.
 
-    A change comes back as a "transition" with a "window" (times and scene
-    scores of the frames around it). _settle_changes turns it into a "cut"
-    when the change sits in one frame step, and drops the window.
+    A change comes back as a "transition" or, when it sits in one frame step,
+    a "cut". On a large video the decode leaves that to _settle_changes: the
+    change carries a "window" (times and scene scores of the frames around it).
     """
-    times, scores, rgb, _ = _scan_frames(video_path, start_sec, duration_sec, timeout, with_gray=False)
+    import numpy as np
+
+    with_gray = _scan_is_small(video_path, start_sec, duration_sec)
+    times, scores, rgb, gray = _scan_frames(video_path, start_sec, duration_sec, timeout, with_gray=with_gray)
     strong = [[round(float(t), 6), round(float(s), 6)] for t, s in zip(times, scores) if s > SCAN_SCORE_FLOOR]
     changes = []
     for when, value in _find_transitions(*_lag_curves(rgb), start_sec):
@@ -575,9 +592,21 @@ def _scan_scene_changes(video_path: str, start_sec: float, duration_sec: Optiona
         window = _step_window(times, when)
         if window is not None:
             lo, hi = window[0] - 1, window[1]
-            entry["window"] = {"times": [float(t) for t in times[lo:hi]], "scores": [float(x) for x in scores[lo:hi]]}
+            if gray is not None:
+                _settle_entry(entry, np.asarray(times[lo:hi], dtype=np.float64), np.asarray(scores[lo:hi], dtype=np.float32), gray[lo:hi])
+            else:
+                entry["window"] = {"times": [float(t) for t in times[lo:hi]], "scores": [float(x) for x in scores[lo:hi]]}
         changes.append(entry)
     return strong, changes
+
+
+def _settle_entry(entry: Dict[str, Any], t, scores, frames) -> None:
+    """Turn a change into a "cut" when it sits in one frame step (`frames` are the gray frames at times `t`)."""
+    step = _sharp_step(t, frames, 1)
+    if step is not None:
+        # A two-step change is timed like a hard cut: at its stronger frame.
+        best = step[0] + int(scores[step[0]: step[1] + 1].argmax())
+        entry.update(timestamp_sec=round(float(t[best]), 3), kind="cut", score=round(float(scores[best]), 6))
 
 
 def _settle_changes(
@@ -614,12 +643,7 @@ def _settle_changes(
                 raise MediaCorruptError("FFmpeg scene-change scan did not repeat", {"video_path": video_path})
             stretches.append(gray[at: at + len(t)])
     for entry, t, frames in zip(todo, stretch_times, stretches):
-        scores = np.array(entry.pop("window")["scores"], dtype=np.float32)
-        step = _sharp_step(t, frames, 1)
-        if step is not None:
-            # A two-step change is timed like a hard cut: at its stronger frame.
-            best = step[0] + int(scores[step[0]: step[1] + 1].argmax())
-            entry.update(timestamp_sec=round(float(t[best]), 3), kind="cut", score=round(float(scores[best]), 6))
+        _settle_entry(entry, t, np.array(entry.pop("window")["scores"], dtype=np.float32), frames)
     return True
 
 

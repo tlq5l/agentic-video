@@ -54,6 +54,15 @@ should only remove waiting. 4 pairs, clip_415s detect_cuts CPU s, prev -> new: 3
 Idea: `-threads 1` per part instead of cores/parts (2). 3 pairs on clip_415s scan: CPU 24.7 vs 28.4 s (-13%)
 but wall 2.75 vs 2.38 s (+15%). Wall time matters more under the 60 s Executor limit. Undone.
 
+## 7. detect_cuts: small videos keep the in-scan gray frames (KEPT, fixes a regression from exp 1-4)
+The final check against origin/main showed fixture_60s detect_cuts slower (0.66 -> 1.3 s): it has 10 soft
+changes, and a short decode for each costs more than scaling every frame of a 640x360, 60 s video. Now the
+scan scales every frame to gray when width x height x seconds < 60 million (fixture 14M, x_post_127s 263M,
+clip_415s 860M; the cut-off is only checked at those three points) and settles the changes right there;
+larger videos keep the lazy path. Same `_settle_entry` code on both paths.
+4 pairs vs the commit before: fixture_60s detect_cuts 1.32/1.31/1.32/1.30 -> 0.75/0.73/0.73/0.73 s,
+CPU total 3.35 -> 2.77 s (4/4); x_post_127s unchanged. No QUALITY_FAIL.
+
 ## Not tried / measured and dropped
 - Process-wide fingerprint memo: a cold call hashes the source once or twice and the hash takes
   0.01 s per call on the benchmark files (MediaCache already memoizes per instance). Nothing to gain.
