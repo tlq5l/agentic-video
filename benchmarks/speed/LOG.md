@@ -30,3 +30,22 @@ Idea: a one-frame extraction gets nothing from frame threads (default = all core
 4 pairs, contact_sheet CPU s, prev -> new: x_post_127s 7.0/6.7/7.2/6.9 -> 4.8/5.3/5.2/5.1 (-25%, 4/4);
 fixture_60s 1.77/1.81/2.05/1.94 -> 1.48/1.89/1.61/1.63 (3/4). In-process (generate_video_overview, 24 samples):
 x_post wall 0.90 -> 0.77 s, CPU 6.85 -> 4.8; clip_415s wall 0.61 -> 0.51 s, CPU 4.2 -> 3.0. No QUALITY_FAIL.
+
+## 4. detect_cuts: settle only the soft changes that are not echoes of a hard cut (KEPT)
+Idea: every hard cut also leaves a soft-change candidate (plateau within 0.7 s), and
+`detect_soft_transitions` drops those. In exp 1 each candidate still got its own gray-frame
+decode (36 of them on clip_415s, 13 CPU s = a third of the tool). Now the scan stores the
+frame times and scores around each candidate (a "window", cache key softtrans_v9), the engine
+asks `scan_scene_changes(..., defer_echoes=True)` to leave the ones on a hard cut of the scanned
+thresholds alone, and `detect_soft_transitions` settles (decodes) only those that survive its
+own hard-cut filter, writing the result back to the cache. Other callers keep the old behaviour
+(everything settled in the scan). If a window cannot be matched to the scan, it falls back to the
+all-frames scan as before. Checked with a script (not committed): lazy == eager == fallback, with
+and without hard cuts, on fixture_60s (3 transitions, mixed cuts) and x_post_127s.
+4 pairs, clip_415s detect_cuts CPU s, prev -> new: 45.5/46.1/45.7/45.9 -> 32.2/32.3/32.3/32.2 (-30%, 4/4);
+x_post_127s and fixture_60s unchanged (fixture 1.49 -> 1.30). No QUALITY_FAIL.
+
+## Not tried / measured and dropped
+- Process-wide fingerprint memo: a cold call hashes the source once or twice and the hash takes
+  0.01 s per call on the benchmark files (MediaCache already memoizes per instance). Nothing to gain.
+- Contact-sheet timeouts that leave ffmpeg running: only matters on timeout, no speed effect.

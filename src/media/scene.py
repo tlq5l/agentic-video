@@ -561,28 +561,71 @@ def _sharp_step(times, frames, first: int) -> Optional[tuple]:
 
 
 def _scan_scene_changes(video_path: str, start_sec: float, duration_sec: Optional[float], timeout: float):
-    """One decode: every frame's scene score above the floor, and the soft scene changes."""
-    times, scores, rgb, gray = _scan_frames(video_path, start_sec, duration_sec, timeout, with_gray=False)
+    """One decode: every frame's scene score above the floor, and the soft scene changes.
+
+    A change comes back as a "transition" with a "window" (times and scene
+    scores of the frames around it). _settle_changes turns it into a "cut"
+    when the change sits in one frame step, and drops the window.
+    """
+    times, scores, rgb, _ = _scan_frames(video_path, start_sec, duration_sec, timeout, with_gray=False)
     strong = [[round(float(t), 6), round(float(s), 6)] for t, s in zip(times, scores) if s > SCAN_SCORE_FLOOR]
-    transitions = _find_transitions(*_lag_curves(rgb), start_sec)
-    windows = [_step_window(times, when) for when, _ in transitions]
-    with ThreadPoolExecutor(max_workers=min(4, os.cpu_count() or 1)) as pool:
-        pending = [None if w is None else pool.submit(_gray_frames, video_path, times, w[0] - 1, w[1]) for w in windows]
-        stretches = [None if job is None else job.result() for job in pending]
-    if any(w is not None and f is None for w, f in zip(windows, stretches)):
-        # A stretch that cannot be read on its own: scan again with every frame.
-        times, scores, rgb, gray = _scan_frames(video_path, start_sec, duration_sec, timeout)
-        stretches = [None if w is None else gray[w[0] - 1: w[1]] for w in windows]
     changes = []
-    for (when, value), window, frames in zip(transitions, windows, stretches):
+    for when, value in _find_transitions(*_lag_curves(rgb), start_sec):
         entry = {"timestamp_sec": round(when, 3), "score": round(value, 6), "kind": "transition", "plateau_sec": round(when, 3)}
-        step = None if window is None else _sharp_step(times, frames, window[0])
+        window = _step_window(times, when)
+        if window is not None:
+            lo, hi = window[0] - 1, window[1]
+            entry["window"] = {"times": [float(t) for t in times[lo:hi]], "scores": [float(x) for x in scores[lo:hi]]}
+        changes.append(entry)
+    return strong, changes
+
+
+def _settle_changes(
+    video_path: str,
+    changes: List[Dict[str, Any]],
+    start_sec: float,
+    duration_sec: Optional[float],
+    timeout: float,
+    skip=lambda entry: False,
+) -> bool:
+    """Decide cut or transition for each change that still has a "window" (in place), except those `skip` names.
+
+    Reads the gray frames of each window with its own short decode, which
+    costs about a third of the whole scan if done for every change; a caller
+    that will throw some changes away anyway (the echoes of hard cuts) skips
+    them. Returns whether anything was settled.
+    """
+    import numpy as np
+
+    todo = [entry for entry in changes if "window" in entry and not skip(entry)]
+    if not todo:
+        return False
+    stretch_times = [np.array(entry["window"]["times"], dtype=np.float64) for entry in todo]
+    with ThreadPoolExecutor(max_workers=min(4, os.cpu_count() or 1)) as pool:
+        jobs = [pool.submit(_gray_frames, video_path, t, 0, len(t)) for t in stretch_times]
+        stretches = [job.result() for job in jobs]
+    if any(frames is None for frames in stretches):
+        # A stretch that cannot be read on its own: scan again with every frame.
+        times, _, _, gray = _scan_frames(video_path, start_sec, duration_sec, timeout)
+        stretches = []
+        for t in stretch_times:
+            at = int(np.searchsorted(times, t[0] - 1e-4))
+            if not np.allclose(times[at: at + len(t)], t, atol=1e-4):
+                raise MediaCorruptError("FFmpeg scene-change scan did not repeat", {"video_path": video_path})
+            stretches.append(gray[at: at + len(t)])
+    for entry, t, frames in zip(todo, stretch_times, stretches):
+        scores = np.array(entry.pop("window")["scores"], dtype=np.float32)
+        step = _sharp_step(t, frames, 1)
         if step is not None:
             # A two-step change is timed like a hard cut: at its stronger frame.
             best = step[0] + int(scores[step[0]: step[1] + 1].argmax())
-            entry.update(timestamp_sec=round(float(times[best]), 3), kind="cut", score=round(float(scores[best]), 6))
-        changes.append(entry)
-    return strong, changes
+            entry.update(timestamp_sec=round(float(t[best]), 3), kind="cut", score=round(float(scores[best]), 6))
+    return True
+
+
+def _echoes_of(cut_times: Sequence[float]):
+    """Test for a change that a hard cut at one of `cut_times` already explains."""
+    return lambda entry: any(abs(entry["plateau_sec"] - t) < SOFT_HARD_CUT_GAP_SEC for t in cut_times)
 
 
 def scan_scene_changes(
@@ -592,6 +635,7 @@ def scan_scene_changes(
     duration_sec: Optional[float] = None,
     cache: Optional[MediaCache] = None,
     timeout_sec: Optional[float] = None,
+    defer_echoes: bool = False,
 ) -> None:
     """Decode the video once and fill the cache that detect_scenes and detect_soft_transitions read.
 
@@ -599,6 +643,10 @@ def scan_scene_changes(
     transitions pay for one decode instead of two. It only writes cache
     entries; results come from those two functions as before. A threshold
     below SCAN_SCORE_FLOOR is left for detect_scenes to measure itself.
+
+    With defer_echoes, soft changes that sit on a hard cut of these
+    thresholds are not settled now: detect_soft_transitions drops them when
+    given those cuts, and settles them itself if given others.
     """
     vpath = Path(video_path).resolve()
     if not vpath.exists():
@@ -607,19 +655,30 @@ def scan_scene_changes(
         cache = MediaCache()
     fingerprint = cache.compute_fingerprint(str(vpath))
     span = _range_key(start_sec, duration_sec)
+    timeout = timeout_sec or (Config.SUBPROCESS_TIMEOUT_SEC * 2)
+    changes_key = f"softtrans_v9_{span}"
     strong = cache.load_json(fingerprint, f"scenescores_v1_{span}")
-    if strong is None or cache.load_json(fingerprint, f"softtrans_v8_{span}") is None:
-        strong, changes = _scan_scene_changes(str(vpath), start_sec, duration_sec, timeout_sec or (Config.SUBPROCESS_TIMEOUT_SEC * 2))
+    changes = cache.load_json(fingerprint, changes_key)
+    if strong is None or changes is None:
+        strong, changes = _scan_scene_changes(str(vpath), start_sec, duration_sec, timeout)
         cache.save_json(fingerprint, f"scenescores_v1_{span}", strong)
-        cache.save_json(fingerprint, f"softtrans_v8_{span}", changes)
+        cache.save_json(fingerprint, changes_key, changes)
+    cut_times: List[float] = []
     for threshold in thresholds:
         # detect_scenes hands ffmpeg the threshold with three decimals.
         cutoff = float(f"{threshold:.3f}")
-        key = _scenes_key(threshold, span)
-        if cutoff < SCAN_SCORE_FLOOR or cache.load_json(fingerprint, key) is not None:
+        if cutoff < SCAN_SCORE_FLOOR:
             continue
-        raw = [SceneCut(timestamp_sec=t, score=s, timecode=format_timestamp(t)) for t, s in strong if s > cutoff]
-        cache.save_json(fingerprint, key, [c.to_dict() for c in _debounce(raw, 0.5, _frame_gap_sec(raw, str(vpath), cache))])
+        key = _scenes_key(threshold, span)
+        cached = cache.load_json(fingerprint, key)
+        if cached is None:
+            raw = [SceneCut(timestamp_sec=t, score=s, timecode=format_timestamp(t)) for t, s in strong if s > cutoff]
+            cached = [c.to_dict() for c in _debounce(raw, 0.5, _frame_gap_sec(raw, str(vpath), cache))]
+            cache.save_json(fingerprint, key, cached)
+        cut_times.extend(item["timestamp_sec"] for item in cached)
+    skip = _echoes_of(cut_times) if defer_echoes else (lambda entry: False)
+    if _settle_changes(str(vpath), changes, start_sec, duration_sec, timeout, skip):
+        cache.save_json(fingerprint, changes_key, changes)
 
 
 def detect_soft_transitions(
@@ -649,18 +708,22 @@ def detect_soft_transitions(
         cache = MediaCache()
     fingerprint = cache.compute_fingerprint(str(vpath))
     span = _range_key(start_sec, duration_sec)
-    changes = cache.load_json(fingerprint, f"softtrans_v8_{span}") if use_cache else None
+    changes_key = f"softtrans_v9_{span}"
+    timeout = timeout_sec or (Config.SUBPROCESS_TIMEOUT_SEC * 2)
+    changes = cache.load_json(fingerprint, changes_key) if use_cache else None
     if changes is None:
-        strong, changes = _scan_scene_changes(str(vpath), start_sec, duration_sec, timeout_sec or (Config.SUBPROCESS_TIMEOUT_SEC * 2))
+        strong, changes = _scan_scene_changes(str(vpath), start_sec, duration_sec, timeout)
         if use_cache:
             cache.save_json(fingerprint, f"scenescores_v1_{span}", strong)
-            cache.save_json(fingerprint, f"softtrans_v8_{span}", changes)
+            cache.save_json(fingerprint, changes_key, changes)
     # A hard cut also raises the lag difference for half a second each side;
     # the plateau it leaves is that cut, not a second change.
+    echo = _echoes_of([hard.timestamp_sec for hard in hard_cuts])
+    if _settle_changes(str(vpath), changes, start_sec, duration_sec, timeout, echo) and use_cache:
+        cache.save_json(fingerprint, changes_key, changes)
     return [SceneCut(timestamp_sec=item["timestamp_sec"], score=item["score"],
                      timecode=format_timestamp(item["timestamp_sec"]), kind=item["kind"])
-            for item in changes
-            if all(abs(item["plateau_sec"] - hard.timestamp_sec) >= SOFT_HARD_CUT_GAP_SEC for hard in hard_cuts)]
+            for item in changes if not echo(item)]
 
 
 def partition_into_scene_segments(

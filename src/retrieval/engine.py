@@ -1123,6 +1123,7 @@ class AgenticVideoEngine:
             start_sec=start,
             duration_sec=duration,
             cache=self._cache,
+            defer_echoes=True,
         )
         known_cuts = None
         if threshold > 0.25:
