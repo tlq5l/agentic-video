@@ -260,33 +260,39 @@ def _scan_plan(video_path: str, start_sec: float, duration_sec: Optional[float])
     return [(i * length, None if i == parts - 1 else length) for i in range(parts)]
 
 
-def _scan_frames(video_path: str, start_sec: float, duration_sec: Optional[float], timeout: float):
+def _scan_frames(video_path: str, start_sec: float, duration_sec: Optional[float], timeout: float, with_gray: bool = True):
     """Decode the video once for everything scene-change detection needs.
 
     Returns the time and ffmpeg scene score of every frame, the 32x18 colour
-    samples taken ten times a second, and every frame as 32x18 gray.
+    samples taken ten times a second, and (with_gray) every frame as 32x18
+    gray. Without with_gray the last item is None: scaling every frame down
+    costs more than the rest of the scan, so _gray_frames reads only the
+    few stretches that need it.
     """
     plan = _scan_plan(video_path, start_sec, duration_sec)
     if len(plan) > 1:
         try:
-            return _scan_parts(video_path, start_sec, duration_sec, timeout, plan)
+            return _scan_parts(video_path, start_sec, duration_sec, timeout, plan, with_gray)
         except MediaCorruptError:
             # A part that cannot be read on its own (a seek the container
             # does not support): read the whole range in one go instead.
             pass
-    return _scan_parts(video_path, start_sec, duration_sec, timeout, [(0, None)])
+    return _scan_parts(video_path, start_sec, duration_sec, timeout, [(0, None)], with_gray)
 
 
-def _scan_parts(video_path: str, start_sec: float, duration_sec: Optional[float], timeout: float, plan: List[tuple]):
+def _scan_parts(video_path: str, start_sec: float, duration_sec: Optional[float], timeout: float, plan: List[tuple], with_gray: bool = True):
     import numpy as np
 
     width, height = SOFT_GRID
     graph = (
-        "[0:v]split=3[a][b][c];"
+        f"[0:v]split={3 if with_gray else 2}[a][b]{'[c]' if with_gray else ''};"
         r"[a]select=gte(scene\,0),metadata=print:key=lavfi.scene_score:file=scene.txt,nullsink;"
-        f"[b]fps={SOFT_SAMPLE_FPS}:start_time=0,scale={width}:{height},format=rgb24[soft];"
-        f"[c]scale={width}:{height},format=gray[native]"
+        f"[b]fps={SOFT_SAMPLE_FPS}:start_time=0,scale={width}:{height},format=rgb24[soft]"
+        + (f";[c]scale={width}:{height},format=gray[native]" if with_gray else "")
     )
+    outputs = ["-map", "[soft]", "-fps_mode", "passthrough", "-f", "rawvideo", "soft.raw"]
+    if with_gray:
+        outputs += ["-map", "[native]", "-fps_mode", "passthrough", "-f", "rawvideo", "native.raw"]
     threads = max(2, (os.cpu_count() or 2) // len(plan)) if len(plan) > 1 else None
     deadline = time.monotonic() + timeout
     pieces = []
@@ -314,9 +320,7 @@ def _scan_parts(video_path: str, start_sec: float, duration_sec: Optional[float]
                 # passthrough: write each frame once. The default would repeat
                 # or drop frames to hold a constant rate, and the gray frames
                 # would no longer line up with the printed frame times.
-                cmd.extend(["-i", video_path, "-filter_complex", graph,
-                            "-map", "[soft]", "-fps_mode", "passthrough", "-f", "rawvideo", "soft.raw",
-                            "-map", "[native]", "-fps_mode", "passthrough", "-f", "rawvideo", "native.raw"])
+                cmd.extend(["-i", video_path, "-filter_complex", graph, *outputs])
                 part_dir = Path(workdir) / f"part{index}"
                 part_dir.mkdir()
                 running.append((subprocess.Popen(cmd, cwd=part_dir, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE), part_dir, begin, lead, length))
@@ -330,10 +334,13 @@ def _scan_parts(video_path: str, start_sec: float, duration_sec: Optional[float]
                 scores = np.array([float(s) for _, s in pairs], dtype=np.float32)
                 rgb = np.fromfile(part_dir / "soft.raw", dtype=np.uint8)
                 rgb = rgb[: (len(rgb) // (width * height * 3)) * width * height * 3].reshape(-1, height, width, 3)
-                gray = np.fromfile(part_dir / "native.raw", dtype=np.uint8)
-                gray = gray[: (len(gray) // (width * height)) * width * height].reshape(-1, height, width)
-                if len(times) != len(gray):
-                    raise MediaCorruptError("FFmpeg scene-change scan lost frames", {"video_path": video_path, "times": len(times), "frames": len(gray)})
+                if with_gray:
+                    gray = np.fromfile(part_dir / "native.raw", dtype=np.uint8)
+                    gray = gray[: (len(gray) // (width * height)) * width * height].reshape(-1, height, width)
+                    if len(times) != len(gray):
+                        raise MediaCorruptError("FFmpeg scene-change scan lost frames", {"video_path": video_path, "times": len(times), "frames": len(gray)})
+                else:
+                    gray = np.zeros(len(times), dtype=np.uint8)  # placeholder, one per frame, so the slicing below stays the same
                 # Keep this part's own stretch. The seam sits a little before
                 # the whole second so a frame exactly on it lands on one side.
                 own = times >= begin + lead - 1e-4
@@ -355,7 +362,8 @@ def _scan_parts(video_path: str, start_sec: float, duration_sec: Optional[float]
                 if proc.poll() is None:
                     proc.kill()
                     proc.communicate()
-    return tuple(np.concatenate([piece[i] for piece in pieces]) for i in range(4))
+    merged = tuple(np.concatenate([piece[i] for piece in pieces]) for i in range(4))
+    return merged if with_gray else (*merged[:3], None)
 
 
 def _lag_curves(rgb):
@@ -478,20 +486,57 @@ def _find_transitions(diff, area, colour, blend, start_sec: float) -> List[tuple
     return found
 
 
-def _sharp_step(times, gray, when: float) -> Optional[tuple]:
-    """Tell a hard cut from an animated change by how the change is spread over frames.
-
-    Looks at the step from each frame to the next around `when`. Returns the
-    first and last frame index of the step (one frame, or two adjacent ones)
-    that holds most of the change, or None when the change is spread out.
-    """
+def _step_window(times, when: float) -> Optional[tuple]:
+    """Frame index range (first, last) that _sharp_step looks at around `when`, or None when too short."""
     import numpy as np
 
     first = max(1, int(np.searchsorted(times, when - SOFT_CUT_REACH_SEC)))
     last = int(np.searchsorted(times, when + SOFT_CUT_REACH_SEC, side="right"))
-    if last - first < 6:
+    return None if last - first < 6 else (first, last)
+
+
+def _gray_frames(video_path: str, times, lo: int, hi: int):
+    """The 32x18 gray frames with index lo..hi-1 of the scan, or None when they cannot be matched to `times`.
+
+    Seeks to just before frame lo and reads only that stretch. The frame
+    times ffmpeg prints are checked against the scan, so a seek that lands
+    on other frames is caught instead of used.
+    """
+    import numpy as np
+
+    width, height = SOFT_GRID
+    count = hi - lo
+    begin = max(0.0, float(times[lo]) - 0.01)
+    # -ss in front of -i restarts the clock at `begin`; the scan's times are begin + clock.
+    length = float(times[hi - 1]) - begin + 0.005
+    cmd = ["ffmpeg", "-v", "info", "-nostats", "-ss", f"{begin:.3f}", "-t", f"{length:.3f}", "-i", video_path,
+           "-vf", f"showinfo,scale={width}:{height},format=gray", "-fps_mode", "passthrough", "-f", "rawvideo", "-"]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, timeout=Config.SUBPROCESS_TIMEOUT_SEC, check=False)
+    except (OSError, subprocess.TimeoutExpired):
         return None
-    frames = gray[first - 1: last].astype(np.float32) / 255.0
+    if proc.returncode != 0:
+        return None
+    seen = [float(t) + begin for t in re.findall(r"pts_time:(\S+)", proc.stderr.decode(errors="replace"))]
+    if len(seen) != count or not np.allclose(seen, times[lo:hi], atol=1e-3):
+        return None
+    frames = np.frombuffer(proc.stdout, dtype=np.uint8)
+    if len(frames) != count * width * height:
+        return None
+    return frames.reshape(count, height, width)
+
+
+def _sharp_step(times, frames, first: int) -> Optional[tuple]:
+    """Tell a hard cut from an animated change by how the change is spread over frames.
+
+    `frames` are the gray frames first-1..last-1 of a _step_window. Looks at
+    the step from each frame to the next. Returns the first and last frame
+    index of the step (one frame, or two adjacent ones) that holds most of
+    the change, or None when the change is spread out.
+    """
+    import numpy as np
+
+    frames = frames.astype(np.float32) / 255.0
     steps = np.abs(frames[1:] - frames[:-1]).mean(axis=(1, 2))
     # Motion and grain give every step some size; only what rises above the
     # usual step counts as the change.
@@ -516,12 +561,19 @@ def _sharp_step(times, gray, when: float) -> Optional[tuple]:
 
 def _scan_scene_changes(video_path: str, start_sec: float, duration_sec: Optional[float], timeout: float):
     """One decode: every frame's scene score above the floor, and the soft scene changes."""
-    times, scores, rgb, gray = _scan_frames(video_path, start_sec, duration_sec, timeout)
+    times, scores, rgb, gray = _scan_frames(video_path, start_sec, duration_sec, timeout, with_gray=False)
     strong = [[round(float(t), 6), round(float(s), 6)] for t, s in zip(times, scores) if s > SCAN_SCORE_FLOOR]
+    transitions = _find_transitions(*_lag_curves(rgb), start_sec)
+    windows = [_step_window(times, when) for when, _ in transitions]
+    stretches = [None if w is None else _gray_frames(video_path, times, w[0] - 1, w[1]) for w in windows]
+    if any(w is not None and f is None for w, f in zip(windows, stretches)):
+        # A stretch that cannot be read on its own: scan again with every frame.
+        times, scores, rgb, gray = _scan_frames(video_path, start_sec, duration_sec, timeout)
+        stretches = [None if w is None else gray[w[0] - 1: w[1]] for w in windows]
     changes = []
-    for when, value in _find_transitions(*_lag_curves(rgb), start_sec):
+    for (when, value), window, frames in zip(transitions, windows, stretches):
         entry = {"timestamp_sec": round(when, 3), "score": round(value, 6), "kind": "transition", "plateau_sec": round(when, 3)}
-        step = _sharp_step(times, gray, when)
+        step = None if window is None else _sharp_step(times, frames, window[0])
         if step is not None:
             # A two-step change is timed like a hard cut: at its stronger frame.
             best = step[0] + int(scores[step[0]: step[1] + 1].argmax())
