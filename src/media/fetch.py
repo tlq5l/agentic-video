@@ -9,14 +9,17 @@ import re
 import shutil
 import subprocess
 import threading
+import time
 import uuid
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Iterable, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from src.core.config import Config
 
-WAIT_SEC = 30.0
+# Executor drops a call at 60 s and frame extraction may use up to 40 s after the
+# download, so the download wait gets what is left (see test_url_source).
+WAIT_SEC = 15.0
 RETRY_AFTER_SECONDS = 15
 DOWNLOAD_TIMEOUT_SEC = 20 * 60
 # The Executor server's PATH only has /opt/homebrew/bin; yt-dlp often lives in ~/.local/bin.
@@ -134,29 +137,43 @@ def _run_job(url: str, target: Path, job: _Job) -> None:
         job.done.set()
 
 
-def resolve_url(url: str) -> Optional[Path]:
-    """Return the local file for ``url``, or None while the download is still running.
-
-    Starts (or joins) one background download per URL and waits up to ``WAIT_SEC``.
-    Raises DownloadError when the download failed; the next call starts a fresh attempt.
-    """
-    target = cached_path(url)
-    if target.is_file():
-        return target
+def _start_job(url: str, target: Path) -> _Job:
     with _JOBS_LOCK:
         job = _JOBS.get(target)
         if job is None:
             job = _JOBS[target] = _Job()
             threading.Thread(target=_run_job, args=(url, target, job),
                              name=f"agentic-video-download-{target.stem[:12]}", daemon=True).start()
-    if not job.done.wait(WAIT_SEC):
-        return None
-    with _JOBS_LOCK:
-        if _JOBS.get(target) is job:
-            del _JOBS[target]
-    if job.error:
-        raise DownloadError(job.error)
-    return target
+    return job
+
+
+def resolve_urls(urls: Iterable[str]) -> Dict[str, Optional[Path]]:
+    """Map each URL to its local file, or to None while its download is still running.
+
+    Starts (or joins) one background download per URL before waiting on any, then
+    waits for all of them within one shared ``WAIT_SEC``, so a call with two URLs
+    never waits twice. Raises DownloadError when a download failed; the next call
+    starts a fresh attempt.
+    """
+    targets = {url: cached_path(url) for url in urls}
+    jobs = {url: _start_job(url, target) for url, target in targets.items() if not target.is_file()}
+    deadline = time.monotonic() + WAIT_SEC
+    resolved: Dict[str, Optional[Path]] = {}
+    for url, target in targets.items():
+        job = jobs.get(url)
+        if job is None:
+            resolved[url] = target
+            continue
+        if not job.done.wait(max(0.0, deadline - time.monotonic())):
+            resolved[url] = None
+            continue
+        with _JOBS_LOCK:
+            if _JOBS.get(target) is job:
+                del _JOBS[target]
+        if job.error:
+            raise DownloadError(job.error)
+        resolved[url] = target
+    return resolved
 
 
 def pending_result(url: str) -> Dict[str, object]:

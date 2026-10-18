@@ -3,6 +3,7 @@
 import json
 import subprocess
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -110,6 +111,23 @@ def test_slow_download_returns_in_progress_then_ready(ytdlp, monkeypatch):
     ready = handle_call("probe_video", {"source": X_URL})
     assert ready["data"]["duration_sec"] == 63.0 and ready["data"]["local_path"]
     assert len(ytdlp.calls) == 1
+
+
+def test_two_url_arguments_download_together_within_one_wait(ytdlp, monkeypatch):
+    monkeypatch.setattr(fetch, "WAIT_SEC", 0.5)
+    ytdlp.release.clear()
+    started = time.monotonic()
+    pending = handle_call("audio_onsets", {"source": X_URL, "compare_to": "https://youtu.be/5TNXByrtHc4"})
+    elapsed = time.monotonic() - started
+    ytdlp.release.set()
+    assert pending["data"]["status"] == "in_progress"
+    assert elapsed < 0.8  # one shared wait, not one per URL
+    assert sorted(cmd[-1] for cmd in ytdlp.calls) == sorted([X_URL, "https://youtu.be/5TNXByrtHc4"])
+
+
+def test_download_wait_plus_frame_extraction_fits_executor_call_limit():
+    executor_call_limit_sec = 60.0
+    assert fetch.WAIT_SEC + mcp_server.FRAME_EXTRACT_DEADLINE_SEC <= executor_call_limit_sec - 5
 
 
 def test_failure_names_the_url_and_last_yt_dlp_error_then_retries(ytdlp):

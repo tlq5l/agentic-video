@@ -442,19 +442,18 @@ def handle_call(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
                 if "source" in missing else "")
         raise ValueError(f"{name} is missing required argument(s): {', '.join(missing)}. Required: {', '.join(required)}.{hint}")
     unknown = sorted(set(args) - set(schema.get("properties", {})))
-    source_url = None
-    for key in ("source", "compare_to"):
-        value = args.get(key)
-        if isinstance(value, str) and fetch.is_url(value):
-            try:
-                local = fetch.resolve_url(value)
-            except fetch.DownloadError as exc:
-                return {"ok": False, "error": {"code": "download_failed", "message": str(exc)}}
-            if local is None:
-                return {"ok": True, "data": fetch.pending_result(value)}
-            args = {**args, key: str(local)}
-            if key == "source":
-                source_url = value
+    url_args = {key: args[key] for key in ("source", "compare_to")
+                if isinstance(args.get(key), str) and fetch.is_url(args[key])}
+    if url_args:
+        try:
+            local = fetch.resolve_urls(url_args.values())
+        except fetch.DownloadError as exc:
+            return {"ok": False, "error": {"code": "download_failed", "message": str(exc)}}
+        pending = [url for url in url_args.values() if local[url] is None]
+        if pending:
+            return {"ok": True, "data": fetch.pending_result(pending[0])}
+        args = {**args, **{key: str(local[url]) for key, url in url_args.items()}}
+    source_url = url_args.get("source")
     args, clamped = _clamp_args(name, args)
     outcome = _dispatch(name, args)
     if outcome.get("ok") and isinstance(outcome.get("data"), dict):
