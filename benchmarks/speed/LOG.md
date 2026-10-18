@@ -45,6 +45,15 @@ and without hard cuts, on fixture_60s (3 transitions, mixed cuts) and x_post_127
 4 pairs, clip_415s detect_cuts CPU s, prev -> new: 45.5/46.1/45.7/45.9 -> 32.2/32.3/32.3/32.2 (-30%, 4/4);
 x_post_127s and fixture_60s unchanged (fixture 1.49 -> 1.30). No QUALITY_FAIL.
 
+## 5. detect_cuts: one filter thread per scan part (UNDONE, under the 10% bar)
+Idea: the 8 scan parts already fill the cores, so `-filter_threads 1 -filter_complex_threads 1` per part
+should only remove waiting. 4 pairs, clip_415s detect_cuts CPU s, prev -> new: 32.0/32.3/30.1/32.4 ->
+29.1/26.6/29.2/29.0 (median -9%, 4/4 wins, no QUALITY_FAIL). Below the 10% keep bar, so not committed.
+
+## 6. detect_cuts: fewer decode threads per scan part (UNDONE, trades wall for CPU)
+Idea: `-threads 1` per part instead of cores/parts (2). 3 pairs on clip_415s scan: CPU 24.7 vs 28.4 s (-13%)
+but wall 2.75 vs 2.38 s (+15%). Wall time matters more under the 60 s Executor limit. Undone.
+
 ## Not tried / measured and dropped
 - Process-wide fingerprint memo: a cold call hashes the source once or twice and the hash takes
   0.01 s per call on the benchmark files (MediaCache already memoizes per instance). Nothing to gain.
