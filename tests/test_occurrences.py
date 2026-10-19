@@ -452,3 +452,24 @@ def test_span_builder_lists_gaps_only_the_default_would_split():
     for t in (0.0, 0.2, 0.4, 1.0):
         default.add(t, hit, frame)
     assert len(default.finish()) == 2 and default.bridged == []
+
+
+def test_batched_clip_judging_matches_one_frame_at_a_time():
+    class FakeEncoder:
+        def pil_images(self, crops):
+            # a unit vector per crop, from its mean colour, so different tiles score differently
+            means = np.array([np.asarray(c.convert("RGB")).reshape(-1, 3).mean(axis=0) for c in crops])
+            return means / np.maximum(np.linalg.norm(means, axis=1, keepdims=True), 1e-9)
+
+    judge = occurrence.FrameJudge("a person waving", None, False)
+    assert judge.batchable
+    judge._clip = (FakeEncoder(), np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]))
+    frames = []
+    for color, spot in (((200, 20, 20), (10, 10)), ((20, 200, 20), (400, 200)), ((20, 20, 200), (0, 0)), ((120, 120, 120), (300, 100))):
+        image = Image.new("RGB", (640, 360), color)
+        ImageDraw.Draw(image).rectangle([spot[0], spot[1], spot[0] + 200, spot[1] + 150], fill=(255, 0, 0))
+        frames.append(image)
+    assert judge.judge_many(frames) == [judge.judge(frame) for frame in frames]
+    assert not occurrence.FrameJudge("purple diamond", None, False).batchable
+    assert not occurrence.FrameJudge("a person waving", "claude", False).batchable
+    assert not occurrence.FrameJudge("a red thing", None, False).batchable

@@ -63,6 +63,43 @@ larger videos keep the lazy path. Same `_settle_entry` code on both paths.
 4 pairs vs the commit before: fixture_60s detect_cuts 1.32/1.31/1.32/1.30 -> 0.75/0.73/0.73/0.73 s,
 CPU total 3.35 -> 2.77 s (4/4); x_post_127s unchanged. No QUALITY_FAIL.
 
+## Pass 2: background tools (benchmarks/speed/jobs.py)
+`jobs.py` runs build_visual_index (+2 search_visual), count_occurrences (text, CLIP description, purple diamond) and
+count_repetitions (30 s and 120 s windows) per video, cold cache, via handle_call, polling like an agent. `AV_REPO=<checkout>`
+times other code; `--save-baseline` records outputs (index embeddings too); a run compares: counts/JSON exact, search hit
+times exact and scores within 1e-3, index frame times exact and every embedding cosine >= 0.9999 (float reordering only;
+measured min cosine was 1.00000000). Needs the sandbox off (Apple Vision). The machine was shared with load 15-290, so
+walls are noisy; pairs are A,B alternated, A = the commit before.
+
+### 8. build_visual_index: decode 3 chunks ahead (KEPT)
+The next chunk's FFmpeg (1.25 s each on clip_415s) was the critical path; embedding (0.5 s a chunk) hid behind it.
+Now 3 chunks decode at once (`PREFETCH_CHUNKS`). clip_415s build wall vs base, 4 pairs: 10.2/10.4/10.5/12.3 -> 7.2/6.6/6.8/7.0 s
+(4/4, CPU +5%). Index identical (cosine 1.0). fixture_60s and x_post_127s unchanged (2.3 s, 4.3 s).
+The resume test now picks the failing chunk by start time (chunks run in parallel) instead of call order.
+
+### 9. build_visual_index: start decoding while the CLIP model loads (KEPT)
+Model load (1.9 s) ran before the first FFmpeg. Quiet pairs vs exp 8: 7.3-7.8 -> 5.5 s (-25%); under heavy load about 5 of 7
+pairs won, the rest tied. Mechanism is certain (overlap of two serial steps).
+
+### 10. count_occurrences: CLIP tiles of 8 frames in one batch (KEPT)
+Description-only counts (no colour/shape word, no text) embedded 5 crops per frame, batch 5. CLIP costs 8 ms/crop at batch 5
+and 4.5 ms at batch 40, so 8 frames (40 crops) share one call (`FrameJudge.judge_many`, same results per frame: score
+diff < 1e-6, boxes equal). clip_415s occ_clip, 4 pairs: A 111/112/126/107 -> B 77/71/93/114 s wall (3/4, under load), CPU -11..-15%.
+Counts and span output identical.
+
+### Tried and undone
+- BATCH_SIZE 16 -> 64 in the index build: -4% wall, under the bar.
+- TORCH_THREADS 4 -> 8: no gain on a loaded machine.
+- OCR from a CGImage built from raw pixels instead of PNG data: output identical on 100 frames and 18% faster in one thread,
+  but 4/4 pairs slower with the 2 OCR workers (62-93 s vs 60-62 s). Vision itself is the cost; 3+ workers are slower than 2.
+- 2 judge workers for the batched CLIP path: one clean pair -10%, others lost in load noise. Retry on a quiet machine.
+- CLIP fast image processor: needs torchvision (not installed); would add a dependency.
+
+### Not tried
+- count_repetitions JPEG round trip, double decode when fast_fps > fps, periodicity blur computed once (these tools take 2-4 s).
+- Pre-shrinking frames before cutting CLIP crops and smaller decode for colour/shape: change pixels, so counts could move.
+- Caching per-frame results so a rerun with only min_gap_sec/max_spans changed skips decoding (cold benchmark won't show it).
+
 ## Not tried / measured and dropped
 - Process-wide fingerprint memo: a cold call hashes the source once or twice and the hash takes
   0.01 s per call on the benchmark files (MediaCache already memoizes per instance). Nothing to gain.
