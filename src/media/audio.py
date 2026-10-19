@@ -198,14 +198,13 @@ def _db(power: float, floor_db: float = -120.0) -> float:
 def _db_rounded(power: np.ndarray) -> np.ndarray:
     """`round(_db(p), 3)` for every p in `power`.
 
-    Rounds in bulk; the few values within 1e-6 of a rounding boundary (where
-    numpy's log10 could differ from math.log10 in the last bit) take the scalar path.
+    Rounds in bulk. Values within 1e-6 of a half step take the scalar path: there
+    `* 1000`, numpy's log10 and round()'s exact-decimal tie rule can disagree.
     """
     power = np.asarray(power, dtype=np.float64)
     floor_db = -120.0
     quiet = ~np.isfinite(power) | (power <= 10.0 ** (floor_db / 10.0))
-    with np.errstate(all="ignore"):
-        level = np.maximum(10.0 * np.log10(np.where(quiet, 1.0, power)), floor_db)
+    level = np.maximum(10.0 * np.log10(np.where(quiet, 1.0, power)), floor_db)
     scaled = np.where(quiet, floor_db, level) * 1000.0
     rounded = np.rint(scaled) / 1000.0
     for index in np.flatnonzero(np.abs(scaled - np.floor(scaled) - 0.5) < 1e-6):
@@ -334,18 +333,16 @@ def _stft_flux(
             magnitudes = magnitudes[:, band_mask]
         totals = np.sum(magnitudes, axis=1, keepdims=True)
         normalized = magnitudes / np.maximum(totals, 1e-12)
-        inner = np.maximum(normalized[1:] - normalized[:-1], 0.0).sum(axis=1) if count > 1 else None
+        inner = np.maximum(normalized[1:] - normalized[:-1], 0.0).sum(axis=1)
         return inner, normalized[0].copy(), normalized[-1].copy()
 
     # Chunks are independent; only the first frame of each needs the previous chunk's last row.
     starts = list(range(0, frame_count, frames_per_chunk))
     previous = None
     for first, (inner, head, tail) in zip(starts, _parallel_map(chunk_flux, starts)):
-        count = min(frames_per_chunk, frame_count - first)
         if previous is not None:
             flux[first] = np.maximum(head - previous, 0.0).sum()
-        if count > 1:
-            flux[first + 1:first + count] = inner
+        flux[first + 1:first + 1 + len(inner)] = inner
         previous = tail
     return flux
 
@@ -473,10 +470,11 @@ def _detect_onsets_in_samples(
     ]
     profiles, energies = _onset_spectra(samples, starts, ends, band)
     names = [name for name, _, _ in BANDS]
-    for position, (onset, row) in enumerate(zip(onsets, profiles.tolist())):
+    for onset, row in zip(onsets, profiles.tolist()):
         onset["band_db"] = dict(zip(names, row))
-        if energies is not None:
-            onset["band_energy_db"] = float(energies[position])
+    if energies is not None:
+        for onset, energy in zip(onsets, energies.tolist()):
+            onset["band_energy_db"] = energy
     return onsets
 
 
@@ -822,6 +820,15 @@ def _median_without_rows(
     return (pick(kept // 2 - 1) + pick(kept // 2)) / 2.0
 
 
+def _rank_window(block: np.ndarray, max_removed: int) -> Tuple[np.ndarray, np.ndarray]:
+    """The `window` and `below_or_equal` of `_median_without_rows` for up to `max_removed` dropped rows."""
+    rows = len(block)
+    first = max(0, (rows - max_removed - 1) // 2)
+    last = min(rows - 1, rows // 2 + max_removed)
+    window = np.sort(np.partition(block, (first, last), axis=0)[first:last + 1], axis=0)
+    return window, first + (window[None, :, :] <= window[:, None, :]).sum(axis=1)
+
+
 def _mark_content_changes(
     sections: List[Dict[str, Any]], samples: np.ndarray, ignore_ranges: Sequence[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
@@ -875,15 +882,13 @@ def _mark_content_changes(
                     outside_rows = ~inside_rows & ((seg_end <= start) | (seg_start >= end))
                     for item in ignore_ranges:
                         outside_rows &= ~((seg_start < item["end_sec"]) & (item["start_sec"] < seg_end))
-                    if not inside_rows.any() or int(outside_rows.sum()) < 4:
+                    outside_count = int(outside_rows.sum())
+                    if not inside_rows.any() or outside_count < 4:
                         continue
-                    jobs.append((section, inside_rows, outside_rows, rows - int(outside_rows.sum())))
+                    jobs.append((section, inside_rows, outside_rows, rows - outside_count))
                 if not jobs:
                     continue
-                few = [job[3] for job in jobs if job[3] <= _MEDIAN_WINDOW_MAX_REMOVED]
-                # Ranks the median of a column without <= max(few) rows can land on.
-                first_rank = max(0, (rows - max(few) - 1) // 2) if few else 0
-                last_rank = min(rows - 1, rows // 2 + max(few)) if few else 0
+                max_removed = max((job[3] for job in jobs if job[3] <= _MEDIAN_WINDOW_MAX_REMOVED), default=None)
                 in_powers = [np.empty(matrix.shape[1]) for _ in jobs]
                 out_powers = [np.empty(matrix.shape[1]) for _ in jobs]
 
@@ -891,10 +896,8 @@ def _mark_content_changes(
                     # Column blocks keep the row-selected copies small; columns are independent.
                     block = matrix[:, first:first + 256]
                     window = below_or_equal = None
-                    if few and not np.isnan(block).any():
-                        ranks = [first_rank] if first_rank == last_rank else [first_rank, last_rank]
-                        window = np.sort(np.partition(block, ranks, axis=0)[first_rank:last_rank + 1], axis=0)
-                        below_or_equal = first_rank + (window[None, :, :] <= window[:, None, :]).sum(axis=1)
+                    if max_removed is not None and not np.isnan(block).any():
+                        window, below_or_equal = _rank_window(block, max_removed)
                     for index, (_, inside_rows, outside_rows, removed) in enumerate(jobs):
                         in_powers[index][first:first + 256] = np.mean(block[inside_rows], axis=0)
                         if window is not None and removed <= _MEDIAN_WINDOW_MAX_REMOVED:
