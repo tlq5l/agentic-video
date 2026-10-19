@@ -15,7 +15,9 @@ from src.core.types import FrameInfo, ContactSheetResult, format_timestamp
 from src.core.cache import MediaCache
 from src.media.probe import probe_video
 
-SHEET_EXTRACT_WORKERS = 4
+# One decode thread per ffmpeg: a one-frame job gains nothing from frame
+# threads, and running more of them side by side finishes sooner.
+SHEET_EXTRACT_WORKERS = 8
 
 
 def default_sheet_path(
@@ -155,7 +157,7 @@ def build_contact_sheet(
 
     def _extract(t: float) -> FrameInfo:
         return extract_single_frame(
-            video_path=str(vpath), timestamp_sec=t, width=width, cache=cache
+            video_path=str(vpath), timestamp_sec=t, width=width, cache=cache, threads=1
         )
 
     # One ffmpeg process per frame; running a few at once keeps large sheets
