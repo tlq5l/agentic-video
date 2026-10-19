@@ -42,7 +42,7 @@ JOB_TIMEOUT_SEC = 3000
 EMBED_MIN_COS = 0.9999
 SCORE_TOL = 1e-3
 BIG = "clip_415s"
-FINAL = {"complete", "error", "index_required"}
+WAITING = {"queued", "running", "in_progress", "busy"}
 
 
 def job_mix(duration: float) -> list[tuple[str, str, dict]]:
@@ -61,44 +61,14 @@ def job_mix(duration: float) -> list[tuple[str, str, dict]]:
 
 
 def run_job(handle_call, tool: str, args: dict) -> dict:
-    """Call and poll like an agent would; returns the final result dict."""
+    """Call and poll like an agent would, until the job leaves its waiting states; returns the final result."""
     deadline = time.monotonic() + JOB_TIMEOUT_SEC
     while True:
         result = handle_call(tool, args)
-        if not result.get("ok"):
-            return result
-        data = result["data"]
-        if data.get("status") in FINAL or data.get("status") is None:
-            return result
-        if data.get("status") in ("partial",):
+        if not result.get("ok") or result["data"].get("status") not in WAITING:
             return result
         if time.monotonic() > deadline:
             raise SystemExit(f"{tool} did not finish in {JOB_TIMEOUT_SEC}s")
-        time.sleep(POLL_SEC)
-
-
-def run_search(handle_call, args):
-    # A search returns "queued" first and then the hits; poll until hits (or an error) appear.
-    deadline = time.monotonic() + JOB_TIMEOUT_SEC
-    while True:
-        result = handle_call("search_visual", args)
-        data = result.get("data", {})
-        if not result.get("ok") or "hits" in data or data.get("status") in ("error", "index_required", "partial", "complete"):
-            return result
-        if time.monotonic() > deadline:
-            raise SystemExit("search_visual did not finish")
-        time.sleep(POLL_SEC)
-
-
-def run_build(handle_call):
-    deadline = time.monotonic() + JOB_TIMEOUT_SEC
-    while True:
-        result = handle_call("build_visual_index", {})
-        data = result.get("data", {})
-        if not result.get("ok") or data.get("status") in ("complete", "error"):
-            return result
-        if time.monotonic() > deadline:
-            raise SystemExit("build_visual_index did not finish")
         time.sleep(POLL_SEC)
 
 
@@ -126,18 +96,10 @@ def child(video: str, out_dir: str, only: list[str] | None) -> None:
     out = Path(out_dir)
     walls, cpus, outputs = {}, {}, {}
     for name, tool, args in job_mix(duration):
-        if only and name not in only and not (name.startswith("search") and "build" in only):
+        if only and ("build" if name.startswith("search") else name) not in only:  # searches need the index
             continue
-        if name.startswith("search") and "build" not in (only or ["build"]):
-            continue
-        call = {"source": path, **args}
         start, start_cpu = time.perf_counter(), base._cpu()
-        if tool == "build_visual_index":
-            result = run_build(lambda t, a: handle_call(t, {"source": path, **a}))
-        elif tool == "search_visual":
-            result = run_search(handle_call, call)
-        else:
-            result = run_job(handle_call, tool, call)
+        result = run_job(handle_call, tool, {"source": path, **args})
         walls[name], cpus[name] = time.perf_counter() - start, base._cpu() - start_cpu
         if not result.get("ok"):
             raise SystemExit(f"{video} {name} failed: {json.dumps(result)[:500]}")
@@ -149,7 +111,7 @@ def child(video: str, out_dir: str, only: list[str] | None) -> None:
             data = {"status": data["status"], "frames_indexed": data["frames_indexed"]}
         elif name.startswith("search"):
             data = {"hits": [{k: h[k] for k in ("rank", "timestamp_sec", "score")} for h in data["hits"]],
-                    "intervals": [{k: v for k, v in i.items()} for i in data["intervals"]]}
+                    "intervals": data["intervals"]}
         outputs[name] = base._stable(data)
     peak_py = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024 / 1024  # bytes on macOS
     peak_kid = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss / 1024 / 1024
