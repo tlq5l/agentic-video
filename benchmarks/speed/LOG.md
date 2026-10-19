@@ -105,6 +105,35 @@ Counts and span output identical.
   0.01 s per call on the benchmark files (MediaCache already memoizes per instance). Nothing to gain.
 - Contact-sheet timeouts that leave ffmpeg running: only matters on timeout, no speed effect.
 
+## count_occurrences rerun cache (perf/count-rerun)
+Idea: only `SpanBuilder` reads `min_gap_sec` and `max_spans`, so the per-frame judgments (one hit or none per sampled frame, plus
+frames analyzed) are saved as `<key>.judgments.json` under a key without them (ALGORITHM_VERSION bumped to occurrences-v5,
+fingerprint, description, text, case_sensitive, start, end, requested fps). A call that differs only in those two arguments replays
+the saved hits into a new `SpanBuilder` without frames, then decodes again only the representative frame of each listed span
+(up to 24, at its sample time, starting one sample early so the fps filter picks the same source frame) to cut the contact-sheet tiles.
+Cold calls only gain one small JSON write.
+Same output: JSON identical to the old code (origin/main b514629) with the sheet file name and path normalised, and the contact-sheet
+JPEG byte-identical (md5), for reruns with other min_gap_sec / max_spans (smaller and larger max_spans than the first call):
+x_post_127s description "a man speaking into a microphone" (3 calls), clip_415s description 0-200 s (3 calls), clip_415s text "claude"
+30-170 s (3 calls; non-zero start). x_post_127s text "claude" has 0 spans, so it only checks the empty path (identical).
+Wall, handle_call polled like an agent, loaded machine (rerun vs the same args run fresh by the old code):
+x_post_127s description 0.8 s vs 31.8 s and 0.8 s vs 38.5 s; clip_415s description 0-200 s 1.0 s vs 21.5 s (and 1.1 s vs 27.7 s);
+clip_415s text 30-170 s 0.5 s vs 22.2 s (and 0.5 vs 22.8 s). CPU 0.6-1.5 s vs 30-75 s.
+Cold call, 4 interleaved pairs old/new, clip_415s text 30-110 s, wall s: 14.5/14.4/14.1/13.6 -> 15.7/13.8/13.7/13.9 (no change, as expected).
+Test added: a rerun with other min_gap_sec and max_spans does not judge frames again and equals a fresh run (JSON and sheet bytes).
+
+## whisper-cli flags (perf/count-rerun, asr.py unchanged)
+Input: clip_415s audio as the 16 kHz mono WAV asr.py makes (414.6 s, 101 segments, 1,594 words). Current command
+`-t 8 -l auto -mc 0 -sns` (flash attention on by default; large-v3-turbo-q5_0, Metal). The current output is identical run to run
+(checked). 4 interleaved pairs per variant (A = current, B = variant), wall s, loaded machine (load 14-20):
+- -t 4: A 10.2/14.2/16.2/11.6 -> B 11.1/15.0/12.4/15.2 (1 of 4 faster). Output identical. Dropped.
+- -t 6: 10.4/18.6/16.9/12.1 -> 10.3/19.8/14.9/11.3 (per pair -1/+6/-12/-7%, median wall -4%). Output identical. Dropped, under the 10% bar.
+- -bo 3: 11.4/19.6/12.5/16.7 -> 14.3/15.0/12.3/11.5 (noise). Output identical. Dropped. -bo 1: 1 of 4 faster, identical. Dropped.
+  (best-of only matters when temperature fallback samples, so a gain was not expected.)
+- -bs 3 / 2 / 1: 9-20% faster wall in 3-4 of 4 pairs, but the transcript changes on every pair (-bs 2: 127 segments instead of 101; -bs 3 and -bs 1: same count,
+  different words or boundaries). Dropped by the same-output rule.
+Result: no variant is both faster by 10% and identical, so asr.py is not changed.
+
 ## Sound tools (audio_onsets x5 bands, loudness_timeline, sync_check)
 Bench: `benchmarks/speed/audio.py` (result caches bypassed, output compared with a saved baseline).
 clip_415s total CPU, 4 pairs old/new: 93.2/100.8/130.5/110.7 s -> 11.5/12.1/14.8/15.3 s (4/4 wins, ~8x).
