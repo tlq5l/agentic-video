@@ -117,3 +117,34 @@ batched onset FFTs, band-planned content-change spectra (bands share a pass up t
 Dropped (no gain): transposed-matrix median, vectorized _silence_gaps, median overwrite_input.
 Not tried: cache save_json indent=2 encoder (~25% of an onset call; touches src/core/cache.py), global-sort
 exact median, shared STFT in sync_check, batching _measure_window.
+
+## Sound tools on 1 hour of audio (perf/long-audio)
+Goal: loudness_timeline and sync_check each under the 60 s Executor limit on 1 h, same JSON as origin/main 0d4294e.
+Input: clip_415s audio looped to 3600 s (m4a; mp4 for the handle_call video runs). Result caches bypassed. Mac loaded
+(load 8-18), so walls are noisy; CPU is user+sys. "wall s / CPU s".
+1 h, old -> new (one run each, same session):
+- loudness_timeline default: 75.8 / 80.2 -> 10.2 / 29.5 (earlier runs under heavier load: 99-113 s wall). Peak 4.2 -> 4.5 GB.
+- loudness_timeline 1 s windows: 35.3 / 39.7 -> 8.4 / 23.0. With ignore ranges + bpm: 84.2 / 88.5 (old).
+- sync_check, 6 cues: 66.5 / 66.2 -> 20.9 / 66.2 (earlier old runs under heavier load: 131-157 s wall).
+- sync_check, 13 cues (rich): 105.0 / 104.4 -> 46.1 / 103.1.
+- sync_check, 13 cues + bpm=120 (direct call; handle_call has no bpm): 161.1 / 160.6 -> 94.8 / 152.4. NOT under 60 s:
+  the time is _simple_supports_time (8,150 calls, ~627k small Python `at` calls and 56k level_test calls). Left alone.
+- sync_check, no cues: 5.6 -> 1.1. audio_onsets broad: 5.4 (old); bands 6-9 s (old); not re-timed here.
+- handle_call sync_check on a 1 h mp4 (6 cues): old 69.2 / 68.7 with cut scan cached; new 23.3 / 68.5 cached,
+  50.1 / 442 with the first (uncached) cut scan, which is about 27 s of that. Thin margin on a loaded machine.
+- handle_call loudness_timeline on the 1 h mp4: 87.4 / 92.0 -> 10.6 / 30.1.
+Other videos, old -> new, wall / CPU s (loudness default | sync_check 6 cues):
+- x_post_127s: 0.5 / 0.6 -> 0.4 / 0.6 | 3.9 / 14.1 -> 0.7 / 1.6.
+- clip_415s: 2.2 / 2.7 -> 1.1 / 2.6 | 6.1 / 40.7 -> 1.1 / 3.2.
+- fixture_60s: both under 1 s before and after (new: 0.1 s | 0.4 s).
+Same output: byte-identical JSON on all 4 inputs (1 h m4a, clip_415s, x_post_127s, fixture_60s) for loudness_timeline
+(default, ignore ranges + bpm, 1 s windows, range), sync_check (with and without bpm, cues 6/13/none) and audio_onsets
+(broad + sub/low_mid/mid/high/air + min_strength/range); also handle_call sync_check and loudness_timeline on the 1 h mp4.
+Kept:
+- save_json writes json.dumps(compact) in one go: json.dump and any indent use the pure-Python encoder. All readers use
+  json.load(s), so layout does not matter and old files still load.
+- Exact leave-rows-out column median from one np.partition window per column block plus rank counts (replaces the sorted copy).
+- Threaded numpy work (8 workers; 4 for the median): band power rows, STFT flux chunks (serial boundary fix-up), onset spectra.
+- Vectorized onset peak picking, span grouping and per-onset RMS; bulk dB rounding with a boundary guard that falls back to scalar.
+Dropped / not needed: shared FFT across the 2048-FFT bands and batching _measure_window (the above reached the goal without
+them); cross-call span dedupe (each band needs its own band energy); global-sort median (the window median is cheaper).

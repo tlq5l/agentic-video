@@ -8,6 +8,7 @@ onset times are quantized to that resolution rather than inferred by ear.
 from __future__ import annotations
 
 import bisect
+import concurrent.futures
 import functools
 import hashlib
 import json
@@ -49,6 +50,18 @@ _PCM_NAME = "pcm_mono_48000_f32_v1.f32"
 _PCM_META_NAME = "pcm_mono_48000_f32_v1_meta"
 _DECODE_LOCKS: Dict[str, threading.Lock] = {}
 _DECODE_LOCKS_GUARD = threading.Lock()
+
+
+# FFTs, sorts and ufuncs release the GIL, so independent chunks run on threads.
+_WORKERS = max(1, min(4, os.cpu_count() or 1))  # 8 saved ~2.5 s on 1 h sync_check for ~19 s more CPU on a shared Mac
+
+
+def _parallel_map(function: Any, items: Sequence[Any], workers: int = _WORKERS) -> List[Any]:
+    """`[function(item) for item in items]`, in order, on up to `workers` threads."""
+    if workers <= 1 or len(items) < 2:
+        return [function(item) for item in items]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(workers, len(items))) as pool:
+        return list(pool.map(function, items))
 
 
 def _lock_for(key: str) -> threading.Lock:
@@ -182,6 +195,23 @@ def _db(power: float, floor_db: float = -120.0) -> float:
     return max(floor_db, 10.0 * math.log10(power))
 
 
+def _db_rounded(power: np.ndarray) -> np.ndarray:
+    """`round(_db(p), 3)` for every p in `power`.
+
+    Rounds in bulk. Values within 1e-6 of a half step take the scalar path: there
+    `* 1000`, numpy's log10 and round()'s exact-decimal tie rule can disagree.
+    """
+    power = np.asarray(power, dtype=np.float64)
+    floor_db = -120.0
+    quiet = ~np.isfinite(power) | (power <= 10.0 ** (floor_db / 10.0))
+    level = np.maximum(10.0 * np.log10(np.where(quiet, 1.0, power)), floor_db)
+    scaled = np.where(quiet, floor_db, level) * 1000.0
+    rounded = np.rint(scaled) / 1000.0
+    for index in np.flatnonzero(np.abs(scaled - np.floor(scaled) - 0.5) < 1e-6):
+        rounded[index] = round(_db(float(power[index])), 3)
+    return rounded
+
+
 @functools.lru_cache(maxsize=32)
 def _hann(length: int) -> np.ndarray:
     """Read-only Hann window (float64); the same lengths recur for every onset."""
@@ -291,9 +321,9 @@ def _stft_flux(
         band_mask = (frequencies >= band["low_hz"]) & (frequencies < band["high_hz"])
         if not np.any(band_mask):
             raise ExtractionBoundsError("band_hz is too narrow for the analysis FFT", {"band_hz": band})
-    previous = None
     frames_per_chunk = int(10.0 * SAMPLE_RATE / HOP_SAMPLES)
-    for first in range(0, frame_count, frames_per_chunk):
+
+    def chunk_flux(first: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         count = min(frames_per_chunk, frame_count - first)
         view_start = first * HOP_SAMPLES
         view_end = (first + count - 1) * HOP_SAMPLES + fft_size
@@ -303,51 +333,83 @@ def _stft_flux(
             magnitudes = magnitudes[:, band_mask]
         totals = np.sum(magnitudes, axis=1, keepdims=True)
         normalized = magnitudes / np.maximum(totals, 1e-12)
+        inner = np.maximum(normalized[1:] - normalized[:-1], 0.0).sum(axis=1)
+        return inner, normalized[0].copy(), normalized[-1].copy()
+
+    # Chunks are independent; only the first frame of each needs the previous chunk's last row.
+    starts = list(range(0, frame_count, frames_per_chunk))
+    previous = None
+    for first, (inner, head, tail) in zip(starts, _parallel_map(chunk_flux, starts)):
         if previous is not None:
-            flux[first] = np.maximum(normalized[0] - previous, 0.0).sum()
-        if count > 1:
-            flux[first + 1:first + count] = np.maximum(normalized[1:] - normalized[:-1], 0.0).sum(axis=1)
-        previous = normalized[-1]
+            flux[first] = np.maximum(head - previous, 0.0).sum()
+        flux[first + 1:first + 1 + len(inner)] = inner
+        previous = tail
     return flux
 
 
+def _span_chunks(starts: np.ndarray, ends: np.ndarray, rows: int = 512) -> List[Tuple[int, np.ndarray]]:
+    """(length, positions) groups of at most `rows` spans, equal-length spans together."""
+    lengths = ends - starts
+    return [
+        (int(length), positions[first:first + rows])
+        for length in np.unique(lengths)
+        for positions in [np.flatnonzero(lengths == length)]
+        for first in range(0, len(positions), rows)
+    ]
+
+
+def _span_rows(samples: np.ndarray, starts: np.ndarray, length: int) -> np.ndarray:
+    """Float64 matrix with one row per span start, `length` samples each."""
+    return np.lib.stride_tricks.sliding_window_view(np.asarray(samples), length)[starts].astype(np.float64)
+
+
+def _activity_rms(samples: np.ndarray, starts: np.ndarray, ends: np.ndarray) -> np.ndarray:
+    """RMS of each span `samples[start:end]` (float64 math, as for a single span)."""
+    result = np.zeros(len(starts))
+
+    def measure(task: Tuple[int, np.ndarray]) -> None:
+        length, positions = task
+        if length:
+            values = _span_rows(samples, starts[positions], length)
+            result[positions] = np.sqrt(np.mean(values * values, axis=1))
+
+    _parallel_map(measure, _span_chunks(starts, ends))
+    return result
+
+
 def _onset_spectra(
-    samples: np.ndarray, spans: Sequence[Tuple[int, int]], band: Optional[Dict[str, Any]],
-) -> List[Tuple[Dict[str, float], Optional[float]]]:
+    samples: np.ndarray, starts: np.ndarray, ends: np.ndarray, band: Optional[Dict[str, Any]],
+) -> Tuple[np.ndarray, Optional[np.ndarray]]:
     """`_band_profile` (and `_band_energy_db` for a band) of many sample spans.
 
-    Equal-length spans share one batched FFT; the per-span formulas are those
-    of `_band_profile` and `_band_energy_db`.
+    Returns the dB of each named band, one row per span in BANDS order, and the
+    band's energy dB per span (None without a band). Equal-length spans share
+    one batched FFT; the per-span formulas are those of `_band_profile` and
+    `_band_energy_db`.
     """
-    results: List[Optional[Tuple[Dict[str, float], Optional[float]]]] = [None] * len(spans)
-    by_length: Dict[int, List[int]] = {}
-    for position, (first, last) in enumerate(spans):
-        by_length.setdefault(last - first, []).append(position)
-    for length, positions in by_length.items():
+    profiles = np.empty((len(starts), len(BANDS)))
+    energies = None if band is None else np.empty(len(starts))
+
+    def spectra_of(task: Tuple[int, np.ndarray]) -> None:
+        length, chunk = task
         size = 1 << int(math.ceil(math.log2(max(32, length))))
         window = _hann(length)
-        profile_denominator = max(1.0, float(np.sum(window) ** 2))
-        energy_denominator = max(1.0, float(np.sum(window * window)))
         masks = _named_band_masks(size)
-        band_mask = None if band is None else _hz_mask(size, band["low_hz"], band["high_hz"])
-        for chunk_start in range(0, len(positions), 512):
-            chunk = positions[chunk_start:chunk_start + 512]
-            values = np.stack([np.asarray(samples[spans[p][0]:spans[p][1]], dtype=np.float64) for p in chunk])
-            squared = np.abs(np.fft.rfft(values * window, n=size, axis=1)) ** 2
-            profile_power = squared / profile_denominator
-            if profile_power.shape[1] > 2:
-                profile_power[:, 1:-1] *= 2.0
-            band_sums = {name: np.sum(profile_power[:, mask], axis=1) for name, mask in masks}
-            if band_mask is not None:
-                energy_power = squared / energy_denominator
-                if energy_power.shape[1] > 2:
-                    energy_power[:, 1:-1] *= 2.0
-                energy_sums = np.sum(energy_power[:, band_mask], axis=1)
-            for row, position in enumerate(chunk):
-                profile = {name: round(_db(float(band_sums[name][row])), 3) for name, _ in masks}
-                energy = None if band_mask is None else round(_db(float(energy_sums[row])), 3)
-                results[position] = (profile, energy)
-    return results  # type: ignore[return-value]
+        squared = np.abs(np.fft.rfft(_span_rows(samples, starts[chunk], length) * window, n=size, axis=1)) ** 2
+        profile_power = squared / max(1.0, float(np.sum(window) ** 2))
+        if profile_power.shape[1] > 2:
+            profile_power[:, 1:-1] *= 2.0
+        for column, (_, mask) in enumerate(masks):
+            profiles[chunk, column] = _db_rounded(np.sum(profile_power[:, mask], axis=1))
+        if energies is not None:
+            energy_power = squared / max(1.0, float(np.sum(window * window)))
+            if energy_power.shape[1] > 2:
+                energy_power[:, 1:-1] *= 2.0
+            energies[chunk] = _db_rounded(
+                np.sum(energy_power[:, _hz_mask(size, band["low_hz"], band["high_hz"])], axis=1))
+
+    _parallel_map(spectra_of, _span_chunks(starts, ends))
+    return profiles, energies
 
 
 def _detect_onsets_in_samples(
@@ -366,15 +428,16 @@ def _detect_onsets_in_samples(
     # a shorter window when pitched attacks sit only a few milliseconds apart.
     fft_size = 1024 if band is not None and band["low_hz"] >= 500.0 else N_FFT
     envelope = _stft_flux(local, band, fft_size=fft_size)
-    peak_indices: List[int] = []
-    for index in range(1, max(1, len(envelope) - 1)):
-        if envelope[index] >= threshold and envelope[index] > envelope[index - 1] and envelope[index] >= envelope[index + 1]:
-            peak_indices.append(index)
-    if len(envelope) == 1 and envelope[0] >= threshold:
-        peak_indices.append(0)
+    peaks = np.zeros(0, dtype=np.int64)
+    if len(envelope) >= 3:
+        middle = envelope[1:-1]
+        peaks = np.flatnonzero((middle >= threshold) & (middle > envelope[:-2]) & (middle >= envelope[2:])) + 1
+    elif len(envelope) == 1 and envelope[0] >= threshold:
+        peaks = np.zeros(1, dtype=np.int64)
 
-    # Debounce multiple spectral peaks from one attack, keeping the strongest.
-    ranked = sorted(peak_indices, key=lambda idx: (-float(envelope[idx]), idx))
+    # Debounce multiple spectral peaks from one attack, keeping the strongest
+    # (strongest first, earlier first among equals).
+    ranked = peaks[np.lexsort((peaks, -envelope[peaks].astype(np.float64)))].tolist()
     selected: List[int] = []
     debounce_sec = 0.010 if band is not None else 0.030
     min_gap_frames = max(1, int(round(debounce_sec * SAMPLE_RATE / HOP_SAMPLES)))
@@ -385,36 +448,33 @@ def _detect_onsets_in_samples(
             blocked[max(0, index - min_gap_frames + 1):index + min_gap_frames] = True
     selected.sort()
 
-    onsets: List[Dict[str, Any]] = []
-    spans: List[Tuple[int, int]] = []
-    for index in selected:
-        # A centered 2048-sample window first sees an attack as it enters its
-        # right edge, half a window before the attack time. Correct that known
-        # STFT lead; the remaining quantization is one 256-sample hop.
-        # Band-limited flux peaks a little later for short pitched bursts than
-        # broadband attacks. One hop corrects that band-specific window lag.
-        bias = fft_size // 2 - (HOP_SAMPLES if band is not None else 0)
-        time_sec = context_first / float(SAMPLE_RATE) + (index * HOP_SAMPLES + bias) / float(SAMPLE_RATE)
-        if time_sec < start - 1e-6 or time_sec > end + 1e-6:
-            continue
-        sample_index = min(len(samples) - 1, max(0, int(round(time_sec * SAMPLE_RATE))))
-        profile_end = min(len(samples), sample_index + int(0.085 * SAMPLE_RATE))
-        activity = np.asarray(samples[sample_index:profile_end], dtype=np.float64)
-        activity_rms = float(np.sqrt(np.mean(activity * activity))) if len(activity) else 0.0
-        if activity_rms < 1e-4:
-            # A normalized spectrum can show a large flux when codec noise
-            # changes shape at a silence boundary. Do not call that a sound.
-            continue
-        onsets.append({
-            "time_sec": round(time_sec, 6),
-            "strength": round(float(envelope[index]), 6),
-        })
-        spans.append((sample_index, profile_end))
-    spectra = _onset_spectra(samples, spans, band)
-    for onset, (profile, band_energy) in zip(onsets, spectra):
-        onset["band_db"] = profile
-        if band_energy is not None:
-            onset["band_energy_db"] = band_energy
+    # A centered 2048-sample window first sees an attack as it enters its
+    # right edge, half a window before the attack time. Correct that known
+    # STFT lead; the remaining quantization is one 256-sample hop.
+    # Band-limited flux peaks a little later for short pitched bursts than
+    # broadband attacks. One hop corrects that band-specific window lag.
+    bias = fft_size // 2 - (HOP_SAMPLES if band is not None else 0)
+    frames = np.asarray(selected, dtype=np.int64)
+    times = context_first / float(SAMPLE_RATE) + (frames * HOP_SAMPLES + bias) / float(SAMPLE_RATE)
+    inside = (times >= start - 1e-6) & (times <= end + 1e-6)
+    frames, times = frames[inside], times[inside]
+    starts = np.clip(np.rint(times * SAMPLE_RATE), 0, len(samples) - 1).astype(np.int64)
+    ends = np.minimum(len(samples), starts + int(0.085 * SAMPLE_RATE))
+    # A normalized spectrum can show a large flux when codec noise changes
+    # shape at a silence boundary. Do not call that a sound.
+    audible = ~(_activity_rms(samples, starts, ends) < 1e-4)
+    frames, times, starts, ends = frames[audible], times[audible], starts[audible], ends[audible]
+    onsets: List[Dict[str, Any]] = [
+        {"time_sec": round(time_sec, 6), "strength": round(strength, 6)}
+        for time_sec, strength in zip(times.tolist(), envelope[frames].astype(np.float64).tolist())
+    ]
+    profiles, energies = _onset_spectra(samples, starts, ends, band)
+    names = [name for name, _, _ in BANDS]
+    for onset, row in zip(onsets, profiles.tolist()):
+        onset["band_db"] = dict(zip(names, row))
+    if energies is not None:
+        for onset, energy in zip(onsets, energies.tolist()):
+            onset["band_energy_db"] = energy
     return onsets
 
 
@@ -713,14 +773,60 @@ def _band_power_rows(
     window = _hann(size)
     out = {name: np.empty((rows, int(masks[name].sum()))) for name in bands}
     frames_per_chunk = 64
-    for row in range(0, rows, frames_per_chunk):
+
+    def fill(row: int) -> None:
         count = min(frames_per_chunk, rows - row)
         block = np.asarray(samples[row * hop:(row + count - 1) * hop + size], dtype=np.float64)
         frames = np.lib.stride_tricks.sliding_window_view(block, size)[::hop]
         power = np.abs(np.fft.rfft(frames * window, axis=1)) ** 2
         for name in bands:
             out[name][row:row + count] = power[:, masks[name]]
+
+    _parallel_map(fill, range(0, rows, frames_per_chunk))
     return out
+
+
+# np.median of a column without a few rows, for every section at once: the
+# answer sits within `removed` ranks of the middle of the full column, so one
+# partition per column block finds that window and each section is settled
+# from it. Sections that drop more rows than this use np.median directly.
+_MEDIAN_WINDOW_MAX_REMOVED = 64
+_MEDIAN_WORKERS = 4
+
+
+def _median_without_rows(
+    block: np.ndarray, window: np.ndarray, below_or_equal: np.ndarray, keep: np.ndarray,
+) -> np.ndarray:
+    """Column medians of `block[keep]` (equal to np.median) from the sorted rank window.
+
+    `window` holds the sorted values of ranks `first`..`first + len - 1` of every
+    column of `block`, which must cover the ranks the median can land on;
+    `below_or_equal[i]` is `first` plus how many window values are <= `window[i]`
+    (the count of column values <= `window[i]`, exact for every row but the last).
+    """
+    removed = block[~keep]
+    kept = len(block) - len(removed)
+    left = below_or_equal - (removed[None, :, :] <= window[:, None, :]).sum(axis=1)
+
+    def pick(rank: int) -> np.ndarray:
+        # first window value with more than `rank` kept values at or below it; the
+        # last row always qualifies (the window reaches past the highest rank needed)
+        ok = left >= rank + 1
+        ok[-1] = True
+        return np.take_along_axis(window, np.argmax(ok, axis=0)[None, :], axis=0)[0]
+
+    if kept % 2:
+        return pick((kept - 1) // 2)
+    return (pick(kept // 2 - 1) + pick(kept // 2)) / 2.0
+
+
+def _rank_window(block: np.ndarray, max_removed: int) -> Tuple[np.ndarray, np.ndarray]:
+    """The `window` and `below_or_equal` of `_median_without_rows` for up to `max_removed` dropped rows."""
+    rows = len(block)
+    first = max(0, (rows - max_removed - 1) // 2)
+    last = min(rows - 1, rows // 2 + max_removed)
+    window = np.sort(np.partition(block, (first, last), axis=0)[first:last + 1], axis=0)
+    return window, first + (window[None, :, :] <= window[:, None, :]).sum(axis=1)
 
 
 def _mark_content_changes(
@@ -766,36 +872,54 @@ def _mark_content_changes(
                 groups.append([name])
         for group in groups:
             matrices = _band_power_rows(samples, size, hop, rows, group)
-            for section in size_sections:
-                if section["band"] not in matrices:
+            for band, matrix in matrices.items():
+                jobs = []
+                for section in size_sections:
+                    if section["band"] != band:
+                        continue
+                    start, end = float(section["start_sec"]), float(section["end_sec"])
+                    inside_rows = (start <= seg_start) & (seg_end <= end)
+                    outside_rows = ~inside_rows & ((seg_end <= start) | (seg_start >= end))
+                    for item in ignore_ranges:
+                        outside_rows &= ~((seg_start < item["end_sec"]) & (item["start_sec"] < seg_end))
+                    outside_count = int(outside_rows.sum())
+                    if not inside_rows.any() or outside_count < 4:
+                        continue
+                    jobs.append((section, inside_rows, outside_rows, rows - outside_count))
+                if not jobs:
                     continue
-                start, end = float(section["start_sec"]), float(section["end_sec"])
-                matrix = matrices[section["band"]]
-                inside_rows = (start <= seg_start) & (seg_end <= end)
-                outside_rows = ~inside_rows & ((seg_end <= start) | (seg_start >= end))
-                for item in ignore_ranges:
-                    outside_rows &= ~((seg_start < item["end_sec"]) & (item["start_sec"] < seg_end))
-                if not inside_rows.any() or int(outside_rows.sum()) < 4:
-                    continue
-                # Column blocks keep the row-selected copies small; columns are independent.
-                in_power = np.empty(matrix.shape[1])
-                out_power = np.empty(matrix.shape[1])
-                for first in range(0, matrix.shape[1], 256):
+                max_removed = max((job[3] for job in jobs if job[3] <= _MEDIAN_WINDOW_MAX_REMOVED), default=None)
+                in_powers = [np.empty(matrix.shape[1]) for _ in jobs]
+                out_powers = [np.empty(matrix.shape[1]) for _ in jobs]
+
+                def settle(first: int) -> None:
+                    # Column blocks keep the row-selected copies small; columns are independent.
                     block = matrix[:, first:first + 256]
-                    in_power[first:first + 256] = np.mean(block[inside_rows], axis=0)
-                    out_power[first:first + 256] = np.median(block[outside_rows], axis=0)
-                if float(np.sum(in_power)) <= 0.0 or float(np.sum(out_power)) <= 0.0:
-                    continue
-                delta = 10.0 * math.log10(float(np.sum(in_power)) / float(np.sum(out_power)))
-                rise = 10.0 * np.log10((in_power + 1e-20) / (out_power + 1e-20))
-                new_share = float(np.sum(in_power[rise >= delta + _NEW_CONTENT_EXCESS_DB]) / np.sum(in_power))
-                raised_share = float(np.sum(out_power[rise >= delta / 2.0]) / np.sum(out_power))
-                section["new_content_share"] = round(new_share, 3)
-                section["raised_existing_share"] = round(raised_share, 3)
-                if new_share > _NEW_CONTENT_SHARE or raised_share < _RAISED_EXISTING_SHARE:
-                    section["fault_level"] = False
-                    section["classification"] = "informational"
-                    section["content_change"] = True
+                    window = below_or_equal = None
+                    if max_removed is not None and not np.isnan(block).any():
+                        window, below_or_equal = _rank_window(block, max_removed)
+                    for index, (_, inside_rows, outside_rows, removed) in enumerate(jobs):
+                        in_powers[index][first:first + 256] = np.mean(block[inside_rows], axis=0)
+                        if window is not None and removed <= _MEDIAN_WINDOW_MAX_REMOVED:
+                            out_powers[index][first:first + 256] = _median_without_rows(
+                                block, window, below_or_equal, outside_rows)
+                        else:
+                            out_powers[index][first:first + 256] = np.median(block[outside_rows], axis=0)
+
+                _parallel_map(settle, range(0, matrix.shape[1], 256), _MEDIAN_WORKERS)
+                for (section, _, _, _), in_power, out_power in zip(jobs, in_powers, out_powers):
+                    if float(np.sum(in_power)) <= 0.0 or float(np.sum(out_power)) <= 0.0:
+                        continue
+                    delta = 10.0 * math.log10(float(np.sum(in_power)) / float(np.sum(out_power)))
+                    rise = 10.0 * np.log10((in_power + 1e-20) / (out_power + 1e-20))
+                    new_share = float(np.sum(in_power[rise >= delta + _NEW_CONTENT_EXCESS_DB]) / np.sum(in_power))
+                    raised_share = float(np.sum(out_power[rise >= delta / 2.0]) / np.sum(out_power))
+                    section["new_content_share"] = round(new_share, 3)
+                    section["raised_existing_share"] = round(raised_share, 3)
+                    if new_share > _NEW_CONTENT_SHARE or raised_share < _RAISED_EXISTING_SHARE:
+                        section["fault_level"] = False
+                        section["classification"] = "informational"
+                        section["content_change"] = True
     return sections
 
 

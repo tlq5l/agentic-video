@@ -159,8 +159,11 @@ class MediaCache:
             unique_id = f"{os.getpid()}_{uuid.uuid4().hex[:8]}"
             tmp_path = entry_dir / f"{name}.{unique_id}.tmp"
 
+            # json.dumps takes the C encoder; json.dump (and any indent) the pure-Python one,
+            # which costs seconds on a multi-MB document. Readers parse, so layout is free.
+            payload = json.dumps(data, separators=(",", ":"))
             with open(tmp_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
+                f.write(payload)
                 f.flush()
                 os.fsync(f.fileno())
 
