@@ -79,19 +79,21 @@ def test_index_build_is_chunked_resumable_and_reuses_completed_cache(tmp_path, m
         start = kwargs["start_sec"]
         boundaries.append(start)
         frames = real_sample(*args, **kwargs)
-        if start >= 4 and len(boundaries) == 2:
+        if start == 4:  # chunks decode ahead in parallel, so pick the chunk by start, not by call order
             raise RuntimeError("synthetic interruption")
         return frames
 
     monkeypatch.setattr(visual, "sample_chunk", one_shot_fail_second_chunk)
     with pytest.raises(RuntimeError, match="synthetic interruption"):
         visual.build_index(engine)
-    assert boundaries[:2] == [0.0, 4.0]
+    assert {0.0, 4.0} <= set(boundaries)
     assert not list((tmp_path / "cache").rglob("*.jpg"))
     assert not list((tmp_path / "cache").rglob("visual-chunk-*"))
     # The committed first chunk survives; a later call resumes at its cursor.
+    resumed = []
+
     def record_resume(*args, **kwargs):
-        boundaries.append(kwargs["start_sec"])
+        resumed.append(kwargs["start_sec"])
         return real_sample(*args, **kwargs)
 
     monkeypatch.setattr(visual, "sample_chunk", record_resume)
@@ -102,7 +104,7 @@ def test_index_build_is_chunked_resumable_and_reuses_completed_cache(tmp_path, m
     indexed_calls = encoder.calls
     visual.build_index(engine)
     assert encoder.calls == indexed_calls
-    assert boundaries[2] == 4.0
+    assert resumed[0] == 4.0 and 0.0 not in resumed
     assert not list((tmp_path / "cache").rglob("*.jpg"))
     assert not list((tmp_path / "cache").rglob("visual-chunk-*"))
     with visual._connect(engine) as conn:

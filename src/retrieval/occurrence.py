@@ -38,6 +38,7 @@ ANALYSIS_WIDTH = 320
 DECODE_WIDTH = 1280
 READ_STALL_TIMEOUT_SEC = 30.0
 OCR_WORKERS = 2
+CLIP_BATCH_FRAMES = 8  # frames whose tiles share one CLIP batch
 STATIC_PIXEL_DELTA = 24
 STATIC_PIXEL_COUNT = 4
 CLIP_MIN_PROBABILITY = 0.4
@@ -330,6 +331,10 @@ class FrameJudge:
                 matches = self._clip_blobs(frame, blobs, width, height)
         else:
             matches = self._clip_tiles(frame)
+        return self._hit(matches, width, height)
+
+    @staticmethod
+    def _hit(matches, width, height):
         if not matches:
             return None
         boxes = [(x0 / width, y0 / height, (x1 - x0) / width, (y1 - y0) / height) for _, (x0, y0, x1, y1) in matches]
@@ -350,17 +355,41 @@ class FrameJudge:
             crops.append(frame.crop((int(cx - half), int(cy - half), int(cx + half), int(cy + half))))
         return [(score, blob["box"]) for score, blob in zip(self._clip_scores(crops), blobs) if score >= CLIP_MIN_PROBABILITY]
 
-    def _clip_tiles(self, frame):
-        self._prepare_clip()
+    @staticmethod
+    def _tile_boxes(frame):
         w, h = frame.size
-        tiles = [(0, 0, w, h)] + [(x, y, x + int(w * .6), y + int(h * .6))
-                                   for x in (0, int(w * .4)) for y in (0, int(h * .4))]
-        scores = self._clip_scores([frame.crop(t) for t in tiles])
+        return [(0, 0, w, h)] + [(x, y, x + int(w * .6), y + int(h * .6))
+                                  for x in (0, int(w * .4)) for y in (0, int(h * .4))]
+
+    @staticmethod
+    def _best_tile(scores, tiles, width):
         index = int(np.argmax(scores))
         if scores[index] < CLIP_MIN_PROBABILITY:
             return []
-        scale = ANALYSIS_WIDTH / w
+        scale = ANALYSIS_WIDTH / width
         return [(scores[index], tuple(v * scale for v in tiles[index]))]
+
+    def _clip_tiles(self, frame):
+        self._prepare_clip()
+        tiles = self._tile_boxes(frame)
+        return self._best_tile(self._clip_scores([frame.crop(t) for t in tiles]), tiles, frame.width)
+
+    @property
+    def batchable(self):
+        """Only the whole-frame CLIP check judges frames independently of each other, so frames can share a batch."""
+        return self.pattern is None and self.spec is not None and not (self.spec["color"] or self.spec["shape"])
+
+    def judge_many(self, frames):
+        """Same results as `judge` per frame, with all frames' tiles embedded in one CLIP batch (cheaper per crop)."""
+        self._prepare_clip()
+        tile_sets = [self._tile_boxes(frame) for frame in frames]
+        scores = self._clip_scores([frame.crop(t) for frame, tiles in zip(frames, tile_sets) for t in tiles])
+        results, offset = [], 0
+        for frame, tiles in zip(frames, tile_sets):
+            matches = self._best_tile(scores[offset:offset + len(tiles)], tiles, frame.width)
+            offset += len(tiles)
+            results.append(self._hit(matches, ANALYSIS_WIDTH, max(1, round(frame.height * ANALYSIS_WIDTH / frame.width))))
+        return results
 
 
 def _direction(points):
@@ -606,14 +635,28 @@ def count_video(engine, progress=lambda done, total: None, **args):
     # Apple Vision text recognition runs about twice as fast with two frames in flight; frames are
     # still added in order, so results match a serial run. Visual (CLIP) judging stays serial.
     workers = OCR_WORKERS if text and not description else 1
+    batched = judge.batchable
     pending = collections.deque()
+    open_batch = None  # [frames, future]: analyzed frames waiting to be judged together
+
+    def flush():
+        nonlocal open_batch
+        if open_batch is not None:
+            open_batch[1] = pool.submit(judge.judge_many, open_batch[0])
+            open_batch = None
 
     def settle(limit):
         nonlocal last_hit
         while len(pending) > limit:
             t, frame, future = pending.popleft()
             if future is not None:
-                last_hit = future.result()
+                if batched:
+                    batch, slot = future
+                    if batch[1] is None:
+                        flush()
+                    last_hit = batch[1].result()[slot]
+                else:
+                    last_hit = future.result()
             builder.add(t, last_hit, frame)
     with ThreadPoolExecutor(workers) as pool:
         for t, frame in _iter_frames(engine.source_path, start, end, fps, width, height, lambda n: progress(n, total)):
@@ -622,10 +665,18 @@ def count_video(engine, progress=lambda done, total: None, **args):
             if previous is not None and (np.abs(gray - previous) > STATIC_PIXEL_DELTA).sum() < STATIC_PIXEL_COUNT:
                 future = None
             else:
-                future = pool.submit(judge.judge, frame)
+                if batched:
+                    if open_batch is None:
+                        open_batch = [[], None]
+                    future = (open_batch, len(open_batch[0]))
+                    open_batch[0].append(frame)
+                    if len(open_batch[0]) >= CLIP_BATCH_FRAMES:
+                        flush()
+                else:
+                    future = pool.submit(judge.judge, frame)
                 previous, analyzed = gray, analyzed + 1
             pending.append((t, frame, future))
-            settle(workers * 4)
+            settle(CLIP_BATCH_FRAMES * 3 if batched else workers * 4)
         settle(0)
     spans = builder.finish()
     capped = len(spans) >= MAX_SPANS_LIMIT

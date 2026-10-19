@@ -33,6 +33,7 @@ FFMPEG_THREADS = 6
 TORCH_THREADS = 4
 SCENE_THRESHOLD = 0.3
 ORPHAN_TEMP_AGE_SEC = 300
+PREFETCH_CHUNKS = 3  # chunks decoded ahead of the embedding step, one FFmpeg each
 
 
 class ClipEncoder:
@@ -200,7 +201,7 @@ def sample_chunk(source_path, start_sec, end_sec, output_dir):
 def _build_locked(engine, stamp, duration, report):
     conn = _connect(engine)
     cache_dir = engine._cache.get_entry_dir(engine.metadata.fingerprint)
-    pending = {}  # chunk start -> (temp dir, future): the next chunk decodes while this one is embedded
+    pending = {}  # chunk start -> (temp dir, future): the next chunks decode while this one is embedded
 
     def prefetch(pool, start):
         if start < duration and start not in pending:
@@ -208,7 +209,7 @@ def _build_locked(engine, stamp, duration, report):
             end = min(duration, start + CHUNK_SEC)
             pending[start] = (temp, pool.submit(sample_chunk, engine.source_path, start_sec=start, end_sec=end,
                                                 output_dir=temp.name))
-    pool = ThreadPoolExecutor(1)
+    pool = ThreadPoolExecutor(PREFETCH_CHUNKS)
     try:
         report(_progress(conn, duration))
         while True:
@@ -216,13 +217,14 @@ def _build_locked(engine, stamp, duration, report):
             if start >= duration:
                 return {"status": "complete", **_progress(conn, duration)}
             end = min(duration, start + CHUNK_SEC)
+            prefetch(pool, start)  # decoding starts while the model loads
             encoder = get_encoder()
             rows = []
-            prefetch(pool, start)
             temp, future = pending.pop(start)
             with temp as temp_dir:
                 frames = future.result()
-                prefetch(pool, end)
+                for ahead in range(1, PREFETCH_CHUNKS + 1):
+                    prefetch(pool, start + ahead * CHUNK_SEC)
                 if not frames:
                     frames.append(extract_single_frame(engine.source_path, start,
                                                        output_path=Path(temp_dir) / "tail.jpg", width=224,
