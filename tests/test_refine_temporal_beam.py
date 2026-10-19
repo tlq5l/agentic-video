@@ -48,7 +48,7 @@ def test_refine_temporal_beam_partitions_parents_without_gaps(monkeypatch):
         calls.append((start_sec, end_sec, samples, cols))
         return _fake_sheet(start_sec, end_sec, samples, cols)
 
-    monkeypatch.setattr(engine, "overview", fake_overview)
+    monkeypatch.setattr(engine, "_overview_batch", lambda ranges: [fake_overview(**r) for r in ranges])
     result = engine.refine_temporal_beam(
         windows=[{"start_sec": 10.0, "end_sec": 50.0}, {"start_sec": 60.0, "end_sec": 100.0}],
         fanout=4,
@@ -89,8 +89,8 @@ def test_refine_temporal_beam_context_expands_and_clamps(monkeypatch):
     engine = _engine(duration=20.0)
     monkeypatch.setattr(
         engine,
-        "overview",
-        lambda samples=12, cols=4, start_sec=0.0, end_sec=None: _fake_sheet(start_sec, end_sec, samples, cols),
+        "_overview_batch",
+        lambda ranges: [_fake_sheet(r["start_sec"], r["end_sec"], r["samples"], r["cols"]) for r in ranges],
     )
 
     result = engine.refine_temporal_beam(
@@ -114,7 +114,7 @@ def test_refine_temporal_beam_rejects_budget_before_extraction(monkeypatch):
     def should_not_run(*args, **kwargs):
         raise AssertionError("extraction should not run before the budget gate")
 
-    monkeypatch.setattr(engine, "overview", should_not_run)
+    monkeypatch.setattr(engine, "_overview_batch", should_not_run)
     monkeypatch.setattr(engine, "detect_cuts", should_not_run)
     with pytest.raises(ExtractionBoundsError, match="max_total_samples"):
         engine.refine_temporal_beam(
@@ -146,8 +146,8 @@ def test_refine_temporal_beam_cut_alignment_is_bounded_and_deterministic(monkeyp
     engine = _engine()
     monkeypatch.setattr(
         engine,
-        "overview",
-        lambda samples=12, cols=4, start_sec=0.0, end_sec=None: _fake_sheet(start_sec, end_sec, samples, cols),
+        "_overview_batch",
+        lambda ranges: [_fake_sheet(r["start_sec"], r["end_sec"], r["samples"], r["cols"]) for r in ranges],
     )
     seen = []
 
@@ -175,8 +175,8 @@ def test_refine_temporal_beam_does_not_detect_cuts_by_default(monkeypatch):
     engine = _engine()
     monkeypatch.setattr(
         engine,
-        "overview",
-        lambda samples=12, cols=4, start_sec=0.0, end_sec=None: _fake_sheet(start_sec, end_sec, samples, cols),
+        "_overview_batch",
+        lambda ranges: [_fake_sheet(r["start_sec"], r["end_sec"], r["samples"], r["cols"]) for r in ranges],
     )
     monkeypatch.setattr(engine, "detect_cuts", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("unexpected cut detection")))
     result = engine.refine_temporal_beam(
@@ -196,7 +196,7 @@ def test_refine_temporal_beam_can_add_compact_parent_sheet(monkeypatch):
         calls.append((start_sec, end_sec, samples, cols))
         return _fake_sheet(start_sec, end_sec, samples, cols)
 
-    monkeypatch.setattr(engine, "overview", fake_overview)
+    monkeypatch.setattr(engine, "_overview_batch", lambda ranges: [fake_overview(**r) for r in ranges])
     result = engine.refine_temporal_beam(
         windows=[{"start_sec": 20.0, "end_sec": 60.0}],
         fanout=2,

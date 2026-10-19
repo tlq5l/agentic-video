@@ -2,12 +2,19 @@
 import hashlib
 import json
 import os
+import threading
 import time
 import uuid
 from pathlib import Path
 from typing import Optional, Any, Dict
 from src.core.config import Config
 from src.core.errors import ExtractionBoundsError, CacheWriteError
+
+# Process-wide fingerprint memo: handle_call builds a fresh MediaCache per
+# call, so a per-instance memo never hit. Entries are valid only while the
+# file's (dev, inode, size, mtime, ctime) stat tuple is unchanged.
+_FINGERPRINT_MEMO: Dict[str, tuple[tuple[int, int, int, int, int], str]] = {}
+_FINGERPRINT_MEMO_LOCK = threading.Lock()
 
 
 class MediaCache:
@@ -16,10 +23,9 @@ class MediaCache:
     def __init__(self, base_dir: Optional[Path] = None):
         self.base_dir = Path(base_dir or Config.BASE_CACHE_DIR)
         self.base_dir.mkdir(parents=True, exist_ok=True)
-        # Keep this memo scoped to the cache instance. The public method is
-        # assigned on the instance so the historical class-level static API
-        # remains available as ``MediaCache.compute_fingerprint(path)``.
-        self._fingerprint_memo: Dict[str, tuple[tuple[int, int, int, int, int], str]] = {}
+        # The public method is assigned on the instance so the historical
+        # class-level static API remains available as
+        # ``MediaCache.compute_fingerprint(path)``.
         self.compute_fingerprint = self._compute_fingerprint_memoized
     
     @staticmethod
@@ -69,12 +75,21 @@ class MediaCache:
             stat.st_mtime_ns,
             stat.st_ctime_ns,
         )
-        memo = self._fingerprint_memo.get(str(p))
+        with _FINGERPRINT_MEMO_LOCK:
+            memo = _FINGERPRINT_MEMO.get(str(p))
         if memo is not None and memo[0] == stat_key:
             return memo[1]
 
         fingerprint = MediaCache.compute_fingerprint(file_path)
-        self._fingerprint_memo[str(p)] = (stat_key, fingerprint)
+        # Re-stat after hashing: if the file changed while it was read, the
+        # hash may not match either stat, so do not memoize it.
+        try:
+            after = p.stat()
+        except OSError:
+            return fingerprint
+        if (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns) == stat_key:
+            with _FINGERPRINT_MEMO_LOCK:
+                _FINGERPRINT_MEMO[str(p)] = (stat_key, fingerprint)
         return fingerprint
 
     def get_entry_dir(self, fingerprint: str) -> Path:

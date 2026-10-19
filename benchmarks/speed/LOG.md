@@ -101,8 +101,8 @@ Counts and span output identical.
 - Caching per-frame results so a rerun with only min_gap_sec/max_spans changed skips decoding (cold benchmark won't show it).
 
 ## Not tried / measured and dropped
-- Process-wide fingerprint memo: a cold call hashes the source once or twice and the hash takes
-  0.01 s per call on the benchmark files (MediaCache already memoizes per instance). Nothing to gain.
+- Process-wide fingerprint memo: dropped on the 0.4 MB benchmark files (0.01 s per hash); kept later for big files, see
+  "Frame tools" below.
 - Contact-sheet timeouts that leave ffmpeg running: only matters on timeout, no speed effect.
 
 ## count_occurrences rerun cache (perf/count-rerun)
@@ -223,3 +223,28 @@ Not tried: vectorising frame_splices' adjacent differences (about 1.5 s of 46), 
   frozen_pictures, change_shares on fixture_60s, flower, sample_10s, x_post_127s, clip_415s, fixture_60s again: all dicts equal.
 - Re-timed, 2 pairs, clip_415s all scans, CPU/wall s: 168.7/23.1, 169.4/23.2 -> 31.9/11.0, 32.2/11.1.
   Peak RSS 369 -> 938 MB (1080p, 415 s).
+## Frame tools (perf/frame-tools, off b514629)
+Bench: `benchmarks/speed/frames.py` (cold cache per tool through handle_call, clip_415s, JSON equal and images >= 40 dB
+PSNR against a saved baseline). Mac loaded; interleaved old/new pairs, wall s.
+Kept:
+- One shared contact-sheet extraction pool (`build_contact_sheets`, 4 threads) for refine_temporal_beam children,
+  inspect_moments and overview_chunks. refine_temporal_beam 2.23/2.37/3.49/2.52 -> 1.63/2.02/1.85/1.94 (4/4 pairs, ~-25%).
+  overview_chunks and inspect_moments are flat (within noise), CPU +10 to 40%. Honest result: they were already
+  decode-bound, only the per-item waiting of refine_temporal_beam went away.
+- inspect_windows: windows extracted by 4 workers (WINDOW_WORKERS). 0.84/0.84/0.71/0.74 -> 0.49/0.46/0.58/0.50 (4/4, ~-36%).
+- mcp_server text block as compact JSON (`separators=(",", ":")`): track_region_changes text 48767 -> 34393 B (-30%),
+  build 1.17 -> 0.64 ms; json.loads equal. Under 1 ms absolute, kept because it is smaller and simpler.
+- Process-wide, lock-protected fingerprint memo in cache.py (handle_call builds a new MediaCache per call, so the old
+  per-instance memo never hit). Key: path + (dev, inode, size, mtime_ns, ctime_ns), re-checked after hashing so a file
+  that changes mid-hash is not memoized. 2 GB file (87 copies of clip_415s), probe_video called 4 times in one process,
+  4 pairs: old 0.85-0.95 s every call; new 0.85-0.88 s on the first call, 0.000 s on calls 2-4 (4/4). First call unchanged.
+  Test `..._isolated_between_cache_instances` changed to `..._shared_...` (1 open instead of 2).
+Dropped:
+- track_region_changes/events scan segments in parallel (cap 4): changes 3.7/5.1/5.3/5.7 -> 4.9/5.5/4.9/4.5, no gain; the
+  scan is decode-bound and timeout halving is untouched.
+- `-skip_loop_filter` on gray analysis decodes: scores shift (max ~0.001) and on clip_415s cut times/kinds differ, so it
+  fails the identical-cuts guard. (The jsonl description of run 6 says identical on 5 videos; that is wrong for clip_415s.)
+- fit_response double dump: not changed (its size check still uses default separators, which only over-estimates; unmeasured).
+Final state vs saved baseline: frames.py exit 0 (output equal), run.py no QUALITY_FAIL (SCORE 75.53 cpu s, WALL 21.58 s).
+Final frames.py walls: overview_chunks 1.13, inspect_moments 2.34, inspect_windows 0.59, refine_temporal_beam 1.74,
+track_region_changes 5.86, track_region_events 5.26 s.

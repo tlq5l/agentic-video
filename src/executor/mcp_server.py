@@ -372,7 +372,7 @@ def _text_copy(node: Any) -> Any:
 
 def _success_result(data: Dict[str, Any]) -> Dict[str, Any]:
     return {
-        "content": [{"type": "text", "text": json.dumps(_text_copy(data), indent=2)}],
+        "content": [{"type": "text", "text": json.dumps(_text_copy(data), separators=(",", ":"))}],
         "structuredContent": data,
     }
 
