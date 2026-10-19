@@ -784,6 +784,49 @@ export interface ContactSheetOutput {
 // Unified Agentic Video Namespace Interface in Executor
 // ============================================================================
 
+export interface ReviewVideoInput {
+  source: string;
+  /** Contact sheet thumbnails (default 24); values above 150 are clamped to 150 and the result says so. */
+  samples?: number;
+}
+
+export interface ReviewVideoLoudness {
+  /** Energy-averaged RMS level over the whole video, in dBFS. */
+  average_rms_dbfs: number | null;
+  peak_dbfs: number;
+  peak_sec: number;
+  window_sec: number;
+  silence_threshold_dbfs: number;
+  /** At most 20 silent stretches, in time order. */
+  silence_gaps: Array<{ start_sec: number; end_sec: number; duration_sec: number; threshold_dbfs: number }>;
+  silence_gaps_total: number;
+  outliers_total: number;
+  fault_outliers_total: number;
+  /** At most 10: fault-level first, then the largest delta_db. Call loudness_timeline for the full list. */
+  outliers: Array<{
+    start_sec: number;
+    end_sec: number;
+    band: string;
+    direction: string;
+    shape: string;
+    delta_db: number;
+    fault_level: boolean;
+  }>;
+}
+
+export interface ReviewVideoOutput {
+  /** Same fields as probe_video. */
+  metadata: ProbeVideoOutput;
+  /** Same fields as contact_sheet. */
+  contact_sheet: ContactSheetOutput;
+  cuts: SceneCut[];
+  cuts_total: number;
+  cuts_omitted?: number;
+  /** Null when the video has no audio track. */
+  loudness: ReviewVideoLoudness | null;
+  note?: string;
+}
+
 export interface OverviewChunksInput {
   source: string;
   /** Target duration of each contiguous coarse chunk, in seconds (default 60, maximum 600). */
@@ -1100,6 +1143,9 @@ export interface AgenticVideoIntegration {
    * One grid image of evenly spaced frames with timestamps: the cheapest way to survey a video (samples up to 150).
    */
   contact_sheet(input: ContactSheetInput): Promise<ToolResult<WithUrlSource<ContactSheetOutput>>>;
+
+  /** First look in one call: metadata, contact sheet, cuts and a loudness summary (runs probe_video, contact_sheet, detect_cuts, loudness_timeline). */
+  review_video(input: ReviewVideoInput): Promise<ToolResult<WithUrlSource<ReviewVideoOutput>>>;
 
   /** Survey a long video as consecutive contact sheets (at most 32 per call). */
   overview_chunks(input: OverviewChunksInput): Promise<ToolResult<WithUrlSource<OverviewChunksOutput>>>;

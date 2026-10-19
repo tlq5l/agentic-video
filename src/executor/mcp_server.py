@@ -469,6 +469,58 @@ def handle_call(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
     return outcome
 
 
+MAX_REVIEW_OUTLIERS = 10
+MAX_REVIEW_SILENCE_GAPS = 20
+
+
+def _loudness_summary(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Boil a full loudness_timeline result down to what a first look needs."""
+    rms = [w["rms_dbfs"] for w in data["windows"] if isinstance(w.get("rms_dbfs"), (int, float)) and math.isfinite(w["rms_dbfs"])]
+    average = round(10 * math.log10(sum(10 ** (v / 10) for v in rms) / len(rms)), 3) if rms else None
+    outliers = data["outliers"]
+    strongest = sorted(outliers, key=lambda o: (not o["fault_level"], -abs(o["delta_db"])))[:MAX_REVIEW_OUTLIERS]
+    gaps = data["silence_gaps"]
+    return {
+        "average_rms_dbfs": average,
+        "peak_dbfs": data["peak_dbfs"],
+        "peak_sec": data["peak_sec"],
+        "window_sec": data["window_sec"],
+        "silence_threshold_dbfs": data["silence_threshold_dbfs"],
+        "silence_gaps": gaps[:MAX_REVIEW_SILENCE_GAPS],
+        "silence_gaps_total": len(gaps),
+        "outliers_total": len(outliers),
+        "fault_outliers_total": sum(1 for o in outliers if o["fault_level"]),
+        "outliers": [{key: o[key] for key in ("start_sec", "end_sec", "band", "direction", "shape", "delta_db", "fault_level")}
+                     for o in strongest],
+    }
+
+
+def _review_video(args: Dict[str, Any]) -> Dict[str, Any]:
+    """First look at a video in one call: metadata, contact sheet, cuts and a loudness summary.
+
+    Runs the same code as probe_video, contact_sheet, detect_cuts and loudness_timeline.
+    Any of them failing fails the whole call with that tool's own error.
+    """
+    source = args["source"]
+    data: Dict[str, Any] = {"metadata": AgenticVideoEngine(source).probe().to_dict()}
+    sheet_args = {"source": source, "samples": args.get("samples", 24)}
+    data["contact_sheet"] = _dispatch("contact_sheet", sheet_args)["data"]
+    cuts = _dispatch("detect_cuts", {"source": source})["data"]
+    data["cuts"] = cuts["cuts"]
+    data["cuts_total"] = cuts["total"]
+    for key in ("cuts_omitted", "note"):
+        if key in cuts:
+            data[key] = cuts[key]
+    if data["metadata"]["has_audio"]:
+        data["loudness"] = _loudness_summary(AgenticVideoEngine(source).loudness_timeline())
+    else:
+        data["loudness"] = None
+        _add_note(data, "No audio track, so loudness is null.")
+    if "note" in data["contact_sheet"]:
+        _add_note(data, data["contact_sheet"].pop("note"))
+    return {"ok": True, "data": data}
+
+
 def _dispatch(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
     source = args.get("source", "")
     engine = AgenticVideoEngine(source)
@@ -594,6 +646,9 @@ def _dispatch(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         d["tool_file"] = make_tool_file(sheet.file_path)
         return {"ok": True, "data": d}
         
+    elif name == "review_video":
+        return _review_video(args)
+
     elif name == "overview_chunks":
         chunk_sec = float(args.get("chunk_sec", 60.0))
         samples_per_chunk = int(args.get("samples_per_chunk", 8))

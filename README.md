@@ -6,9 +6,9 @@ agentic-video lets an AI agent that reads text and images, but not video, work w
 
 ## What it gives an agent
 
-The MCP server exposes 20 tools (full schemas in `src/adapters/mcp_schemas.json`):
+The MCP server exposes 21 tools (full schemas in `src/adapters/mcp_schemas.json`):
 
-- **Look:** `probe_video` (duration, fps, size, codecs, audio), `contact_sheet`, `overview_chunks` (consecutive sheets across a long video), `inspect_window` / `inspect_windows` (dense frames for short ranges), `inspect_moments` (frames around given instants), `refine_temporal_beam` (zoom into candidate windows).
+- **Look:** `review_video` (first look in one call: metadata, contact sheet, cuts and a loudness summary), `probe_video` (duration, fps, size, codecs, audio), `contact_sheet`, `overview_chunks` (consecutive sheets across a long video), `inspect_window` / `inspect_windows` (dense frames for short ranges), `inspect_moments` (frames around given instants), `refine_temporal_beam` (zoom into candidate windows).
 - **Listen:** `transcribe` (timestamped speech, cached), `search_transcript` (find when words are spoken).
 - **Find:** `detect_cuts` (hard cuts and animated scene changes), `build_visual_index` + `search_visual` (local CLIP search for things that are visible, optional).
 - **Count and track:** `count_occurrences` (separate appearances of an object or on-screen text), `count_repetitions` (cycles of a repeated action), `track_region_changes` / `track_region_events` (changes inside one fixed rectangle).

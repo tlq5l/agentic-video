@@ -21,6 +21,7 @@ EXPECTED_TOOLS = {
     "count_repetitions",
     "count_occurrences",
     "contact_sheet",
+    "review_video",
     "overview_chunks",
     "refine_temporal_beam",
     "track_region_changes",

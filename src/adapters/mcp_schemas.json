@@ -1065,6 +1065,211 @@
         "additionalProperties": false
       }
     },
+    "review_video": {
+      "name": "review_video",
+      "description": "First look at a video in ONE call: container metadata (duration, size, fps, codecs, has_audio), a contact sheet image with burned timestamp badges (default 24 samples; `samples` up to 150, larger values are clamped and the result says so), every cut and transition from detect_cuts, and a loudness summary (average and peak level, silence gaps, the strongest band-energy outliers with their times). It runs probe_video, contact_sheet, detect_cuts and loudness_timeline for you, so start here instead of calling them one by one. Finishes in a few seconds on clips up to about 10 minutes. `loudness` is null when the video has no audio track. Use the times it returns to zoom in with inspect_window or spectrogram_window; for a different threshold, window or time range call detect_cuts or loudness_timeline directly. Any step failing fails the whole call with that step's error message.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source."
+          },
+          "samples": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 24,
+            "description": "Contact sheet thumbnails (default 24; values above 150 are clamped to 150 and the result says so)."
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "source_url": {
+            "type": "string",
+            "description": "The video URL you passed as `source`; only present when `source` was a URL."
+          },
+          "local_path": {
+            "type": "string",
+            "description": "Cached local copy of `source_url`; pass it to other tools or ffmpeg to skip the URL lookup."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "in_progress"
+            ]
+          },
+          "retry_after_seconds": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "note": {
+            "type": "string",
+            "description": "Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument."
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Same fields as probe_video: source_path, duration_sec, width, height, fps, format_name, size_bytes, has_audio, audio_codec, video_codec, fingerprint."
+          },
+          "contact_sheet": {
+            "type": "object",
+            "description": "Same fields as contact_sheet: file_path, sample_count, rows, cols, start_sec, end_sec, timestamps, frame_width, frame_height, tool_file (the image), and samples_clamped_from when samples was lowered."
+          },
+          "cuts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "timestamp_sec": {
+                  "type": "number",
+                  "description": "Time of the change in seconds. For a cut this is the first frame of the new shot; for a transition it is the middle."
+                },
+                "score": {
+                  "type": "number",
+                  "description": "Detector strength 0-1. Not comparable between kinds. A cut between two similar pictures can score below the threshold."
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "cut",
+                    "transition"
+                  ],
+                  "description": "\"cut\" for a hard cut, \"transition\" for an animated change (fade, dissolve, slide, wipe, zoom)."
+                }
+              },
+              "required": [
+                "timestamp_sec",
+                "score",
+                "kind"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "cuts_total": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "How many cuts and transitions were found in all."
+          },
+          "cuts_omitted": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "How many cuts entries were left out of the list."
+          },
+          "loudness": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Null when the video has no audio track.",
+            "properties": {
+              "average_rms_dbfs": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "Energy-averaged RMS level over the whole video, in dBFS."
+              },
+              "peak_dbfs": {
+                "type": "number",
+                "description": "Loudest sample on any channel, in dBFS."
+              },
+              "peak_sec": {
+                "type": "number"
+              },
+              "window_sec": {
+                "type": "number",
+                "description": "Window length the outliers were measured in."
+              },
+              "silence_threshold_dbfs": {
+                "type": "number"
+              },
+              "silence_gaps": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                },
+                "description": "At most 20 silent stretches, in time order."
+              },
+              "silence_gaps_total": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "outliers_total": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "All band-energy outliers found."
+              },
+              "fault_outliers_total": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "How many outliers are fault level (not informational)."
+              },
+              "outliers": {
+                "type": "array",
+                "description": "At most 10: fault-level first, then the largest delta_db. Call loudness_timeline for the full list.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "start_sec": {
+                      "type": "number"
+                    },
+                    "end_sec": {
+                      "type": "number"
+                    },
+                    "band": {
+                      "type": "string"
+                    },
+                    "direction": {
+                      "type": "string"
+                    },
+                    "shape": {
+                      "type": "string"
+                    },
+                    "delta_db": {
+                      "type": "number"
+                    },
+                    "fault_level": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "anyOf": [
+          {
+            "required": [
+              "metadata",
+              "contact_sheet",
+              "cuts",
+              "cuts_total",
+              "loudness"
+            ]
+          },
+          {
+            "required": [
+              "status",
+              "source_url",
+              "retry_after_seconds"
+            ],
+            "not": {
+              "required": [
+                "local_path"
+              ]
+            }
+          }
+        ],
+        "additionalProperties": false
+      }
+    },
     "overview_chunks": {
       "name": "overview_chunks",
       "description": "Survey a long video as consecutive contact sheets, one per chunk_sec (default 60 s), so every stretch is covered in order. At most max_chunks sheets per call (default and maximum 32): for a longer video raise chunk_sec or page through it with start_sec/end_sec; a call over budget fails and says what chunk_sec would fit. samples_per_chunk defaults to 8 (maximum 150, larger values are clamped). Use contact_sheet instead when one sheet is enough.",

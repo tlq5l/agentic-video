@@ -12,6 +12,7 @@ When an agent is tasked with answering questions about a video, **never scan the
 
 ```text
 1. PROBE       ──> Check duration, resolution, stream types, and audio presence.
+                   `review_video({ source })` does this plus a contact sheet, cuts and a loudness summary in one call.
 2. TRIAGE      ──> Decide if the question is acoustic (speech/dialogue) or visual.
 3. FORAGE      ──> If acoustic, query transcript first (0 vision tokens).
                    If visual, generate a coarse overview contact sheet (1 image, ~258 tokens).
