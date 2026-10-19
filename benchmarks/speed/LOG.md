@@ -104,3 +104,16 @@ Counts and span output identical.
 - Process-wide fingerprint memo: a cold call hashes the source once or twice and the hash takes
   0.01 s per call on the benchmark files (MediaCache already memoizes per instance). Nothing to gain.
 - Contact-sheet timeouts that leave ffmpeg running: only matters on timeout, no speed effect.
+
+## Sound tools (audio_onsets x5 bands, loudness_timeline, sync_check)
+Bench: `benchmarks/speed/audio.py` (result caches bypassed, output compared with a saved baseline).
+clip_415s total CPU, 4 pairs old/new: 93.2/100.8/130.5/110.7 s -> 11.5/12.1/14.8/15.3 s (4/4 wins, ~8x).
+Per tool, clip_415s (old -> new, CPU s): broad 3.1->0.8, low_mid 4.5->0.8, mid 15.8->1.1, high 18.4->1.2,
+air 19.9->1.2, loudness 14.3->3.2, sync_check 33.5->4.4. fixture_60s 2.42->1.88, x_post_127s 17.5->5.3.
+Synthetic 1 h (clip looped): new code ~266 s CPU before the memory fix; loudness peak memory 11 GB -> 3.8 GB
+after. No old-code 1 h number (old debounce is quadratic). No QUALITY_FAIL on any video.
+Kept: debounce mask, leave-one-out median from one sorted copy, lru_cache on windows/frequencies/band masks,
+batched onset FFTs, band-planned content-change spectra (bands share a pass up to 256 MB; one band is not split).
+Dropped (no gain): transposed-matrix median, vectorized _silence_gaps, median overwrite_input.
+Not tried: cache save_json indent=2 encoder (~25% of an onset call; touches src/core/cache.py), global-sort
+exact median, shared STFT in sync_check, batching _measure_window.
