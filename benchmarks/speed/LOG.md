@@ -125,7 +125,7 @@ Input: clip_415s audio looped to 3600 s (m4a; mp4 for the handle_call video runs
 1 h, old -> new (one run each, same session):
 - loudness_timeline default: 75.8 / 80.2 -> 10.2 / 29.5 (earlier runs under heavier load: 99-113 s wall). Peak 4.2 -> 4.5 GB.
 - loudness_timeline 1 s windows: 35.3 / 39.7 -> 8.4 / 23.0. With ignore ranges + bpm: 84.2 / 88.5 (old).
-- sync_check, 6 cues: 66.5 / 66.2 -> 20.9 / 66.2 (wall / CPU in the harness: 20.9 / 66.2). Earlier old runs: 131-157 s wall.
+- sync_check, 6 cues: 66.5 / 66.2 -> 20.9 / 66.2 (earlier old runs under heavier load: 131-157 s wall).
 - sync_check, 13 cues (rich): 105.0 / 104.4 -> 46.1 / 103.1.
 - sync_check, 13 cues + bpm=120 (direct call; handle_call has no bpm): 161.1 / 160.6 -> 94.8 / 152.4. NOT under 60 s:
   the time is _simple_supports_time (8,150 calls, ~627k small Python `at` calls and 56k level_test calls). Left alone.
@@ -133,8 +133,10 @@ Input: clip_415s audio looped to 3600 s (m4a; mp4 for the handle_call video runs
 - handle_call sync_check on a 1 h mp4 (6 cues): old 69.2 / 68.7 with cut scan cached; new 23.3 / 68.5 cached,
   50.1 / 442 with the first (uncached) cut scan, which is about 27 s of that. Thin margin on a loaded machine.
 - handle_call loudness_timeline on the 1 h mp4: 87.4 / 92.0 -> 10.6 / 30.1.
-Other videos, new code wall s (old in brackets), sync_check 6 cues / loudness default:
-fixture_60s 0.4 (0.4?) / 0.1; x_post_127s 0.7 (3.9) / 0.4 (0.5); clip_415s 1.1 / 1.1 (see harness logs; old not re-run here).
+Other videos, old -> new, wall / CPU s (loudness default | sync_check 6 cues):
+- x_post_127s: 0.5 / 0.6 -> 0.4 / 0.6 | 3.9 / 14.1 -> 0.7 / 1.6.
+- clip_415s: 2.2 / 2.7 -> 1.1 / 2.6 | 6.1 / 40.7 -> 1.1 / 3.2.
+- fixture_60s: both under 1 s before and after (new: 0.1 s | 0.4 s).
 Same output: byte-identical JSON on all 4 inputs (1 h m4a, clip_415s, x_post_127s, fixture_60s) for loudness_timeline
 (default, ignore ranges + bpm, 1 s windows, range), sync_check (with and without bpm, cues 6/13/none) and audio_onsets
 (broad + sub/low_mid/mid/high/air + min_strength/range); also handle_call sync_check and loudness_timeline on the 1 h mp4.
