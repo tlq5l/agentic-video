@@ -7,6 +7,7 @@ onset times are quantized to that resolution rather than inferred by ear.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import math
@@ -180,6 +181,35 @@ def _db(power: float, floor_db: float = -120.0) -> float:
     return max(floor_db, 10.0 * math.log10(power))
 
 
+@functools.lru_cache(maxsize=32)
+def _hann(length: int) -> np.ndarray:
+    """Read-only Hann window (float64); the same lengths recur for every onset."""
+    window = np.hanning(length)
+    window.setflags(write=False)
+    return window
+
+
+@functools.lru_cache(maxsize=32)
+def _rfft_frequencies(size: int) -> np.ndarray:
+    frequencies = np.fft.rfftfreq(size, d=1.0 / SAMPLE_RATE)
+    frequencies.setflags(write=False)
+    return frequencies
+
+
+@functools.lru_cache(maxsize=64)
+def _hz_mask(size: int, low_hz: float, high_hz: float) -> np.ndarray:
+    frequencies = _rfft_frequencies(size)
+    mask = (frequencies >= low_hz) & (frequencies < high_hz)
+    mask.setflags(write=False)
+    return mask
+
+
+@functools.lru_cache(maxsize=32)
+def _named_band_masks(size: int) -> Tuple[Tuple[str, np.ndarray], ...]:
+    frequencies = _rfft_frequencies(size)
+    return tuple((name, (frequencies >= lower) & (frequencies < upper)) for name, lower, upper in BANDS)
+
+
 def _band_profile(segment: np.ndarray, fft_size: Optional[int] = None) -> Dict[str, float]:
     if len(segment) == 0:
         return {name: -120.0 for name, _, _ in BANDS}
@@ -187,16 +217,14 @@ def _band_profile(segment: np.ndarray, fft_size: Optional[int] = None) -> Dict[s
         size = 1 << int(math.ceil(math.log2(max(32, len(segment)))))
     else:
         size = max(32, int(fft_size))
-    window = np.hanning(len(segment)).astype(np.float64)
+    window = _hann(len(segment))
     values = np.asarray(segment, dtype=np.float64)
     transformed = np.fft.rfft(values * window, n=size)
     power = (np.abs(transformed) ** 2) / max(1.0, float(np.sum(window) ** 2))
     if len(power) > 2:
         power[1:-1] *= 2.0
-    frequencies = np.fft.rfftfreq(size, d=1.0 / SAMPLE_RATE)
     profile: Dict[str, float] = {}
-    for name, lower, upper in BANDS:
-        mask = (frequencies >= lower) & (frequencies < upper)
+    for name, mask in _named_band_masks(size):
         profile[name] = round(_db(float(np.sum(power[mask]))), 3)
     return profile
 
@@ -239,13 +267,12 @@ def _band_energy_db(segment: np.ndarray, band: Dict[str, Any]) -> float:
         return -120.0
     values = np.asarray(segment, dtype=np.float64)
     size = 1 << int(math.ceil(math.log2(max(32, len(values)))))
-    window = np.hanning(len(values))
+    window = _hann(len(values))
     transformed = np.fft.rfft(values * window, n=size)
     power = np.abs(transformed) ** 2 / max(1.0, float(np.sum(window * window)))
     if len(power) > 2:
         power[1:-1] *= 2.0
-    frequencies = np.fft.rfftfreq(size, d=1.0 / SAMPLE_RATE)
-    mask = (frequencies >= band["low_hz"]) & (frequencies < band["high_hz"])
+    mask = _hz_mask(size, band["low_hz"], band["high_hz"])
     return round(_db(float(np.sum(power[mask]))), 3)
 
 
@@ -290,6 +317,45 @@ def _stft_flux(
     return flux
 
 
+def _onset_spectra(
+    samples: np.ndarray, spans: Sequence[Tuple[int, int]], band: Optional[Dict[str, Any]],
+) -> List[Tuple[Dict[str, float], Optional[float]]]:
+    """`_band_profile` (and `_band_energy_db` for a band) of many sample spans.
+
+    Equal-length spans share one batched FFT; the per-span formulas are those
+    of `_band_profile` and `_band_energy_db`.
+    """
+    results: List[Optional[Tuple[Dict[str, float], Optional[float]]]] = [None] * len(spans)
+    by_length: Dict[int, List[int]] = {}
+    for position, (first, last) in enumerate(spans):
+        by_length.setdefault(last - first, []).append(position)
+    for length, positions in by_length.items():
+        size = 1 << int(math.ceil(math.log2(max(32, length))))
+        window = _hann(length)
+        profile_denominator = max(1.0, float(np.sum(window) ** 2))
+        energy_denominator = max(1.0, float(np.sum(window * window)))
+        masks = _named_band_masks(size)
+        band_mask = None if band is None else _hz_mask(size, band["low_hz"], band["high_hz"])
+        for chunk_start in range(0, len(positions), 512):
+            chunk = positions[chunk_start:chunk_start + 512]
+            values = np.stack([np.asarray(samples[spans[p][0]:spans[p][1]], dtype=np.float64) for p in chunk])
+            squared = np.abs(np.fft.rfft(values * window, n=size, axis=1)) ** 2
+            profile_power = squared / profile_denominator
+            if profile_power.shape[1] > 2:
+                profile_power[:, 1:-1] *= 2.0
+            band_sums = {name: np.sum(profile_power[:, mask], axis=1) for name, mask in masks}
+            if band_mask is not None:
+                energy_power = squared / energy_denominator
+                if energy_power.shape[1] > 2:
+                    energy_power[:, 1:-1] *= 2.0
+                energy_sums = np.sum(energy_power[:, band_mask], axis=1)
+            for row, position in enumerate(chunk):
+                profile = {name: round(_db(float(band_sums[name][row])), 3) for name, _ in masks}
+                energy = None if band_mask is None else round(_db(float(energy_sums[row])), 3)
+                results[position] = (profile, energy)
+    return results  # type: ignore[return-value]
+
+
 def _detect_onsets_in_samples(
     samples: np.ndarray,
     start: float,
@@ -318,12 +384,15 @@ def _detect_onsets_in_samples(
     selected: List[int] = []
     debounce_sec = 0.010 if band is not None else 0.030
     min_gap_frames = max(1, int(round(debounce_sec * SAMPLE_RATE / HOP_SAMPLES)))
+    blocked = np.zeros(len(envelope), dtype=bool)
     for index in ranked:
-        if all(abs(index - chosen) >= min_gap_frames for chosen in selected):
+        if not blocked[index]:
             selected.append(index)
+            blocked[max(0, index - min_gap_frames + 1):index + min_gap_frames] = True
     selected.sort()
 
-    onsets = []
+    onsets: List[Dict[str, Any]] = []
+    spans: List[Tuple[int, int]] = []
     for index in selected:
         # A centered 2048-sample window first sees an attack as it enters its
         # right edge, half a window before the attack time. Correct that known
@@ -336,7 +405,6 @@ def _detect_onsets_in_samples(
             continue
         sample_index = min(len(samples) - 1, max(0, int(round(time_sec * SAMPLE_RATE))))
         profile_end = min(len(samples), sample_index + int(0.085 * SAMPLE_RATE))
-        profile = _band_profile(samples[sample_index:profile_end])
         activity = np.asarray(samples[sample_index:profile_end], dtype=np.float64)
         activity_rms = float(np.sqrt(np.mean(activity * activity))) if len(activity) else 0.0
         if activity_rms < 1e-4:
@@ -346,10 +414,13 @@ def _detect_onsets_in_samples(
         onsets.append({
             "time_sec": round(time_sec, 6),
             "strength": round(float(envelope[index]), 6),
-            "band_db": profile,
         })
-        if band is not None:
-            onsets[-1]["band_energy_db"] = _band_energy_db(activity, band)
+        spans.append((sample_index, profile_end))
+    spectra = _onset_spectra(samples, spans, band)
+    for onset, (profile, band_energy) in zip(onsets, spectra):
+        onset["band_db"] = profile
+        if band_energy is not None:
+            onset["band_energy_db"] = band_energy
     return onsets
 
 
@@ -523,18 +594,41 @@ def _outlier_sections(
         candidates: Dict[str, List[int]] = {"boost": [], "cut": []}
         baselines: Dict[int, float] = {}
         deltas: Dict[int, float] = {}
-        for index, window in enumerate(windows):
-            energy = float(window["band_db"][band])
+        energies_all = [float(window["band_db"][band]) for window in windows]
+        # Leave-one-out median of the non-silent, audible windows, computed
+        # from one sorted copy: dropping the window at sorted rank r shifts the
+        # middle element(s) by at most one place.
+        usable = [
+            index for index, window in enumerate(windows)
+            if not window["silent"] and energies_all[index] > -90.0
+        ]
+        usable_values = np.asarray([energies_all[index] for index in usable], dtype=np.float64)
+        order = np.argsort(usable_values, kind="stable")
+        sorted_values = usable_values[order]
+        rank_of = {usable[int(position)]: rank for rank, position in enumerate(order)}
+        count = len(usable)
+
+        def _median_without(rank: Optional[int]) -> Optional[float]:
+            remaining = count - (0 if rank is None else 1)
+            if remaining < 1:
+                return None
+
+            def at(position: int) -> float:
+                if rank is not None and position >= rank:
+                    position += 1
+                return float(sorted_values[position])
+
+            if remaining % 2:
+                return at(remaining // 2)
+            return float(np.mean([at(remaining // 2 - 1), at(remaining // 2)]))
+
+        for index in range(len(windows)):
+            energy = energies_all[index]
             if energy <= -90.0:
                 continue
-            rest = [
-                float(other["band_db"][band])
-                for other_index, other in enumerate(windows)
-                if other_index != index and not other["silent"] and float(other["band_db"][band]) > -90.0
-            ]
-            if not rest:
+            baseline = _median_without(rank_of.get(index))
+            if baseline is None:
                 continue
-            baseline = float(np.median(rest))
             delta = energy - baseline
             baselines[index] = baseline
             deltas[index] = delta
@@ -635,6 +729,27 @@ _NEW_CONTENT_SHARE = 0.20
 _RAISED_EXISTING_SHARE = 0.60
 
 
+_SPECTRA_CACHE_MAX_BYTES = 256 * 1024 * 1024
+
+
+def _band_power_rows(
+    samples: np.ndarray, size: int, hop: int, rows: int, bands: Sequence[str],
+) -> Dict[str, np.ndarray]:
+    """Power spectra (one row per hop-spaced frame) restricted to each named band's bins."""
+    masks = dict(_named_band_masks(size))
+    window = _hann(size)
+    out = {name: np.empty((rows, int(masks[name].sum()))) for name in bands}
+    frames_per_chunk = 64
+    for row in range(0, rows, frames_per_chunk):
+        count = min(frames_per_chunk, rows - row)
+        block = np.asarray(samples[row * hop:(row + count - 1) * hop + size], dtype=np.float64)
+        frames = np.lib.stride_tricks.sliding_window_view(block, size)[::hop]
+        power = np.abs(np.fft.rfft(frames * window, axis=1)) ** 2
+        for name in bands:
+            out[name][row:row + count] = power[:, masks[name]]
+    return out
+
+
 def _mark_content_changes(
     sections: List[Dict[str, Any]], samples: np.ndarray, ignore_ranges: Sequence[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
@@ -645,7 +760,11 @@ def _mark_content_changes(
     nearly absent (a bass line moving up into the band), or the band's usual
     content does not rise, the step is a change of arrangement: it stays in
     the outliers as informational.
+
+    Frame spectra are computed once per frame size and shared by the sections
+    that use it (bands are grouped so the kept matrices stay under a memory cap).
     """
+    eligible: Dict[int, List[Dict[str, Any]]] = {}
     for section in sections:
         if not section.get("fault_level") or section.get("direction") != "boost":
             continue
@@ -655,39 +774,54 @@ def _mark_content_changes(
             size //= 2
         if size > (end - start) * SAMPLE_RATE:
             continue
-        low, high = next((lo, hi) for name, lo, hi in BANDS if name == section["band"])
-        frequencies = np.fft.rfftfreq(size, d=1.0 / SAMPLE_RATE)
-        mask = (frequencies >= low) & (frequencies < high)
-        window = np.hanning(size)
-        inside: List[np.ndarray] = []
-        outside: List[np.ndarray] = []
-        for first in range(0, len(samples) - size + 1, size // 4):
-            seg_start, seg_end = first / float(SAMPLE_RATE), (first + size) / float(SAMPLE_RATE)
-            if start <= seg_start and seg_end <= end:
-                target = inside
-            elif (seg_end <= start or seg_start >= end) and not any(
-                    seg_start < item["end_sec"] and item["start_sec"] < seg_end for item in ignore_ranges):
-                target = outside
+        eligible.setdefault(size, []).append(section)
+
+    for size, size_sections in eligible.items():
+        hop = size // 4
+        first_samples = np.arange(0, len(samples) - size + 1, hop)
+        rows = len(first_samples)
+        seg_start = first_samples / float(SAMPLE_RATE)
+        seg_end = (first_samples + size) / float(SAMPLE_RATE)
+        bins_of = {name: int(mask.sum()) for name, mask in _named_band_masks(size)}
+        wanted = list(dict.fromkeys(section["band"] for section in size_sections))
+        groups: List[List[str]] = []
+        for name in wanted:
+            if groups and rows * 8 * sum(bins_of[n] for n in groups[-1] + [name]) <= _SPECTRA_CACHE_MAX_BYTES:
+                groups[-1].append(name)
             else:
-                continue
-            spectrum = np.abs(np.fft.rfft(np.asarray(samples[first:first + size], dtype=np.float64) * window)) ** 2
-            target.append(spectrum[mask])
-        if not inside or len(outside) < 4:
-            continue
-        in_power = np.mean(np.asarray(inside), axis=0)
-        out_power = np.median(np.asarray(outside), axis=0)
-        if float(np.sum(in_power)) <= 0.0 or float(np.sum(out_power)) <= 0.0:
-            continue
-        delta = 10.0 * math.log10(float(np.sum(in_power)) / float(np.sum(out_power)))
-        rise = 10.0 * np.log10((in_power + 1e-20) / (out_power + 1e-20))
-        new_share = float(np.sum(in_power[rise >= delta + _NEW_CONTENT_EXCESS_DB]) / np.sum(in_power))
-        raised_share = float(np.sum(out_power[rise >= delta / 2.0]) / np.sum(out_power))
-        section["new_content_share"] = round(new_share, 3)
-        section["raised_existing_share"] = round(raised_share, 3)
-        if new_share > _NEW_CONTENT_SHARE or raised_share < _RAISED_EXISTING_SHARE:
-            section["fault_level"] = False
-            section["classification"] = "informational"
-            section["content_change"] = True
+                groups.append([name])
+        for group in groups:
+            matrices = _band_power_rows(samples, size, hop, rows, group)
+            for section in size_sections:
+                if section["band"] not in matrices:
+                    continue
+                start, end = float(section["start_sec"]), float(section["end_sec"])
+                matrix = matrices[section["band"]]
+                inside_rows = (start <= seg_start) & (seg_end <= end)
+                outside_rows = ~inside_rows & ((seg_end <= start) | (seg_start >= end))
+                for item in ignore_ranges:
+                    outside_rows &= ~((seg_start < item["end_sec"]) & (item["start_sec"] < seg_end))
+                if not inside_rows.any() or int(outside_rows.sum()) < 4:
+                    continue
+                # Column blocks keep the row-selected copies small; columns are independent.
+                in_power = np.empty(matrix.shape[1])
+                out_power = np.empty(matrix.shape[1])
+                for first in range(0, matrix.shape[1], 256):
+                    block = matrix[:, first:first + 256]
+                    in_power[first:first + 256] = np.mean(block[inside_rows], axis=0)
+                    out_power[first:first + 256] = np.median(block[outside_rows], axis=0)
+                if float(np.sum(in_power)) <= 0.0 or float(np.sum(out_power)) <= 0.0:
+                    continue
+                delta = 10.0 * math.log10(float(np.sum(in_power)) / float(np.sum(out_power)))
+                rise = 10.0 * np.log10((in_power + 1e-20) / (out_power + 1e-20))
+                new_share = float(np.sum(in_power[rise >= delta + _NEW_CONTENT_EXCESS_DB]) / np.sum(in_power))
+                raised_share = float(np.sum(out_power[rise >= delta / 2.0]) / np.sum(out_power))
+                section["new_content_share"] = round(new_share, 3)
+                section["raised_existing_share"] = round(raised_share, 3)
+                if new_share > _NEW_CONTENT_SHARE or raised_share < _RAISED_EXISTING_SHARE:
+                    section["fault_level"] = False
+                    section["classification"] = "informational"
+                    section["content_change"] = True
     return sections
 
 
