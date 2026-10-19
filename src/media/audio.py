@@ -53,7 +53,7 @@ _DECODE_LOCKS_GUARD = threading.Lock()
 
 
 # FFTs, sorts and ufuncs release the GIL, so independent chunks run on threads.
-_WORKERS = max(1, min(8, os.cpu_count() or 1))
+_WORKERS = max(1, min(4, os.cpu_count() or 1))  # 8 saved ~2.5 s on 1 h sync_check for ~19 s more CPU on a shared Mac
 
 
 def _parallel_map(function: Any, items: Sequence[Any], workers: int = _WORKERS) -> List[Any]:
