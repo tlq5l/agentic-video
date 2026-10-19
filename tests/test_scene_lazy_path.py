@@ -35,8 +35,9 @@ def test_lazy_settle_path_reports_the_same_changes_as_the_small_video_path(tmp_p
     real_gray_frames = scene._gray_frames
 
     def counting_gray_frames(video_path, times):
-        reads.append(len(times))
-        return real_gray_frames(video_path, times)
+        frames = real_gray_frames(video_path, times)
+        reads.append(frames is not None)
+        return frames
 
     monkeypatch.setattr(scene, "_gray_frames", counting_gray_frames)
 
@@ -47,6 +48,7 @@ def test_lazy_settle_path_reports_the_same_changes_as_the_small_video_path(tmp_p
     lazy = AgenticVideoEngine(clip, cache=MediaCache(base_dir=tmp_path / "lazy")).detect_cuts()
 
     assert reads, "the lazy path never read a window of frames"
+    assert all(reads), "a short read failed, so settling fell back to a full rescan"
     # The fade (kind "transition"), the hard cut where it ends, and the low-scoring cut only the soft scan finds.
     assert [(cut.kind, int(cut.timestamp_sec)) for cut in small] == [("transition", 2), ("cut", 5), ("cut", 8)]
     assert small[2].score < 0.25
