@@ -7,6 +7,7 @@ onset times are quantized to that resolution rather than inferred by ear.
 
 from __future__ import annotations
 
+import bisect
 import functools
 import hashlib
 import json
@@ -189,16 +190,9 @@ def _hann(length: int) -> np.ndarray:
     return window
 
 
-@functools.lru_cache(maxsize=32)
-def _rfft_frequencies(size: int) -> np.ndarray:
-    frequencies = np.fft.rfftfreq(size, d=1.0 / SAMPLE_RATE)
-    frequencies.setflags(write=False)
-    return frequencies
-
-
 @functools.lru_cache(maxsize=64)
 def _hz_mask(size: int, low_hz: float, high_hz: float) -> np.ndarray:
-    frequencies = _rfft_frequencies(size)
+    frequencies = np.fft.rfftfreq(size, d=1.0 / SAMPLE_RATE)
     mask = (frequencies >= low_hz) & (frequencies < high_hz)
     mask.setflags(write=False)
     return mask
@@ -206,7 +200,7 @@ def _hz_mask(size: int, low_hz: float, high_hz: float) -> np.ndarray:
 
 @functools.lru_cache(maxsize=32)
 def _named_band_masks(size: int) -> Tuple[Tuple[str, np.ndarray], ...]:
-    frequencies = _rfft_frequencies(size)
+    frequencies = np.fft.rfftfreq(size, d=1.0 / SAMPLE_RATE)
     return tuple((name, (frequencies >= lower) & (frequencies < upper)) for name, lower, upper in BANDS)
 
 
@@ -595,40 +589,19 @@ def _outlier_sections(
         baselines: Dict[int, float] = {}
         deltas: Dict[int, float] = {}
         energies_all = [float(window["band_db"][band]) for window in windows]
-        # Leave-one-out median of the non-silent, audible windows, computed
-        # from one sorted copy: dropping the window at sorted rank r shifts the
-        # middle element(s) by at most one place.
-        usable = [
-            index for index, window in enumerate(windows)
-            if not window["silent"] and energies_all[index] > -90.0
-        ]
-        usable_values = np.asarray([energies_all[index] for index in usable], dtype=np.float64)
-        order = np.argsort(usable_values, kind="stable")
-        sorted_values = usable_values[order]
-        rank_of = {usable[int(position)]: rank for rank, position in enumerate(order)}
-        count = len(usable)
-
-        def _median_without(rank: Optional[int]) -> Optional[float]:
-            remaining = count - (0 if rank is None else 1)
-            if remaining < 1:
-                return None
-
-            def at(position: int) -> float:
-                if rank is not None and position >= rank:
-                    position += 1
-                return float(sorted_values[position])
-
-            if remaining % 2:
-                return at(remaining // 2)
-            return float(np.mean([at(remaining // 2 - 1), at(remaining // 2)]))
-
-        for index in range(len(windows)):
-            energy = energies_all[index]
+        usable = [not window["silent"] and energy > -90.0 for window, energy in zip(windows, energies_all)]
+        ranked = sorted(energy for energy, ok in zip(energies_all, usable) if ok)
+        for index, energy in enumerate(energies_all):
             if energy <= -90.0:
                 continue
-            baseline = _median_without(rank_of.get(index))
-            if baseline is None:
+            # Median of the other usable windows: skip one copy of this value
+            # in the sorted list (equal values are interchangeable).
+            skip = bisect.bisect_left(ranked, energy) if usable[index] else len(ranked)
+            remaining = len(ranked) - (skip < len(ranked))
+            if remaining < 1:
                 continue
+            middle = [ranked[position + (position >= skip)] for position in ((remaining - 1) // 2, remaining // 2)]
+            baseline = (middle[0] + middle[1]) / 2.0
             delta = energy - baseline
             baselines[index] = baseline
             deltas[index] = delta
@@ -762,7 +735,8 @@ def _mark_content_changes(
     the outliers as informational.
 
     Frame spectra are computed once per frame size and shared by the sections
-    that use it (bands are grouped so the kept matrices stay under a memory cap).
+    that use it. Bands share one pass while their matrices fit in 256 MB; a
+    single band's matrix is never split, so on long inputs it can exceed that.
     """
     eligible: Dict[int, List[Dict[str, Any]]] = {}
     for section in sections:

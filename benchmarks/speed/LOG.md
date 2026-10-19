@@ -113,7 +113,7 @@ air 19.9->1.2, loudness 14.3->3.2, sync_check 33.5->4.4. fixture_60s 2.42->1.88,
 Synthetic 1 h (clip looped): new code ~266 s CPU before the memory fix; loudness peak memory 11 GB -> 3.8 GB
 after. No old-code 1 h number (old debounce is quadratic). No QUALITY_FAIL on any video.
 Kept: debounce mask, leave-one-out median from one sorted copy, lru_cache on windows/frequencies/band masks,
-batched onset FFTs, band-planned content-change spectra with a 256 MB cap.
+batched onset FFTs, band-planned content-change spectra (bands share a pass up to 256 MB; one band is not split).
 Dropped (no gain): transposed-matrix median, vectorized _silence_gaps, median overwrite_input.
 Not tried: cache save_json indent=2 encoder (~25% of an onset call; touches src/core/cache.py), global-sort
 exact median, shared STFT in sync_check, batching _measure_window.

@@ -67,7 +67,6 @@ def child(name: str, out_dir: str) -> None:
     MediaCache.load_json = lambda self, fp, key: None if str(key).startswith(NOCACHE_PREFIXES) else original_load(self, fp, key)
 
     path = str(INPUTS[name])
-    audio._decode_pcm(path)
     duration = len(audio._decode_pcm(path)[0]) / float(audio.SAMPLE_RATE)
     cues = [{"time_sec": round(duration * f, 2), "label": "hit"} for f in (0.1, 0.25, 0.4, 0.55, 0.7, 0.85)]
     calls = []
