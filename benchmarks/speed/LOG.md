@@ -248,3 +248,14 @@ Dropped:
 Final state vs saved baseline: frames.py exit 0 (output equal), run.py no QUALITY_FAIL (SCORE 75.53 cpu s, WALL 21.58 s).
 Final frames.py walls: overview_chunks 1.13, inspect_moments 2.34, inspect_windows 0.59, refine_temporal_beam 1.74,
 track_region_changes 5.86, track_region_events 5.26 s.
+
+## Fresh check, frame tools (2026-10-20, Opus)
+- Trim 24d2a8f: inspect_moments fills its items in place, one stat-key helper, no memo lock, stale comment fixed. Same behaviour.
+- Same output vs b514629, no result cache: 45 handle_call calls (overview_chunks, inspect_moments, inspect_windows,
+  refine_temporal_beam, track_region_changes/events on fixture_60s, x_post_127s, clip_415s, flower, sample_10s): JSON equal,
+  253 images byte-identical. 7 calls error identically on old and new (inspect_moments with an anchor at the video's end:
+  "FFmpeg failed extracting frame at <duration>s", a bug already on main).
+- Re-timed, 2 pairs old/new, wall s: refine_temporal_beam 1.69/1.67 -> 0.68/0.68; inspect_windows 0.53/0.53 -> 0.29/0.29.
+- Fingerprint memo: second instance hits in 0.05 ms; an in-place same-size edit with mtime restored gets a new fingerprint
+  (equal to a full hash), since ctime is in the key.
+- Not a speed win: the compact JSON text block changes the MCP text bytes for under 1 ms.
