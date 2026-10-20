@@ -282,3 +282,28 @@ The old time was _simple_supports_time and friends: ~627k one-window `_BandLevel
 - Uncued: nearest found time by bisect; items of a group already over its share are skipped (the group is dropped anyway).
 - _stft_flux pads each chunk instead of copying the whole file; no float32 copy after the FFT.
 Left: the 9 band onset passes (~70 s CPU on 1 h) are now most of the cold time; a shared STFT across bands is not tried.
+
+## sync_check cold first call: cut scan beside the audio work (perf/sync-check-cold)
+Goal: the first-ever handle_call("sync_check") on a new 1 h mp4 (13 cues + bpm=120, tolerance 81 ms; every cache cold)
+under 45 s; output byte-identical to main 031a423. Change: decode the audio, start detect_cuts on one background thread,
+do the audio work, then read the cuts (audio errors still win; a scan error surfaces unchanged). Fingerprint memo got a
+per-path lock so two threads never hash one new file twice. Bench: `benchmarks/speed/sync_check_split.py <video>`
+(per-step s; steps now overlap, so read TOTAL). Each cold run uses a fresh `-c copy -metadata comment=...` copy (new
+content hash). All runs `nice -n 10` on a 16-core Mac at load 35-310 (other jobs), so pairs drift.
+- Same load (before and after run at the same time, each on its own cold copy; each one's 16-thread cut scan also slows
+  the other, so this understates the gain), TOTAL s before -> after:
+  s1 102.7 -> 90.0 (load 69 -> 168), s2 113.8 -> 98.8 (168 -> 163); these two started the scan before the audio decode.
+  s3 89.0 -> 76.0 (load 126 -> 173), final version (audio decoded first).
+- Back-to-back pairs, final version: p7 after 47.4 (load 61), before 55.8 (load 99).
+  Earlier version (scan started before the audio decode, which then took 15-23 s instead of 3-4 s):
+  p6 65.2 -> 58.4 (load 58 / 75); p1-p5 were swamped by load jumps inside a pair (27->46, 36->133, 157/136, 212/312,
+  206/188): 69.6->96.2, 65.6->80.2, 113.8->136.3 (after first), 84.4->52.6, 126.6->99.4 (after first).
+- Warm (all caches hit): 7.0, 8.2 s (load 86).
+- With the overlap the audio work is the slow side (cut scan 32-40 s, audio 45-75 s). Cold audio CPU on 1 h, alone:
+  70 s, of it _onset_spectra 33 s and _stft_flux 23 s over 9 full-file onset passes (1 broad + 8 bands); _decode_pcm
+  is 0.1 s CPU over 10 calls (decode already reused). Cut scan alone: ~1.6 s Python, ~260-344 s ffmpeg CPU (1080p30
+  decode ~126 s, scene score most of the rest). Next: share one STFT across the band passes (bands are data-dependent,
+  ~10 s CPU at best), or a cheaper cut scan (changes scene-score bytes; not tried).
+Same output: handle_call JSON on the 1 h mp4 (cold and warm), clip_415s with bpm, a 12 s A/V clip (3 cue sets), and
+errors for a WAV (no video: cut-scan error), a video with no audio, a missing file, bad tolerance, bad cue: identical
+to 031a423 after masking the random temp-file name in the no-audio ffmpeg message.

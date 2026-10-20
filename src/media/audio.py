@@ -3120,8 +3120,21 @@ def sync_check(
             "group": _cue_group_name(cue_label),
         })
 
-    broad_onsets = audio_onsets(source, min_strength=0.10, cache=cache)["onsets"]
+    # The cut scan is mostly an FFmpeg video decode, so run it beside the
+    # audio work. Decode the audio first: beside the scan's FFmpeg processes
+    # it takes ~5x longer, and a file with no audio fails before any scan.
+    # Audio errors still win: the scan's result, or its error, is read only
+    # after the audio work succeeds. On a later audio error the scan
+    # finishes on its own and its result is dropped.
     samples, _, cache = _decode_pcm(source, cache)
+    if cut_detector is None:
+        from src.retrieval.engine import AgenticVideoEngine
+        cut_detector = AgenticVideoEngine(source, cache=cache).detect_cuts
+    cut_pool = concurrent.futures.ThreadPoolExecutor(1, thread_name_prefix="sync-check-cuts")
+    cut_scan = cut_pool.submit(cut_detector)
+    cut_pool.shutdown(wait=False)
+
+    broad_onsets = audio_onsets(source, min_strength=0.10, cache=cache)["onsets"]
     all_band_levels = _BandLevels(samples)
     onsets_by_band: Dict[str, List[Dict[str, Any]]] = {}
     control_cache: Dict[float, Optional[np.ndarray]] = {}
@@ -3142,11 +3155,7 @@ def sync_check(
         tolerance / 1000.0, coincidence / 1000.0,
         None if bpm is None else 60.0 / bpm_value,
     )
-    if cut_detector is None:
-        from src.retrieval.engine import AgenticVideoEngine
-        cut_engine = AgenticVideoEngine(source, cache=cache)
-        cut_detector = cut_engine.detect_cuts
-    cuts_raw = cut_detector()
+    cuts_raw = cut_scan.result()
     cuts = []
     for cut in cuts_raw:
         cut_time = float(cut.timestamp_sec if hasattr(cut, "timestamp_sec") else cut[0])

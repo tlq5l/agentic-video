@@ -2,6 +2,7 @@
 import hashlib
 import json
 import os
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -13,6 +14,10 @@ from src.core.errors import ExtractionBoundsError, CacheWriteError
 # call, so a per-instance memo never hit. Entries are valid only while the
 # file's (dev, inode, size, mtime, ctime) stat tuple is unchanged.
 _FINGERPRINT_MEMO: Dict[str, tuple[tuple[int, int, int, int, int], str]] = {}
+# One lock per path, so threads that ask for the same new file at once
+# (sync_check scans cuts beside its audio work) hash it once, not each.
+_FINGERPRINT_LOCKS: Dict[str, threading.Lock] = {}
+_FINGERPRINT_LOCKS_GUARD = threading.Lock()
 
 
 def _stat_key(stat: os.stat_result) -> tuple[int, int, int, int, int]:
@@ -75,16 +80,22 @@ class MediaCache:
         if memo is not None and memo[0] == stat_key:
             return memo[1]
 
-        fingerprint = MediaCache.compute_fingerprint(file_path)
-        # Re-stat after hashing: if the file changed while it was read, the
-        # hash may not match either stat, so do not memoize it.
-        try:
-            after = p.stat()
-        except OSError:
+        with _FINGERPRINT_LOCKS_GUARD:
+            lock = _FINGERPRINT_LOCKS.setdefault(str(p), threading.Lock())
+        with lock:
+            memo = _FINGERPRINT_MEMO.get(str(p))
+            if memo is not None and memo[0] == stat_key:
+                return memo[1]
+            fingerprint = MediaCache.compute_fingerprint(file_path)
+            # Re-stat after hashing: if the file changed while it was read, the
+            # hash may not match either stat, so do not memoize it.
+            try:
+                after = p.stat()
+            except OSError:
+                return fingerprint
+            if _stat_key(after) == stat_key:
+                _FINGERPRINT_MEMO[str(p)] = (stat_key, fingerprint)
             return fingerprint
-        if _stat_key(after) == stat_key:
-            _FINGERPRINT_MEMO[str(p)] = (stat_key, fingerprint)
-        return fingerprint
 
     def get_entry_dir(self, fingerprint: str) -> Path:
         """Get isolated root directory for this media fingerprint."""

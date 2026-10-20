@@ -182,6 +182,32 @@ def test_sync_check_accepts_every_documented_tolerance(monkeypatch, tmp_path, to
     assert result["data"]["tolerance_ms"] == reported
 
 
+def test_sync_check_errors_keep_their_order_with_the_cut_scan_in_the_background(tmp_path):
+    """The cut scan runs beside the audio work; an audio error still wins, and a scan error still surfaces."""
+    import wave
+    import numpy as np
+
+    from src.core.errors import MediaCorruptError
+
+    rate = 16000
+    samples = np.zeros(rate * 2, dtype=np.float32)
+    samples[rate:rate + 300] = 0.8
+    wav = tmp_path / "clicks.wav"
+    with wave.open(str(wav), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(rate)
+        handle.writeframes((samples * 32767).astype("<i2").tobytes())
+
+    # Audio decodes fine; the cut scan, on a file with no video, fails.
+    for _ in range(2):
+        with pytest.raises(MediaCorruptError, match="No video streams found"):
+            handle_call("sync_check", {"source": str(wav), "cues": [{"time_sec": 1.0}]})
+    # Both would fail on a missing file; the audio error is the one reported, as before.
+    with pytest.raises(MediaNotFoundError, match="Audio source file not found"):
+        handle_call("sync_check", {"source": str(tmp_path / "missing.mp4"), "cues": [{"time_sec": 1.0}]})
+
+
 def test_short_lists_are_returned_untouched(fake_engine):
     fake_engine.reply = {"onsets": [1, 2, 3], "total": 3}
     assert handle_call("audio_onsets", {"source": "clip.mp4"})["data"] == {"onsets": [1, 2, 3], "total": 3}
