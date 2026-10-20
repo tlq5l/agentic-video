@@ -76,3 +76,7 @@ When answering negative queries (*"Does an elephant appear in this office meetin
 - ❌ **Anti-Pattern 2: The Hallucinated Timestamp**: Guessing timestamps from memory without inspecting the burned timecode badge (`#01 [00:14.250]`) on the image.
 - ❌ **Anti-Pattern 3: Visual Search for Audio Events**: Scanning hundreds of visual frames to find where someone said "Good morning". Always use `search_transcript` first.
 - ❌ **Anti-Pattern 4: Raw Video Ingestion**: Assuming the LLM has native video byte support. Always pass extracted JPEG frames or contact sheet paths/tool_files.
+
+## Keep changes small
+
+- No two functions or branches do the same steps; keep one and call it.
