@@ -177,3 +177,13 @@ Kept:
 - Vectorized onset peak picking, span grouping and per-onset RMS; bulk dB rounding with a boundary guard that falls back to scalar.
 Dropped / not needed: shared FFT across the 2048-FFT bands and batching _measure_window (the above reached the goal without
 them); cross-call span dedupe (each band needs its own band energy); global-sort median (the window median is cheaper).
+
+## Fresh check, count rerun (2026-10-20, Opus)
+- Trim 5f97e7b: the judgments file is staged in the result's temp dir; no separate save helper. Same behaviour.
+- Same output vs b514629, no result cache: 30 calls (10 queries x {default, min_gap 1/max_spans 3, min_gap 0.1/max_spans 40}
+  on fixture_60s, flower, sample_10s, x_post_127s, clip_415s; text and description; start 0.37 at fps 2.9): JSON equal,
+  30 sheets byte-identical. Edge video with a span running to the last frame (fps 5, and fps 3.3 from 0.21 s): 6 calls equal,
+  6 sheets byte-identical. Tile re-decode vs full pass: 163 sample indices on 10 windows (incl. first/last frame), 0 mismatches.
+- Re-timed, 2 pairs, clip_415s text 30-90 s then min_gap 1.0/max_spans 3: rerun 8.84/8.82 s (old) -> 0.34/0.34 s (new);
+  first call 8.9-9.3 s both.
+- In-place same-size edit with mtime restored (merged with frame-tools' memo): the rerun judges again and returns the new spans.
