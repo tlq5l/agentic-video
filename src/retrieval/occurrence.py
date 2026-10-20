@@ -662,12 +662,6 @@ def _load_judgments(path):
         return None
 
 
-def _save_judgments(path, hits, analyzed):
-    staged = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    staged.write_text(json.dumps({"hits": hits, "analyzed": analyzed}))
-    staged.replace(path)
-
-
 def _fill_tiles(source, spans, window):
     """Cut the zoomed tile of each span's representative sample from a frame decoded again at that sample's time."""
     start, fps, width, height = window
@@ -780,9 +774,11 @@ def count_video(engine, progress=lambda done, total: None, **args):
                                "name its colour and a basic shape (circle, square, diamond, triangle), or count by eye.")
     if _source_stamp(engine.source_path) != stamp:
         raise RuntimeError("Source changed during occurrence counting; retry with the current video")
-    if replayed is None:
-        _save_judgments(judgments_path, hits, analyzed)
     with tempfile.TemporaryDirectory(prefix="occurrences-", dir=cache_dir) as temp:
+        if replayed is None:
+            staged = Path(temp) / "judgments.json"
+            staged.write_text(json.dumps({"hits": hits, "analyzed": analyzed}))
+            staged.replace(judgments_path)
         if shown:
             tiles = [(f"#{i + 1}{'*' if span['weak'] else ''} {span['rep'][0]:.1f}s", span["weak"], span["rep"][3])
                      for i, span in enumerate(shown[:SHEET_TILES])]
