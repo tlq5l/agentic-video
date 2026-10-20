@@ -10,7 +10,10 @@ steady, while a caption, title or cut appearing makes it stand out.
 from __future__ import annotations
 
 import math
+import re
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
+from fractions import Fraction
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence
 
@@ -45,12 +48,29 @@ def _frame_rate(path: Path) -> float:
     return rate
 
 
+# The grid frames of the last video decoded, kept (as uint8) when small enough so
+# the checker's scans of the same file share one decode.
+_SHARE_MAX_BYTES = 256 * 1024 * 1024
+_shared: Dict[str, Any] = {"key": None, "frames": None}
+
+
+def _share_key(path: Path) -> tuple:
+    stat = path.stat()
+    return (str(path), stat.st_mtime_ns, stat.st_size)
+
+
 def _grid_frames(path: Path) -> Iterator[np.ndarray]:
-    """Each frame as a flat 160x90 grey grid, streamed from FFmpeg."""
+    """Each frame as a flat 160x90 grey grid, streamed from FFmpeg; a repeat scan of one file reuses the first decode."""
     width, height = _GRID
     size = width * height
+    key = _share_key(path)
+    if _shared["key"] == key:
+        for frame in _shared["frames"]:
+            yield frame.astype(np.float32)
+        return
+    kept: Optional[bytearray] = bytearray()
     process = subprocess.Popen(
-        ["ffmpeg", "-nostdin", "-v", "error", "-i", str(path), "-map", "0:v:0", "-an",
+        ["ffmpeg", "-nostdin", "-v", "error", "-filter_threads", "1", "-i", str(path), "-map", "0:v:0", "-an",
          "-vf", "scale={}:{}:flags=area,format=gray".format(width, height), "-f", "rawvideo", "-"],
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
     )
@@ -60,7 +80,13 @@ def _grid_frames(path: Path) -> Iterator[np.ndarray]:
             chunk = process.stdout.read(size)
             if len(chunk) < size:
                 break
+            if kept is not None:
+                kept += chunk
+                if len(kept) > _SHARE_MAX_BYTES:
+                    kept = None
             yield np.frombuffer(chunk, dtype=np.uint8).astype(np.float32)
+        if kept is not None:
+            _shared["key"], _shared["frames"] = key, np.frombuffer(kept, dtype=np.uint8).reshape(-1, size)
     finally:
         if process.stdout is not None:
             process.stdout.close()
@@ -620,6 +646,76 @@ def edge_touches(image: np.ndarray) -> Dict[str, int]:
     return _edge_lines(_stroke_mask(image))
 
 
+_LOOKAHEAD_MAX = 3
+_LOOKAHEAD_BYTES = 128 * 1024 * 1024
+_STRETCH_FRAMES = 45
+_PTS_LINE = re.compile(r"\bn:\s*\d+ pts:\s*(-?\d+) ")
+_TIME_BASE_LINE = re.compile(r"config in time_base: (\d+)/(\d+)")
+_START_LINE = re.compile(r"Duration: [^,]*, start: (-?\d+\.\d+)")
+_MICROSECOND = Fraction(1, 1_000_000)
+
+
+def _grey_frames(path: Path, times: Sequence[float], size: tuple) -> List[Optional[np.ndarray]]:
+    """What `_grey_frame` returns for each time, from one decode of the stretch they span.
+
+    `-ss` decodes from the keyframe before the time, so separate seeks decode that
+    run again each time. Here the frames of the stretch come out with their
+    timestamps, and each time takes the first frame at or after it, as `-ss` does.
+    A time the stretch does not settle falls back to `_grey_frame`.
+    """
+    width, height = size
+    frame_bytes = width * height
+    seconds = [Fraction("{:.3f}".format(max(0.0, time_sec))) for time_sec in times]
+    start = min(seconds)
+    completed = subprocess.run(
+        ["ffmpeg", "-nostdin", "-nostats", "-v", "info", "-threads", "1", "-copyts", "-ss", "{:.3f}".format(float(start)),
+         "-t", "{:.3f}".format(float(max(seconds) - start) + 0.15), "-i", str(path),
+         "-vf", "showinfo,format=gray", "-fps_mode", "passthrough", "-f", "rawvideo", "-"],
+        capture_output=True, check=False, timeout=Config.SUBPROCESS_TIMEOUT_SEC,
+    )
+    log = completed.stderr.decode("utf-8", errors="replace")
+    time_base = _TIME_BASE_LINE.search(log)
+    file_start = _START_LINE.search(log)
+    # The filter also sees the frame at the `-t` limit, which is not written out.
+    stamps = [int(match) for match in _PTS_LINE.findall(log)][:len(completed.stdout) // frame_bytes]
+    frames: List[Optional[np.ndarray]] = [None] * len(seconds)
+    if (completed.returncode == 0 and time_base and file_start and int(time_base.group(1)) > 0
+            and int(time_base.group(2)) > 0 and len(stamps) * frame_bytes == len(completed.stdout)):
+        unit = Fraction(int(time_base.group(1)), int(time_base.group(2)))
+        offset = Fraction(file_start.group(1))
+        for slot, wanted in enumerate(seconds):
+            for index, stamp in enumerate(stamps):
+                gap = stamp * unit - offset - wanted
+                if gap < -_MICROSECOND:
+                    continue
+                # Within a microsecond (but not equal) FFmpeg's own rounding decides; leave that to `_grey_frame`.
+                if gap > _MICROSECOND or gap == 0:
+                    chunk = completed.stdout[index * frame_bytes:(index + 1) * frame_bytes]
+                    frames[slot] = np.frombuffer(chunk, dtype=np.uint8).reshape(height, width).astype(np.float32)
+                break
+    return [frame if frame is not None else _grey_frame(path, time_sec, size)
+            for frame, time_sec in zip(frames, times)]
+
+
+def _cue_frames(path: Path, size: tuple, plans: List[tuple]) -> Iterator[tuple]:
+    """For each (item, appears, moments): the frame just before and the frames at the moments.
+
+    The next cues' frames are decoded while this one is measured.
+    """
+    ahead = max(1, min(_LOOKAHEAD_MAX, _LOOKAHEAD_BYTES // (size[0] * size[1] * _STRETCH_FRAMES)))
+    with ThreadPoolExecutor(max_workers=ahead) as pool:
+        fetching: Dict[int, Any] = {}
+        for position, (item, appears, moments) in enumerate(plans):
+            for upcoming in range(position, min(len(plans), position + ahead)):
+                if upcoming not in fetching:
+                    _, upcoming_appears, upcoming_moments = plans[upcoming]
+                    fetching[upcoming] = pool.submit(
+                        _grey_frames, path, [upcoming_appears - 0.1] + upcoming_moments, size)
+            before, *grabbed = fetching.pop(position).result()
+            yield item, appears, before, [(moment, frame) for moment, frame in zip(moments, grabbed)
+                                           if frame is not None]
+
+
 def text_overflow(source: str, text_cues: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
     """Text cues whose text runs off or ends suspiciously close to a frame edge.
 
@@ -645,13 +741,13 @@ def text_overflow(source: str, text_cues: Sequence[Mapping[str, Any]]) -> Dict[s
         return result
     size = _frame_size(path)
     starts = sorted(float(item["time_sec"]) for item in text_cues)
+    plans = []
     for item in timed:
         appears = float(item.get("appears_sec", item["time_sec"]))
         limit = min([other for other in starts if other > appears + 0.05] or [appears + 10.0]) - 0.1
         moments = sorted({min(appears + offset, limit) for offset in _SETTLE_OFFSETS_SEC if limit > appears + 0.05})
-        before = _grey_frame(path, appears - 0.1, size)
-        frames = [(moment, _grey_frame(path, moment, size)) for moment in moments]
-        frames = [(moment, frame) for moment, frame in frames if frame is not None]
+        plans.append((item, appears, moments))
+    for item, appears, before, frames in _cue_frames(path, size, plans):
         if before is None or len(frames) < 2:
             continue
         still = np.logical_and.reduce([_stroke_mask(frame) for _, frame in frames])

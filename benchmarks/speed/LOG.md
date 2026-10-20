@@ -187,3 +187,31 @@ them); cross-call span dedupe (each band needs its own band energy); global-sort
 - Re-timed, 2 pairs, clip_415s text 30-90 s then min_gap 1.0/max_spans 3: rerun 8.84/8.82 s (old) -> 0.34/0.34 s (new);
   first call 8.9-9.3 s both.
 - In-place same-size edit with mtime restored (merged with frame-tools' memo): the rerun judges again and returns the new spans.
+## Checker scans (src/media/visual_timing.py, perf/checker-speed)
+Target: the visual part of `check_video` (text_cue_timing, text_overflow, blank_flashes, frame_splices, frozen_pictures,
+back to back). Bench: clip_415s, 20 text cues (and 20 forced "ok" cues for text_overflow), CPU = user+sys incl. ffmpeg.
+Machine loaded (load 13-45); pairs alternated base, new. Base = b514629.
+Final, 4 pairs, total CPU s / wall s, base -> new: 207.5/38.8, 209.9/37.1, 203.8/37.0, 207.5/35.6 -> 46.6/14.0, 45.7/13.9, 45.5/13.9, 44.8/13.7
+(-78% CPU, -62% wall, 4/4). Per function CPU s (base -> new): text_cue_timing 31 -> 31 (it now pays the one shared decode),
+text_overflow 29.5 -> 10.4, blank_flashes 35.6 -> 0.6, frame_splices 39.5 -> 2.9, frozen_pictures 34 -> 0.3.
+Peak memory (RSS) 360 -> 820 MB on clip_415s (shared frames 180 MB + text_overflow stretch buffers).
+Same output: every function's dict equal to base on fixture_60s, x_post_127s, clip_415s (change_shares too); the five
+functions equal on newtest2..10 and -pristine (18 videos x bpm None/110: 18 overflows, 12 splices, 4 flashes, 8 frozen,
+240 timed cues); full `check_video` report (judge none) byte-identical on those 18 videos.
+Kept (in order):
+- Scans of one file share one decode: `_grid_frames` keeps the 160x90 uint8 frames of the last file (up to 256 MiB, about
+  17k frames; bigger files stream as before) and later scans read them. Pairs: 184/202/187/196 -> 70/67/65/65 CPU s.
+  The cache holds the last file's frames until another file is scanned or the process ends.
+- text_overflow: one ffmpeg per cue instead of four. `-ss` decodes from the keyframe before each time (GOP 6 s in clip_415s),
+  so four seeks decode it four times. `_grey_frames` decodes the stretch once (`-threads 1 -copyts`, showinfo for timestamps)
+  and each time takes the first frame at or after it, exactly as `-ss` does; a time within 1 microsecond of a frame (not
+  equal), or one the stretch lacks, falls back to `_grey_frame`. The next cue's stretch is decoded while this one is
+  measured (1-3 at a time, by frame size). Checked 500 times (random, frame-boundary, +-0.4 ms, past-end, negative) on 5
+  videos incl. one with start_time 1.38 s and one 24 fps: pixel-identical to `_grey_frame`, 5 fell back. Pairs: 66.6/70.7/68.2/69.6 -> 48.1/46.7/47.2/47.5.
+- Scan ffmpeg with `-filter_threads 1`: same bytes, decode CPU 29.7 -> 24.7 (pairs 44.4/46.3/44.6/44.4 -> 39.6/39.5/39.3/39.8).
+Dropped (same output but wall too long, or under the bar):
+- `-hwaccel videotoolbox` for the scan: CPU 16.6 -> 7.7 s, md5 same, but wall 2.6 -> 20.9 s (as in exp 2); an hour would take about 3 min.
+- `-thread_type slice`/`low_delay`: CPU 16.2 -> 13.7 s, wall 2.6 -> 11 s (about 100 s per hour).
+- `-threads 3/4/6` with filter threads 1: CPU -4..-9%, wall +15..+80%. `format=gray` before `scale`: different bytes, 2x CPU.
+Not tried: vectorising frame_splices' adjacent differences (about 1.5 s of 46), a disk-backed frame store so files over
+17k frames also share one decode, grouping cues that sit in one GOP into one decode.
