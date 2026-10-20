@@ -26,12 +26,14 @@ from src.media.frames import extract_single_frame
 
 MODEL_ID = "openai/clip-vit-base-patch32"
 MODEL_REVISION = "3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268"
-INDEX_NAME = f"visual-clip-b32-{MODEL_REVISION[:7]}-v3.sqlite3"
+INDEX_NAME = f"visual-clip-b32-{MODEL_REVISION[:7]}-v4.sqlite3"  # v4: frames carry end_sec; older indexes are ignored, never mixed in
 CHUNK_SEC = 60.0
 BATCH_SIZE = 16
 FFMPEG_THREADS = 6
 TORCH_THREADS = 4
 SCENE_THRESHOLD = 0.3
+DUPLICATE_MAX_BITS = 5  # a frame within this many dHash bits of the last kept frame is not embedded
+DUPLICATE_MAX_COLOR_STEP = 16  # ...unless its average colour differs by more (dHash sees every flat frame as identical)
 ORPHAN_TEMP_AGE_SEC = 300
 PREFETCH_CHUNKS = 3  # chunks decoded ahead of the embedding step, one FFmpeg each
 
@@ -102,7 +104,7 @@ def _connect(engine, readonly=False):
     conn = sqlite3.connect(path, timeout=1)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("CREATE TABLE IF NOT EXISTS progress (id INTEGER PRIMARY KEY, until_sec REAL, count INTEGER)")
-    conn.execute("CREATE TABLE IF NOT EXISTS frames (timestamp REAL PRIMARY KEY, path TEXT, width INTEGER, height INTEGER, embedding BLOB, thumbnail BLOB)")
+    conn.execute("CREATE TABLE IF NOT EXISTS frames (timestamp REAL PRIMARY KEY, end_sec REAL, path TEXT, width INTEGER, height INTEGER, embedding BLOB, thumbnail BLOB)")
     conn.execute("INSERT OR IGNORE INTO progress VALUES (1, 0, 0)")
     conn.commit()
     return conn
@@ -198,6 +200,34 @@ def sample_chunk(source_path, start_sec, end_sec, output_dir):
     return frames
 
 
+def _frame_signature(path):
+    """(64-bit difference hash, average RGB) of a 9x8 thumbnail. The hash says whether each pixel is
+    brighter than its right neighbour, so it ignores overall colour; the average colour covers that."""
+    from PIL import Image
+    with Image.open(path) as image:
+        thumb = image.convert("RGB").resize((9, 8), Image.LANCZOS)
+    grey = np.asarray(thumb.convert("L"), dtype=np.int16)
+    return (grey[:, 1:] > grey[:, :-1]).ravel(), np.asarray(thumb, dtype=np.float32).mean(axis=(0, 1))
+
+
+def drop_duplicate_frames(frames, chunk_end):
+    """Keep a frame only if it differs from the last KEPT frame; returns [(frame, end_sec)] where a kept
+    frame covers the time up to the next kept frame (the last one up to chunk_end).
+
+    Comparing with the last kept frame (not the previous one) stops slow drift from slipping through."""
+    kept, signatures = [], []
+    for frame in sorted(frames, key=lambda f: f.timestamp_sec):
+        bits, color = _frame_signature(frame.file_path)
+        if signatures:
+            last_bits, last_color = signatures[-1]
+            if np.count_nonzero(bits != last_bits) <= DUPLICATE_MAX_BITS and np.abs(color - last_color).max() <= DUPLICATE_MAX_COLOR_STEP:
+                continue
+        kept.append(frame)
+        signatures.append((bits, color))
+    ends = [f.timestamp_sec for f in kept[1:]] + [max(chunk_end, kept[-1].timestamp_sec)]
+    return list(zip(kept, ends))
+
+
 def _build_locked(engine, stamp, duration, report):
     conn = _connect(engine)
     cache_dir = engine._cache.get_entry_dir(engine.metadata.fingerprint)
@@ -216,7 +246,7 @@ def _build_locked(engine, stamp, duration, report):
             start = _progress(conn, duration)["indexed_until_sec"]
             if start >= duration:
                 return {"status": "complete", **_progress(conn, duration)}
-            end = min(duration, start + CHUNK_SEC)
+            end_of_chunk = min(duration, start + CHUNK_SEC)
             prefetch(pool, start)  # decoding starts while the model loads
             encoder = get_encoder()
             rows = []
@@ -229,20 +259,21 @@ def _build_locked(engine, stamp, duration, report):
                     frames.append(extract_single_frame(engine.source_path, start,
                                                        output_path=Path(temp_dir) / "tail.jpg", width=224,
                                                        overlay_timestamp=False, cache=engine._cache, threads=FFMPEG_THREADS))
-                frames.sort(key=lambda f: f.timestamp_sec)
-                for offset in range(0, len(frames), BATCH_SIZE):
-                    batch = frames[offset:offset+BATCH_SIZE]
-                    vectors = encoder.images([f.file_path for f in batch])
+                # Each chunk starts fresh, so its first frame is always kept; the last kept frame covers up to the chunk end.
+                kept = drop_duplicate_frames(frames, end_of_chunk)
+                for offset in range(0, len(kept), BATCH_SIZE):
+                    batch = kept[offset:offset+BATCH_SIZE]
+                    vectors = encoder.images([frame.file_path for frame, _ in batch])
                     if len(vectors) != len(batch) or not np.isfinite(vectors).all():
                         raise ValueError("Invalid visual embeddings")
-                    rows.extend((frame.timestamp_sec, "", frame.width, frame.height,
+                    rows.extend((frame.timestamp_sec, end, "", frame.width, frame.height,
                                  np.asarray(vector, dtype=np.float32).tobytes(), Path(frame.file_path).read_bytes())
-                                for frame, vector in zip(batch, vectors))
+                                for (frame, end), vector in zip(batch, vectors))
             _check_source(engine, stamp)
             try:
                 conn.execute("BEGIN IMMEDIATE")
-                conn.executemany("INSERT OR REPLACE INTO frames VALUES (?, ?, ?, ?, ?, ?)", rows)
-                conn.execute("UPDATE progress SET until_sec=?, count=(SELECT COUNT(*) FROM frames) WHERE id=1", (end,))
+                conn.executemany("INSERT OR REPLACE INTO frames VALUES (?, ?, ?, ?, ?, ?, ?)", rows)
+                conn.execute("UPDATE progress SET until_sec=?, count=(SELECT COUNT(*) FROM frames) WHERE id=1", (end_of_chunk,))
                 conn.commit()
             except Exception:
                 conn.rollback()
@@ -316,7 +347,7 @@ def search_index(engine, query, top_k=5, start_sec=0.0, end_sec=None):
         covered_end = min(end, progress["indexed_until_sec"])
         vector = get_encoder().text(query)
         best = []
-        cursor = conn.execute("SELECT timestamp,path,width,height,embedding FROM frames WHERE timestamp>=? AND timestamp<? ORDER BY timestamp", (start_sec, covered_end))
+        cursor = conn.execute("SELECT timestamp,end_sec,width,height,embedding FROM frames WHERE timestamp>=? AND timestamp<? ORDER BY timestamp", (start_sec, covered_end))
         while True:
             rows = cursor.fetchmany(256)
             if not rows:
@@ -330,19 +361,21 @@ def search_index(engine, query, top_k=5, start_sec=0.0, end_sec=None):
                 elif item[:2] > best[0][:2]:
                     heapq.heapreplace(best, item)
         ranked = sorted(best, reverse=True)
+        spans = {row[0]: row[1] for _, _, row in ranked}  # frame time -> end of the time it stands for
         hits = [{"rank": i+1, "timestamp_sec": row[0], "timecode": format_timestamp(row[0]),
                  "score": score, "frame_badge": f"#{i+1}",
                  "timestamp_kind": "sample_target", "decoded_timestamp": None} for i, (score, _, row) in enumerate(ranked)]
         intervals = []
         for hit in sorted(hits, key=lambda h: h["timestamp_sec"]):
             t = hit["timestamp_sec"]
-            if intervals and t - intervals[-1]["last_sample_sec"] <= 1.05:
-                intervals[-1]["end_sec"] = min(covered_end, t + 1.0)
+            span_end = min(covered_end, max(spans[t], t + 1.0))
+            if intervals and t <= intervals[-1]["end_sec"] + 0.05:
+                intervals[-1]["end_sec"] = max(intervals[-1]["end_sec"], span_end)
                 intervals[-1]["last_sample_sec"] = t
                 intervals[-1]["score"] = max(intervals[-1]["score"], hit["score"])
                 intervals[-1]["ranks"].append(hit["rank"])
             else:
-                intervals.append({"start_sec": t, "end_sec": min(covered_end, t+1.0), "last_sample_sec": t,
+                intervals.append({"start_sec": t, "end_sec": span_end, "last_sample_sec": t,
                                   "score": hit["score"], "ranks": [hit["rank"]]})
         sheet = None
         if ranked:

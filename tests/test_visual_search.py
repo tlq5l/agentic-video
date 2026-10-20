@@ -99,7 +99,7 @@ def test_index_build_is_chunked_resumable_and_reuses_completed_cache(tmp_path, m
     monkeypatch.setattr(visual, "sample_chunk", record_resume)
     result = visual.build_index(engine)
     assert result["status"] == "complete"
-    assert result["frames_indexed"] >= 10
+    assert result["frames_indexed"] == 3  # one kept frame per solid-colour scene; the rest are duplicates
     assert result["progress"] == pytest.approx(1.0)
     indexed_calls = encoder.calls
     visual.build_index(engine)
