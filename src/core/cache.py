@@ -2,7 +2,6 @@
 import hashlib
 import json
 import os
-import threading
 import time
 import uuid
 from pathlib import Path
@@ -14,7 +13,10 @@ from src.core.errors import ExtractionBoundsError, CacheWriteError
 # call, so a per-instance memo never hit. Entries are valid only while the
 # file's (dev, inode, size, mtime, ctime) stat tuple is unchanged.
 _FINGERPRINT_MEMO: Dict[str, tuple[tuple[int, int, int, int, int], str]] = {}
-_FINGERPRINT_MEMO_LOCK = threading.Lock()
+
+
+def _stat_key(stat: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
 
 
 class MediaCache:
@@ -68,15 +70,8 @@ class MediaCache:
             # must immediately retain the historical deterministic behavior.
             return MediaCache.compute_fingerprint(file_path)
 
-        stat_key = (
-            stat.st_dev,
-            stat.st_ino,
-            stat.st_size,
-            stat.st_mtime_ns,
-            stat.st_ctime_ns,
-        )
-        with _FINGERPRINT_MEMO_LOCK:
-            memo = _FINGERPRINT_MEMO.get(str(p))
+        stat_key = _stat_key(stat)
+        memo = _FINGERPRINT_MEMO.get(str(p))
         if memo is not None and memo[0] == stat_key:
             return memo[1]
 
@@ -87,9 +82,8 @@ class MediaCache:
             after = p.stat()
         except OSError:
             return fingerprint
-        if (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns) == stat_key:
-            with _FINGERPRINT_MEMO_LOCK:
-                _FINGERPRINT_MEMO[str(p)] = (stat_key, fingerprint)
+        if _stat_key(after) == stat_key:
+            _FINGERPRINT_MEMO[str(p)] = (stat_key, fingerprint)
         return fingerprint
 
     def get_entry_dir(self, fingerprint: str) -> Path:

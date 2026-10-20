@@ -34,7 +34,7 @@ from src.media.audio import (
     sync_check as compare_audio_video_sync,
 )
 
-# Most items (windows, scan segments) one multi-item tool call extracts side by side.
+# Most windows one inspect_windows call extracts side by side.
 WINDOW_WORKERS = 4
 
 
@@ -902,7 +902,8 @@ class AgenticVideoEngine:
 
         side = samples // 2
         last_valid = max(0.0, meta.duration_sec - 0.001)
-        planned_moments: List[Dict[str, Any]] = []
+        items: List[Dict[str, Any]] = []
+        jobs: List[Dict[str, Any]] = []
         for input_index, item in enumerate(moments):
             if not isinstance(item, dict) or "timestamp_sec" not in item:
                 raise ExtractionBoundsError("Each inspect_moments item requires timestamp_sec (seconds), e.g. {\"timestamp_sec\": 12.5}", {"input_index": input_index})
@@ -920,31 +921,25 @@ class AgenticVideoEngine:
             anchor_index = len(before_ts) + 1
             label = item.get("label")
             label_text = f" [{label}]" if label is not None else ""
-            planned_moments.append({
-                "input_index": input_index, "anchor": anchor, "label": label, "start": start, "end": end,
-                "anchor_index": anchor_index,
-                "job": {
-                    "timestamps": timestamps,
-                    "cols": min(cols_value, len(timestamps)),
-                    "title": f"Moment {input_index + 1}{label_text}: anchor #{anchor_index} @ {format_timestamp(anchor)}",
-                },
-            })
-        sheets = build_contact_sheets(self.source_path, [m["job"] for m in planned_moments], cache=self._cache)
-        items: List[Dict[str, Any]] = []
-        total_samples = 0
-        for plan, sheet in zip(planned_moments, sheets):
-            anchor, label, start, end = plan["anchor"], plan["label"], plan["start"], plan["end"]
-            anchor_index = plan["anchor_index"]
-            total_samples += sheet.sample_count
             items.append({
-                "index": plan["input_index"] + 1,
+                "index": input_index + 1,
                 "timestamp_sec": anchor,
                 "label": None if label is None else str(label),
                 "start_sec": start,
                 "end_sec": end,
                 "anchor_sample_index": anchor_index,
+            })
+            jobs.append({
+                "timestamps": timestamps,
+                "cols": min(cols_value, len(timestamps)),
+                "title": f"Moment {input_index + 1}{label_text}: anchor #{anchor_index} @ {format_timestamp(anchor)}",
+            })
+        total_samples = 0
+        for moment, sheet in zip(items, build_contact_sheets(self.source_path, jobs, cache=self._cache)):
+            total_samples += sheet.sample_count
+            moment.update({
                 "sample_timestamps": list(sheet.timestamps),
-                "relative_offsets_sec": [round(ts - anchor, 6) for ts in sheet.timestamps],
+                "relative_offsets_sec": [round(ts - moment["timestamp_sec"], 6) for ts in sheet.timestamps],
                 "contact_sheet_path": sheet.file_path,
                 "sample_count": sheet.sample_count,
             })
