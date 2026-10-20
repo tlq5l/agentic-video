@@ -18,9 +18,10 @@ from typing import Iterable, Optional
 
 
 _SHOWINFO_PTS_RE = re.compile(r"\bpts_time:(-?(?:\d+(?:\.\d*)?|\.\d+))\b")
+_SHOWINFO_DURATION_RE = re.compile(r"\bduration_time:(\d+(?:\.\d*)?|\.\d+)\b")
 
 
-def parse_selected_frame_timestamp(stderr: str) -> Optional[float]:
+def parse_selected_frame_timestamp(stderr: str, last: bool = False) -> Optional[float]:
     """Parse the source PTS emitted by FFmpeg's ``showinfo`` filter.
 
     This is intentionally separate from ``probe_decoded_frame_timestamps``:
@@ -28,10 +29,14 @@ def parse_selected_frame_timestamp(stderr: str) -> Optional[float]:
     actually wrote to disk, especially across VFR PTS gaps.  Callers that
     request one output frame should add ``showinfo`` to that same FFmpeg
     command and use this value as the selected-frame receipt.
+
+    With ``last=True`` the receipt is the final frame shown (for commands that
+    overwrite one output file with every frame and keep the last).
     """
     if not isinstance(stderr, str):
         return None
-    for match in _SHOWINFO_PTS_RE.finditer(stderr):
+    matches = list(_SHOWINFO_PTS_RE.finditer(stderr))
+    for match in (reversed(matches) if last else matches):
         try:
             value = float(match.group(1))
         except (TypeError, ValueError):
@@ -39,6 +44,21 @@ def parse_selected_frame_timestamp(stderr: str) -> Optional[float]:
         if math.isfinite(value) and value >= 0.0:
             return round(value, 6)
     return None
+
+
+def parse_last_frame_duration(stderr: str) -> Optional[float]:
+    """Display duration of the final frame ``showinfo`` printed (same line as its
+    ``pts_time``), or None when FFmpeg gave no positive duration for it."""
+    if not isinstance(stderr, str):
+        return None
+    frame_lines = [line for line in stderr.splitlines() if _SHOWINFO_PTS_RE.search(line)]
+    if not frame_lines:
+        return None
+    match = _SHOWINFO_DURATION_RE.search(frame_lines[-1])
+    if match is None:
+        return None
+    value = float(match.group(1))
+    return value if math.isfinite(value) and value > 0.0 else None
 
 
 def probe_decoded_frame_timestamps(
