@@ -187,7 +187,10 @@ def sample_chunk(source_path, start_sec, end_sec, output_dir):
            "-an", "-vf", f"select='{select}',scale='min(224,iw)':-2,showinfo",
            "-fps_mode", "vfr", "-q:v", "3", "-threads", threads, str(Path(output_dir) / "f_%05d.jpg")]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600, check=False)
-    if proc.returncode != 0:
+    # A tail window shorter than one frame can hold no frame; FFmpeg then exits non-zero having written nothing.
+    # That is an empty chunk (the caller covers it with the last frame), not a failure.
+    empty_window = "Nothing was written into output file" in proc.stderr and not any(Path(output_dir).glob("f_*.jpg"))
+    if proc.returncode != 0 and not empty_window:
         raise RuntimeError(f"FFmpeg chunk sampling failed: {proc.stderr.strip()[-500:]}")
     infos = [m for line in proc.stderr.splitlines() if "Parsed_showinfo" in line
              for m in [_PTS.search(line)] if m]

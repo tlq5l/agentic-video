@@ -309,6 +309,26 @@ def test_scene_cuts_supplement_uniform_samples_and_short_tail(tmp_path, monkeypa
     assert any(t >= 2 for t in times)
 
 
+def test_video_ending_within_one_frame_after_a_chunk_mark_still_indexes(tmp_path, monkeypatch):
+    """60 frames at 30000/1001 fps last 2.002 s but the last frame starts at 1.969 s, so the 2.0 s chunk
+    mark leaves a tail window that holds no frame. The last frame must cover that tail, not fail."""
+    if not shutil.which("ffmpeg"):
+        pytest.skip("ffmpeg required")
+    source = tmp_path / "ntsc.mp4"
+    subprocess.run([
+        "ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=160x90:r=30000/1001",
+        "-frames:v", "60", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-threads", "1", str(source),
+    ], check=True, timeout=30)
+    engine = AgenticVideoEngine(str(source), cache=MediaCache(tmp_path / "cache"))
+    assert 2.0 < engine.metadata.duration_sec < 2.0 + 1 / 29
+    monkeypatch.setattr(visual, "get_encoder", lambda: ColorEncoder())
+    monkeypatch.setattr(visual, "CHUNK_SEC", 2.0)
+    result = visual.build_index(engine)
+    assert result["status"] == "complete"
+    assert result["progress"] == 1.0
+    assert result["indexed_until_sec"] == pytest.approx(engine.metadata.duration_sec)
+
+
 def test_search_uses_database_thumbnail_without_persistent_frames(indexed_engine):
     engine, _ = indexed_engine
     with visual._connect(engine) as conn:
