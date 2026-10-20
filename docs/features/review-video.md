@@ -2,7 +2,7 @@
 
 How a user reaches it: the `review_video` tool.
 
-Code: `src/executor/mcp_server.py` (`_review_video`, `_loudness_summary`). It calls `AgenticVideoEngine.probe`, the `contact_sheet` and `detect_cuts` dispatch branches, and `AgenticVideoEngine.loudness_timeline`; it has no analysis code of its own.
+Code: `src/executor/mcp_server.py` (the `review_video` branch of `_dispatch`, `_loudness_summary`). It calls `AgenticVideoEngine.probe`, the `contact_sheet` and `detect_cuts` dispatch branches, and `AgenticVideoEngine.loudness_timeline`; it has no analysis code of its own.
 
 How to check it works: `pytest tests/test_review_video.py tests/test_schema_contract.py tests/test_agent_first_tools.py`.
 
