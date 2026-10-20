@@ -13,22 +13,34 @@ from src.core.cache import MediaCache
 from src.media.seeking import build_seek_arguments
 from src.media.overlay import apply_overlay_to_file
 from src.media.probe import probe_video
-from src.media.timing import parse_selected_frame_timestamp
+from src.media.timing import parse_last_frame_duration, parse_selected_frame_timestamp
 
 # How far before the requested time to look for the frame still on screen when
 # a seek lands after the last frame; widen only when the narrower window holds
-# no frame (very low frame rates). Anchored at the requested time, not the file
-# end, so a longer audio track or a truncated file can't pull in a far-off frame.
+# no frame (very low frame rates). The frame found must still be on screen at the
+# requested time (its start plus its duration reaches it), so a truncated file or
+# a longer audio track can't pass off an earlier frame as the requested moment.
 LAST_FRAME_LOOKBACKS_SEC = (0.5, 5.0)
 END_TOLERANCE_SEC = 0.001
 
 
-def _within_media(vpath: Path, timestamp_sec: float, cache: MediaCache) -> bool:
-    """True when the timestamp is inside the media (not past its end), so a failed seek there means "after the last frame"."""
+def _fps_if_within_media(vpath: Path, timestamp_sec: float, cache: MediaCache) -> Optional[float]:
+    """The video's frame rate when the timestamp is inside the media (not past its end), so a
+    failed seek there means "after the last frame"; None otherwise."""
     try:
-        return timestamp_sec <= probe_video(str(vpath), cache=cache).duration_sec + END_TOLERANCE_SEC
+        meta = probe_video(str(vpath), cache=cache)
     except Exception:
+        return None
+    return meta.fps if timestamp_sec <= meta.duration_sec + END_TOLERANCE_SEC else None
+
+
+def _shows_at(stderr: str, timestamp_sec: float, fps: float) -> bool:
+    """True when the last frame showinfo printed is still on screen at timestamp_sec."""
+    start = parse_selected_frame_timestamp(stderr, last=True)
+    if start is None:
         return False
+    duration = parse_last_frame_duration(stderr) or (1.0 / fps if fps > 0 else 0.0)
+    return start + duration >= timestamp_sec - END_TOLERANCE_SEC
 
 
 def extract_single_frame(
@@ -139,7 +151,10 @@ def extract_single_frame(
 
     proc = _run_ffmpeg(pre_args, one_frame=True)
     last_frame_fallback = False
-    if (proc.returncode != 0 or not tmp_file.exists()) and _within_media(vpath, timestamp_sec, cache):
+    fps = None
+    if proc.returncode != 0 or not tmp_file.exists():
+        fps = _fps_if_within_media(vpath, timestamp_sec, cache)
+    if fps is not None:
         # The seek landed after the last frame's start time (a video ends at its
         # duration, but its last frame starts a frame earlier), so no frame was
         # decoded. Show that last frame; decoded_timestamp/timestamp_delta below
@@ -150,8 +165,11 @@ def extract_single_frame(
             window = ["-ss", f"{window_start:.3f}", "-t", f"{timestamp_sec - window_start:.3f}"]
             retry = _run_ffmpeg(window, one_frame=False)
             if retry.returncode == 0 and tmp_file.exists():
-                proc = retry
-                last_frame_fallback = True
+                if _shows_at(retry.stderr, timestamp_sec, fps):
+                    proc = retry
+                    last_frame_fallback = True
+                # A frame that ended before the requested time means frames are missing
+                # (e.g. a truncated file): fail below rather than relabel it.
                 break
             _discard_tmp()
 

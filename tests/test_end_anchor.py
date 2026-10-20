@@ -28,9 +28,11 @@ def test_inspect_moments_anchor_at_video_end(tmp_path, monkeypatch):
         assert sheet.width > 0
 
 
-def test_inspect_moments_on_truncated_file_still_fails(tmp_path, monkeypatch):
-    # A half-downloaded file still reports 60 s, but its frames stop near 29 s. A sample at 45 s
-    # must fail rather than show the 29 s frame labelled 45 s.
+@pytest.mark.parametrize("moment_sec", [33.0, 45.0])
+def test_inspect_moments_on_truncated_file_still_fails(tmp_path, monkeypatch, moment_sec):
+    # A half-downloaded file still reports 60 s, but its frames stop at 29.04 s. Samples past that
+    # must fail rather than show the 29.04 s frame labelled with a later time, both a few seconds
+    # past the cut (inside the look-back window) and far past it.
     monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
     whole = tmp_path / "whole.mp4"
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(FIXTURE), "-c", "copy", "-movflags", "+faststart", str(whole)], check=True)
@@ -40,6 +42,6 @@ def test_inspect_moments_on_truncated_file_still_fails(tmp_path, monkeypatch):
     with pytest.raises(MediaCorruptError):
         mcp_server.handle_call("inspect_moments", {
             "source": str(truncated),
-            "moments": [{"timestamp_sec": 45.0}],
+            "moments": [{"timestamp_sec": moment_sec}],
             "before_sec": 1.0, "after_sec": 1.0, "samples_per_moment": 3,
         })

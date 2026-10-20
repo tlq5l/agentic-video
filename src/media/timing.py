@@ -18,6 +18,7 @@ from typing import Iterable, Optional
 
 
 _SHOWINFO_PTS_RE = re.compile(r"\bpts_time:(-?(?:\d+(?:\.\d*)?|\.\d+))\b")
+_SHOWINFO_DURATION_RE = re.compile(r"\bduration_time:(\d+(?:\.\d*)?|\.\d+)\b")
 
 
 def parse_selected_frame_timestamp(stderr: str, last: bool = False) -> Optional[float]:
@@ -43,6 +44,21 @@ def parse_selected_frame_timestamp(stderr: str, last: bool = False) -> Optional[
         if math.isfinite(value) and value >= 0.0:
             return round(value, 6)
     return None
+
+
+def parse_last_frame_duration(stderr: str) -> Optional[float]:
+    """Display duration of the final frame ``showinfo`` printed (same line as its
+    ``pts_time``), or None when FFmpeg gave no positive duration for it."""
+    if not isinstance(stderr, str):
+        return None
+    frame_lines = [line for line in stderr.splitlines() if _SHOWINFO_PTS_RE.search(line)]
+    if not frame_lines:
+        return None
+    match = _SHOWINFO_DURATION_RE.search(frame_lines[-1])
+    if match is None:
+        return None
+    value = float(match.group(1))
+    return value if math.isfinite(value) and value > 0.0 else None
 
 
 def probe_decoded_frame_timestamps(
