@@ -15,9 +15,11 @@ from src.media.overlay import apply_overlay_to_file
 from src.media.probe import probe_video
 from src.media.timing import parse_selected_frame_timestamp
 
-# -sseof lookbacks for fetching a video's last frame; widen only when the
-# narrower one holds no frame (very low frame rates).
-LAST_FRAME_LOOKBACKS_SEC = (0.5, 5.0, 60.0)
+# How far before the requested time to look for the frame still on screen when
+# a seek lands after the last frame; widen only when the narrower window holds
+# no frame (very low frame rates). Anchored at the requested time, not the file
+# end, so a longer audio track or a truncated file can't pull in a far-off frame.
+LAST_FRAME_LOOKBACKS_SEC = (0.5, 5.0)
 END_TOLERANCE_SEC = 0.001
 
 
@@ -144,7 +146,9 @@ def extract_single_frame(
         # report which frame it really is.
         _discard_tmp()
         for lookback_sec in LAST_FRAME_LOOKBACKS_SEC:
-            retry = _run_ffmpeg(["-sseof", f"-{lookback_sec}"], one_frame=False)
+            window_start = max(0.0, timestamp_sec - lookback_sec)
+            window = ["-ss", f"{window_start:.3f}", "-t", f"{timestamp_sec - window_start:.3f}"]
+            retry = _run_ffmpeg(window, one_frame=False)
             if retry.returncode == 0 and tmp_file.exists():
                 proc = retry
                 last_frame_fallback = True

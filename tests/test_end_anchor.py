@@ -1,9 +1,12 @@
 """End-to-end: frame tools must work when a sample lands after the last frame's start time."""
+import subprocess
 from pathlib import Path
 
+import pytest
 from PIL import Image
 
 from src.core.config import Config
+from src.core.errors import MediaCorruptError
 from src.executor import mcp_server
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "synthetic_bench_60s.mp4"
@@ -23,3 +26,20 @@ def test_inspect_moments_anchor_at_video_end(tmp_path, monkeypatch):
     assert moment["sample_timestamps"][-1] == 59.999
     with Image.open(moment["contact_sheet_path"]) as sheet:
         assert sheet.width > 0
+
+
+def test_inspect_moments_on_truncated_file_still_fails(tmp_path, monkeypatch):
+    # A half-downloaded file still reports 60 s, but its frames stop near 29 s. A sample at 45 s
+    # must fail rather than show the 29 s frame labelled 45 s.
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    whole = tmp_path / "whole.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(FIXTURE), "-c", "copy", "-movflags", "+faststart", str(whole)], check=True)
+    truncated = tmp_path / "truncated.mp4"
+    data = whole.read_bytes()
+    truncated.write_bytes(data[: len(data) // 2])
+    with pytest.raises(MediaCorruptError):
+        mcp_server.handle_call("inspect_moments", {
+            "source": str(truncated),
+            "moments": [{"timestamp_sec": 45.0}],
+            "before_sec": 1.0, "after_sec": 1.0, "samples_per_moment": 3,
+        })
