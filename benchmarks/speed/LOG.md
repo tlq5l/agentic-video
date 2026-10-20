@@ -215,3 +215,11 @@ Dropped (same output but wall too long, or under the bar):
 - `-threads 3/4/6` with filter threads 1: CPU -4..-9%, wall +15..+80%. `format=gray` before `scale`: different bytes, 2x CPU.
 Not tried: vectorising frame_splices' adjacent differences (about 1.5 s of 46), a disk-backed frame store so files over
 17k frames also share one decode, grouping cues that sit in one GOP into one decode.
+
+## Fresh check, checker scans (2026-10-20, Opus)
+- Fix 60adf99: the shared decode was keyed on (path, mtime, size). An in-place same-size edit with mtime restored served
+  the old frames in the same process. Key now adds dev, inode and ctime, stored as one tuple.
+- Same output vs b514629: text_cue_timing (bpm None/110), text_overflow (real and forced cues), blank_flashes, frame_splices,
+  frozen_pictures, change_shares on fixture_60s, flower, sample_10s, x_post_127s, clip_415s, fixture_60s again: all dicts equal.
+- Re-timed, 2 pairs, clip_415s all scans, CPU/wall s: 168.7/23.1, 169.4/23.2 -> 31.9/11.0, 32.2/11.1.
+  Peak RSS 369 -> 938 MB (1080p, 415 s).
