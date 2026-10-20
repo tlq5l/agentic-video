@@ -215,15 +215,13 @@ def drop_duplicate_frames(frames, chunk_end):
     frame covers the time up to the next kept frame (the last one up to chunk_end).
 
     Comparing with the last kept frame (not the previous one) stops slow drift from slipping through."""
-    kept, signatures = [], []
+    kept, last_bits, last_color = [], None, None
     for frame in sorted(frames, key=lambda f: f.timestamp_sec):
         bits, color = _frame_signature(frame.file_path)
-        if signatures:
-            last_bits, last_color = signatures[-1]
-            if np.count_nonzero(bits != last_bits) <= DUPLICATE_MAX_BITS and np.abs(color - last_color).max() <= DUPLICATE_MAX_COLOR_STEP:
-                continue
+        if kept and np.count_nonzero(bits != last_bits) <= DUPLICATE_MAX_BITS and np.abs(color - last_color).max() <= DUPLICATE_MAX_COLOR_STEP:
+            continue
         kept.append(frame)
-        signatures.append((bits, color))
+        last_bits, last_color = bits, color
     ends = [f.timestamp_sec for f in kept[1:]] + [max(chunk_end, kept[-1].timestamp_sec)]
     return list(zip(kept, ends))
 
