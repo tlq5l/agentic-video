@@ -225,6 +225,7 @@ export const SyncCheckInputSchema = {
     band_hz: AudioBandSelectionSchema.optional(),
   }).refine((cue) => cue.time_sec !== undefined || cue.t !== undefined)).describe("Intended sound cues to check, e.g. [{\"time_sec\": 12.5, \"label\": \"hit\"}]. Omit to compare cuts with onsets only.").optional(),
   tolerance_ms: z.number().min(0).max(5000).describe("Match window in milliseconds (default 80, maximum 5000; larger values are clamped).").optional(),
+  bpm: z.number().min(20).max(300).describe("Tempo of the music, 20-300. Compares each cue with uncued moments at the same beat phase, so steady backing percussion does not hide a missing sound.").optional(),
 };
 
 export interface AgenticVideoHandlers {

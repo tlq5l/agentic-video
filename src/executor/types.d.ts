@@ -1044,6 +1044,8 @@ export interface SyncCheckInput {
   cues?: SyncCueInput[];
   /** Match window in milliseconds (default 80, maximum 5000; larger values are clamped). */
   tolerance_ms?: number;
+  /** Tempo of the music, 20-300: compares cues with uncued moments at the same beat phase. */
+  bpm?: number;
 }
 
 export interface SyncCutMatch {
