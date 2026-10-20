@@ -15,6 +15,7 @@ import collections
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
+import itertools
 import json
 import math
 import os
@@ -30,7 +31,7 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 from src.core.config import Config
 from src.retrieval import ocr
 
-ALGORITHM_VERSION = "occurrences-v4"
+ALGORITHM_VERSION = "occurrences-v5"
 MAX_FRAMES = 2400
 MAX_SPANS_LIMIT = 100
 DEFAULT_MIN_GAP = 0.3
@@ -417,6 +418,7 @@ class SpanBuilder:
         self.bridged = []  # (start, end) of absences the default min_gap_sec would have split but this one joined
 
     def add(self, t, hit, frame):
+        """`frame` is None when replaying cached judgments; tiles are then filled in for the chosen samples only."""
         if hit is None:
             return
         last = self.spans[-1]["samples"][-1] if self.spans else None
@@ -439,7 +441,7 @@ class SpanBuilder:
         span["best"] = max(span["best"], sample[1])
         span["tiles"] = [c for c in span["tiles"] if c[1] >= span["best"] - .03]
         if sample[1] >= span["best"] - .03:
-            span["tiles"].append(sample + (_span_tile(frame, hit["box"]),))
+            span["tiles"].append(sample + (None if frame is None else _span_tile(frame, hit["box"]),))
             if len(span["tiles"]) > TIED_TILES:
                 del span["tiles"][1::2]  # thin evenly so the survivors still spread across the span
 
@@ -599,6 +601,82 @@ def _iter_frames(source, start, end, fps, width, height, progress):
         proc.stderr.close()
 
 
+def _judge_frames(source, judge, builder, window, total, progress):
+    """Decode the window, judge every frame and feed the builder; returns (one hit per frame, frames analyzed)."""
+    start, end, fps, width, height = window
+    workers = OCR_WORKERS if judge.pattern is not None and judge.spec is None else 1
+    if judge.batchable:
+        batch_frames, judge_batch, lookahead = CLIP_BATCH_FRAMES, judge.judge_many, CLIP_BATCH_FRAMES * 3
+    else:
+        batch_frames, judge_batch, lookahead = 1, lambda frames: [judge.judge(frames[0])], workers * 4
+    previous, last_hit, analyzed, hits = None, None, 0, []
+    pending = collections.deque()  # (t, frame, slot); slot is (batch, index), or None for a static frame
+    batch = None  # [frames, future]: analyzed frames judged in one call; future is None until submitted
+
+    def flush():
+        nonlocal batch
+        if batch is not None:
+            batch[1] = pool.submit(judge_batch, batch[0])
+            batch = None
+
+    def settle(limit):
+        nonlocal last_hit
+        while len(pending) > limit:
+            t, frame, slot = pending.popleft()
+            if slot is not None:
+                owner, index = slot
+                if owner[1] is None:
+                    flush()
+                last_hit = owner[1].result()[index]
+            builder.add(t, last_hit, frame)
+            hits.append(last_hit)
+    # Apple Vision text recognition runs about twice as fast with two frames in flight; frames are
+    # still added in order, so results match a serial run. Visual (CLIP) judging stays serial, but
+    # whole-frame CLIP checks embed several frames per call.
+    with ThreadPoolExecutor(workers) as pool:
+        for t, frame in _iter_frames(source, start, end, fps, width, height, lambda n: progress(n, total)):
+            gray = np.asarray(frame.resize((160, 90)).convert("L"), dtype=np.int16)
+            # A thin symbol appearing or leaving changes only a few pixels, so count changed pixels, not the mean.
+            if previous is not None and (np.abs(gray - previous) > STATIC_PIXEL_DELTA).sum() < STATIC_PIXEL_COUNT:
+                slot = None
+            else:
+                if batch is None:
+                    batch = [[], None]
+                slot = (batch, len(batch[0]))
+                batch[0].append(frame)
+                if len(batch[0]) >= batch_frames:
+                    flush()
+                previous, analyzed = gray, analyzed + 1
+            pending.append((t, frame, slot))
+            settle(lookahead)
+        settle(0)
+    return hits, analyzed
+
+
+def _load_judgments(path):
+    """(hits, analyzed) saved by an earlier run, or None when absent or unreadable."""
+    try:
+        saved = json.loads(path.read_text())
+        return saved["hits"], int(saved["analyzed"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def _fill_tiles(source, spans, window):
+    """Cut the zoomed tile of each span's representative sample from a frame decoded again at that sample's time."""
+    start, fps, width, height = window
+    for span in spans:
+        t, score, box, _ = span["rep"]
+        index = round((t - start) * fps)
+        first = max(index - 1, 0)  # start one sample early so the fps filter picks the same source frame as the full pass
+        frames = _iter_frames(source, start + first / fps, start + (index + 1) / fps + .5 / fps, fps, width, height, lambda n: None)
+        try:
+            frame = next(itertools.islice(frames, index - first, None))[1]
+        finally:
+            frames.close()
+        span["rep"] = (t, score, box, _span_tile(frame, box))
+
+
 def _source_stamp(source):
     stat = Path(source).stat()
     return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns
@@ -622,68 +700,33 @@ def count_video(engine, progress=lambda done, total: None, **args):
         raise ValueError(f"A {end - start:g}s window cannot be sampled at 1 fps within the {MAX_FRAMES}-frame budget; "
                          f"use start_sec/end_sec windows of at most {MAX_FRAMES} seconds, one call each: {windows}")
     fps = round(fps, 3)
-    key = json.dumps([ALGORITHM_VERSION, meta.fingerprint, description, text, case_sensitive, start, end,
-                      requested_fps, min_gap, max_spans])
-    tag = hashlib.sha256(key.encode()).hexdigest()[:20]
+    judged = [ALGORITHM_VERSION, meta.fingerprint, description, text, case_sensitive, start, end, requested_fps]
+    tag = hashlib.sha256(json.dumps(judged + [min_gap, max_spans]).encode()).hexdigest()[:20]
     cache_dir = engine._cache.get_entry_dir(meta.fingerprint)
     result_path = cache_dir / f"{tag}.occurrences.json"
     if result_path.exists():
         cached = json.loads(result_path.read_text())
         if not cached["contact_sheet"] or Path(cached["contact_sheet"]["file_path"]).exists():
             return cached
+    # Only SpanBuilder reads min_gap_sec and max_spans, so the per-frame judgments are kept under a key without them.
+    judgments_path = cache_dir / f"{hashlib.sha256(json.dumps(judged).encode()).hexdigest()[:20]}.judgments.json"
     judge = FrameJudge(description, text, case_sensitive)
     width = min(meta.width, DECODE_WIDTH) // 2 * 2
     height = max(2, round(meta.height * width / meta.width) // 2 * 2)
     total = int(math.ceil((end - start) * fps))
     builder = SpanBuilder(1 / fps, min_gap, min(max_spans, SHEET_TILES))
-    previous, last_hit, analyzed = None, None, 0
-    # Apple Vision text recognition runs about twice as fast with two frames in flight; frames are
-    # still added in order, so results match a serial run. Visual (CLIP) judging stays serial, but
-    # whole-frame CLIP checks embed several frames per call.
-    workers = OCR_WORKERS if text and not description else 1
-    if judge.batchable:
-        batch_frames, judge_batch, lookahead = CLIP_BATCH_FRAMES, judge.judge_many, CLIP_BATCH_FRAMES * 3
+    replayed = _load_judgments(judgments_path)
+    if replayed is None:
+        hits, analyzed = _judge_frames(engine.source_path, judge, builder, (start, end, fps, width, height), total, progress)
     else:
-        batch_frames, judge_batch, lookahead = 1, lambda frames: [judge.judge(frames[0])], workers * 4
-    pending = collections.deque()  # (t, frame, slot); slot is (batch, index), or None for a static frame
-    batch = None  # [frames, future]: analyzed frames judged in one call; future is None until submitted
-
-    def flush():
-        nonlocal batch
-        if batch is not None:
-            batch[1] = pool.submit(judge_batch, batch[0])
-            batch = None
-
-    def settle(limit):
-        nonlocal last_hit
-        while len(pending) > limit:
-            t, frame, slot = pending.popleft()
-            if slot is not None:
-                owner, index = slot
-                if owner[1] is None:
-                    flush()
-                last_hit = owner[1].result()[index]
-            builder.add(t, last_hit, frame)
-    with ThreadPoolExecutor(workers) as pool:
-        for t, frame in _iter_frames(engine.source_path, start, end, fps, width, height, lambda n: progress(n, total)):
-            gray = np.asarray(frame.resize((160, 90)).convert("L"), dtype=np.int16)
-            # A thin symbol appearing or leaving changes only a few pixels, so count changed pixels, not the mean.
-            if previous is not None and (np.abs(gray - previous) > STATIC_PIXEL_DELTA).sum() < STATIC_PIXEL_COUNT:
-                slot = None
-            else:
-                if batch is None:
-                    batch = [[], None]
-                slot = (batch, len(batch[0]))
-                batch[0].append(frame)
-                if len(batch[0]) >= batch_frames:
-                    flush()
-                previous, analyzed = gray, analyzed + 1
-            pending.append((t, frame, slot))
-            settle(lookahead)
-        settle(0)
+        hits, analyzed = replayed
+        for index, hit in enumerate(hits):
+            builder.add(start + index / fps, hit, None)
     spans = builder.finish()
     capped = len(spans) >= MAX_SPANS_LIMIT
     shown = spans[:max_spans]
+    if replayed is not None:
+        _fill_tiles(engine.source_path, shown[:SHEET_TILES], (start, fps, width, height))
     entries = []
     for i, span in enumerate(shown):
         x, y, w, h = span["rep"][2]
@@ -732,6 +775,10 @@ def count_video(engine, progress=lambda done, total: None, **args):
     if _source_stamp(engine.source_path) != stamp:
         raise RuntimeError("Source changed during occurrence counting; retry with the current video")
     with tempfile.TemporaryDirectory(prefix="occurrences-", dir=cache_dir) as temp:
+        if replayed is None:
+            staged = Path(temp) / "judgments.json"
+            staged.write_text(json.dumps({"hits": hits, "analyzed": analyzed}))
+            staged.replace(judgments_path)
         if shown:
             tiles = [(f"#{i + 1}{'*' if span['weak'] else ''} {span['rep'][0]:.1f}s", span["weak"], span["rep"][3])
                      for i, span in enumerate(shown[:SHEET_TILES])]

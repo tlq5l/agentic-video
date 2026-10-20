@@ -429,6 +429,19 @@ def test_large_min_gap_reports_the_appearances_it_joined(clips, tmp_path):
 
 
 @needs_ffmpeg
+def test_rerun_with_other_gap_or_span_limit_reuses_judgments_and_matches_a_fresh_run(clips, tmp_path, monkeypatch):
+    video, args = clips["shapes"], {"description": "yellow outlined circle"}
+    count(video, tmp_path / "warm", **args)
+    monkeypatch.setattr(occurrence, "_judge_frames", lambda *a, **k: pytest.fail("a rerun must not judge frames again"))
+    rerun = count(video, tmp_path / "warm", min_gap_sec=1.0, max_spans=2, **args)
+    monkeypatch.undo()
+    fresh = count(video, tmp_path / "fresh", min_gap_sec=1.0, max_spans=2, **args)
+    sheets = [Path(r["contact_sheet"].pop("file_path")) for r in (rerun, fresh)]
+    assert rerun == fresh and rerun["contact_sheet"]["sample_count"] == 2
+    assert sheets[0].read_bytes() == sheets[1].read_bytes()
+
+
+@needs_ffmpeg
 def test_hitting_the_span_cap_returns_no_count(clips, tmp_path, monkeypatch):
     monkeypatch.setattr(occurrence, "MAX_SPANS_LIMIT", 3)
     result = count(clips["markers"], tmp_path, description="green diamond", max_spans=2)  # 4 spans found
