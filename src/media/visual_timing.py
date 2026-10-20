@@ -51,21 +51,23 @@ def _frame_rate(path: Path) -> float:
 # The grid frames of the last video decoded, kept (as uint8) when small enough so
 # the checker's scans of the same file share one decode.
 _SHARE_MAX_BYTES = 256 * 1024 * 1024
-_shared: Dict[str, Any] = {"key": None, "frames": None}
+_shared: Optional[tuple] = None  # (file key, frames), replaced as one object
 
 
 def _share_key(path: Path) -> tuple:
     stat = path.stat()
-    return (str(path), stat.st_mtime_ns, stat.st_size)
+    return (str(path), stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
 
 
 def _grid_frames(path: Path) -> Iterator[np.ndarray]:
     """Each frame as a flat 160x90 grey grid, streamed from FFmpeg; a repeat scan of one file reuses the first decode."""
+    global _shared
     width, height = _GRID
     size = width * height
     key = _share_key(path)
-    if _shared["key"] == key:
-        for frame in _shared["frames"]:
+    shared = _shared
+    if shared is not None and shared[0] == key:
+        for frame in shared[1]:
             yield frame.astype(np.float32)
         return
     kept: Optional[bytearray] = bytearray()
@@ -86,7 +88,7 @@ def _grid_frames(path: Path) -> Iterator[np.ndarray]:
                     kept = None
             yield np.frombuffer(chunk, dtype=np.uint8).astype(np.float32)
         if kept is not None:
-            _shared["key"], _shared["frames"] = key, np.frombuffer(kept, dtype=np.uint8).reshape(-1, size)
+            _shared = (key, np.frombuffer(kept, dtype=np.uint8).reshape(-1, size))
     finally:
         if process.stdout is not None:
             process.stdout.close()
