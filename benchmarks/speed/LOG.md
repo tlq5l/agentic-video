@@ -259,3 +259,26 @@ track_region_changes 5.86, track_region_events 5.26 s.
 - Fingerprint memo: second instance hits in 0.05 ms; an in-place same-size edit with mtime restored gets a new fingerprint
   (equal to a full hash), since ctime is in the key.
 - Not a speed win: the compact JSON text block changes the MCP text bytes for under 1 ms.
+
+## sync_check with 13 cues + bpm on 1 hour (perf/sync-check)
+Goal: handle_call("sync_check") on the 1 h mp4, 13 cues + bpm=120, under 45 s wall; same JSON as main 42347e9.
+handle_call now accepts bpm (705965e passes it through), so the old side for handle_call + bpm is 705965e: main plus
+that passthrough, with audio.py unchanged. Bench: `benchmarks/speed/sync_check.py`. Onset/loudness result caches
+bypassed; cut cache warm (a first-ever call on the 1 h mp4 also pays the uncached cut scan, about 27 s, unchanged here).
+2 alternating pairs, old -> new, wall / CPU s (load 23-49):
+- 1 h mp4, handle_call, 13 cues + bpm: 198.6 / 188.6, 164.2 / 186.7 -> 34.6 / 77.3, 33.8 / 83.3.
+  (An earlier run with load at 36-424: 50.3 and 51.3 s new; at load 17: 25.9 s.)
+- 1 h m4a, direct sync_check, 13 cues + bpm: 156.8 / 174.4, 170.2 / 170.6 -> 56.7 / 76.7, 30.5 / 85.6.
+- clip_415s, handle_call, 13 cues + bpm: 5.3, 5.2 -> 3.8, 4.0. x_post_127s: 4.0, 3.9 -> 1.5, 1.5. fixture_60s: 0.7, 0.7 -> 0.5, 0.5.
+- With the onset cache warm, 1 h mp4 handle_call 13 cues + bpm: 130.3, 137.4 -> 6.5, 6.6.
+Same output: byte-identical JSON on all 4 inputs (1 h m4a/mp4, clip_415s, x_post_127s, fixture_60s) for sync_check direct
+(cues 6/13/none, with and without bpm) and handle_call (cues 6/13, with and without bpm), vs 705965e; handle_call
+without bpm also run on 42347e9 (fixture, clip): identical. Also identical on 15 edge cases (silence, 0.5 s clip,
+tone beeps, tolerance 300 ms) and 4 uncued-sound cases.
+The old time was _simple_supports_time and friends: ~627k one-window `_BandLevels.at` calls and 56k level tests. Kept:
+- _BandLevels.fill: all cue windows measured in one batched FFT; band bins as contiguous slices.
+- level_test memoised per (time, cue): all its inputs are fixed once the band is chosen; results are read-only.
+- Onset times as one array per band; checks scan only the onsets inside their window (same list order).
+- Uncued: nearest found time by bisect; items of a group already over its share are skipped (the group is dropped anyway).
+- _stft_flux pads each chunk instead of copying the whole file; no float32 copy after the FFT.
+Left: the 9 band onset passes (~70 s CPU on 1 h) are now most of the cold time; a shared STFT across bands is not tried.

@@ -808,9 +808,11 @@ def _dispatch(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": True, "data": data}
 
     elif name == "sync_check":
+        bpm_raw = args.get("bpm")
         data = engine.sync_check(
             cues=args.get("cues"),
             tolerance_ms=float(args.get("tolerance_ms", 80.0)),
+            bpm=None if bpm_raw is None else float(bpm_raw),
         )
         data = dict(data)
         for key in ("cuts", "unmatched_strong_onsets"):

@@ -2484,6 +2484,12 @@
             "minimum": 0,
             "maximum": 5000,
             "default": 80
+          },
+          "bpm": {
+            "description": "Tempo of the music, 20-300. Compares each cue with uncued moments at the same beat phase, so steady backing percussion does not hide a missing sound.",
+            "type": "number",
+            "minimum": 20,
+            "maximum": 300
           }
         },
         "required": [
