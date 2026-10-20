@@ -19,7 +19,7 @@ import subprocess
 import threading
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
@@ -300,6 +300,17 @@ def _band_energy_db(segment: np.ndarray, band: Dict[str, Any]) -> float:
     return round(_db(float(np.sum(power[mask]))), 3)
 
 
+def _zero_padded_slice(samples: np.ndarray, first: int, last: int) -> np.ndarray:
+    """samples[first:last], with zeros where the range runs past either end (no whole-file padded copy)."""
+    if first >= 0 and last <= len(samples):
+        return samples[first:last]
+    out = np.zeros(last - first, dtype=samples.dtype)
+    lo, hi = max(first, 0), min(last, len(samples))
+    if hi > lo:
+        out[lo - first:hi - first] = samples[lo:hi]
+    return out
+
+
 def _stft_flux(
     samples: np.ndarray,
     band: Optional[Dict[str, Any]] = None,
@@ -310,7 +321,7 @@ def _stft_flux(
         return np.zeros(1, dtype=np.float32)
     fft_size = max(256, int(fft_size))
     half = fft_size // 2
-    padded = np.pad(np.asarray(samples, dtype=np.float32), (half, fft_size - half), mode="constant")
+    samples = np.asarray(samples, dtype=np.float32)
     frame_count = int(math.ceil(len(samples) / float(HOP_SAMPLES)))
     flux = np.zeros(frame_count, dtype=np.float32)
     window = np.hanning(fft_size).astype(np.float32)
@@ -327,8 +338,9 @@ def _stft_flux(
         count = min(frames_per_chunk, frame_count - first)
         view_start = first * HOP_SAMPLES
         view_end = (first + count - 1) * HOP_SAMPLES + fft_size
-        view = np.lib.stride_tricks.sliding_window_view(padded[view_start:view_end], fft_size)[::HOP_SAMPLES]
-        magnitudes = np.abs(np.fft.rfft(view * window, axis=1)).astype(np.float32)
+        view = np.lib.stride_tricks.sliding_window_view(
+            _zero_padded_slice(samples, view_start - half, view_end - half), fft_size)[::HOP_SAMPLES]
+        magnitudes = np.abs(np.fft.rfft(view * window, axis=1)).astype(np.float32, copy=False)
         if band_mask is not None:
             magnitudes = magnitudes[:, band_mask]
         totals = np.sum(magnitudes, axis=1, keepdims=True)
@@ -2250,7 +2262,9 @@ def _uncued_instances(
         observed = _track_patch(track, times[start:start + 2000], lag_steps)
         residual = (observed - baseline[None, :, :]) / scale[None, None, :]
         scores[start:start + 2000] = np.maximum(np.sum(residual * template[None, :, :], axis=(1, 2)) / norm, 0.0)
+    used = np.asarray(used_events, dtype=np.float64)
     found: List[Dict[str, Any]] = []
+    found_times: List[float] = []  # sorted; a - t only grows as t falls, so the nearest found time on each side decides
     for pos in np.argsort(-scores):
         score = float(scores[pos])
         if score < threshold:
@@ -2258,12 +2272,14 @@ def _uncued_instances(
         at = float(times[pos])
         if (pos > 0 and scores[pos - 1] > score) or (pos + 1 < len(scores) and scores[pos + 1] > score):
             continue
-        if np.min(np.abs(group_times - at)) <= clear_sec or any(abs(at - used) <= .075 for used in used_events):
+        if np.min(np.abs(group_times - at)) <= clear_sec or np.any(np.abs(at - used) <= .075):
             continue
-        if any(abs(at - item["time_sec"]) <= .150 for item in found):
+        slot = bisect.bisect_left(found_times, at)
+        if any(abs(at - found_times[index]) <= .150 for index in (slot - 1, slot) if 0 <= index < len(found_times)):
             continue
         found.append({"time_sec": round(at, 3), "group": group, "score": round(score, 4),
                       "group_median_score": round(median_score, 4), "threshold": round(threshold, 4)})
+        bisect.insort(found_times, found[-1]["time_sec"])
     return sorted(found, key=lambda item: item["time_sec"])
 
 
@@ -2322,25 +2338,40 @@ class _BandLevels:
         self.window = np.hanning(width)
         self.norm = max(1.0, float(np.sum(self.window * self.window)))
         frequencies = np.fft.rfftfreq(self.size, d=1.0 / SAMPLE_RATE)
-        self.masks = [(frequencies >= low) & (frequencies < high) for low, high in _SIMPLE_BANDS]
+        # Bins with low <= f < high: one contiguous run per band (frequencies ascend).
+        self.bands = [slice(int(np.searchsorted(frequencies, low)), int(np.searchsorted(frequencies, high)))
+                      for low, high in _SIMPLE_BANDS]
         self.cache: Dict[int, np.ndarray] = {}
+
+    def fill(self, starts: Iterable[float]) -> None:
+        """Measure every window not yet cached, with one batched FFT."""
+        firsts = list(dict.fromkeys(int(round(start * SAMPLE_RATE)) for start in starts))
+        firsts = [first for first in firsts if first not in self.cache]
+        if not firsts:
+            return
+        chunk = np.zeros((len(firsts), self.width), dtype=np.float64)
+        for row, first in enumerate(firsts):
+            lo, hi = max(0, first), min(len(self.samples), first + self.width)
+            if hi > lo:
+                chunk[row, lo - first:hi - first] = self.samples[lo:hi]
+        power = np.abs(np.fft.rfft(chunk * self.window, n=self.size, axis=1)) ** 2 / self.norm
+        if power.shape[1] > 2:
+            power[:, 1:-1] *= 2.0
+        sums = np.stack([np.sum(power[:, band], axis=1) for band in self.bands], axis=1)
+        for first, row in zip(firsts, sums.tolist()):
+            self.cache[first] = np.asarray([_db(value) for value in row])
 
     def at(self, start: float) -> np.ndarray:
         """Levels for the window beginning at `start` seconds."""
         first = int(round(start * SAMPLE_RATE))
         cached = self.cache.get(first)
-        if cached is not None:
-            return cached
-        chunk = np.zeros(self.width, dtype=np.float64)
-        lo, hi = max(0, first), min(len(self.samples), first + self.width)
-        if hi > lo:
-            chunk[lo - first:hi - first] = self.samples[lo:hi]
-        power = np.abs(np.fft.rfft(chunk * self.window, n=self.size)) ** 2 / self.norm
-        if len(power) > 2:
-            power[1:-1] *= 2.0
-        levels = np.asarray([_db(float(np.sum(power[mask]))) for mask in self.masks])
-        self.cache[first] = levels
-        return levels
+        if cached is None:
+            self.fill((start,))
+            cached = self.cache[first]
+        return cached
+
+    def fill_cues(self, moments: Iterable[float]) -> None:
+        self.fill(at + _SIMPLE_LEVEL_WINDOW[0] for at in moments)
 
     def cue(self, at: float) -> np.ndarray:
         return self.at(at + _SIMPLE_LEVEL_WINDOW[0])
@@ -2556,6 +2587,7 @@ def _simple_dominant_band_check(
     """
     duration = len(samples) / float(SAMPLE_RATE)
     levels = _BandLevels(samples)
+    onset_times: Dict[str, np.ndarray] = {}
     near = max(coincidence_sec, 0.030)
     grouped: Dict[str, List[int]] = {}
     for index, cue in enumerate(normalized):
@@ -2617,6 +2649,7 @@ def _simple_dominant_band_check(
                                    & (all_cue_times <= moment + shift + _SIMPLE_LEVEL_WINDOW[1]))]
         if len(pairs) < 2:
             return None, "preceding_90ms"
+        levels.fill_cues(moment + shift for moment, _ in pairs)
         rows = []
         for moment, present in pairs:
             row = _power(levels.cue(moment + shift))
@@ -2679,6 +2712,8 @@ def _simple_dominant_band_check(
                 source, min_strength=0.08, cache=cache, band_hz=[onset_low, onset_high],
             )["onsets"]
         band_onsets = onsets_by_band[key]
+        if key not in onset_times:
+            onset_times[key] = np.asarray([float(onset["time_sec"]) for onset in band_onsets], dtype=np.float64)
 
         def band_level(at: float, window: str = "cue", band=band, band_index=band_index) -> float:
             if band_index is None:
@@ -2687,10 +2722,18 @@ def _simple_dominant_band_check(
             return float((levels.cue(at) if window == "cue" else levels.before(at))[band_index])
 
         audible = [level for level in (band_level(time) for time in times) if level > -60.0]
+        level_memo: Dict[Tuple[float, int], Dict[str, Any]] = {}
         typical = float(np.median(audible)) if len(audible) >= 3 else None
 
         def level_test(at: float, anchor_index: int, band_level=band_level, typical=typical,
-                       band_index=band_index, band=band) -> Dict[str, Any]:
+                       band_index=band_index, memo=level_memo) -> Dict[str, Any]:
+            """Read-only result, memoised per (at, anchor_index): every input is fixed by now."""
+            known = memo.get((at, anchor_index))
+            if known is None:
+                known = memo[(at, anchor_index)] = measure_level(at, anchor_index, band_level, typical, band_index)
+            return known
+
+        def measure_level(at: float, anchor_index: int, band_level, typical, band_index) -> Dict[str, Any]:
             anchor = float(normalized[anchor_index]["time_sec"])
             level = band_level(at)
             before = band_level(at, "before")
@@ -2728,6 +2771,7 @@ def _simple_dominant_band_check(
                 "onset_time": None if best_onset is None else float(best_onset["time_sec"]),
                 "offset_ms": None if best_onset is None else round((float(best_onset["time_sec"]) - time) * 1000.0, 3),
                 "onsets": band_onsets,
+                "onset_times": onset_times[key],
                 "level_test": level_test,
                 "cue_index": index,
             }
@@ -2915,13 +2959,22 @@ def _attribute_shared_displacement(cue_reports: List[Dict[str, Any]]) -> None:
             break
 
 
+def _onset_times_within(simple: Mapping[str, Any], low: float, high: float) -> List[float]:
+    """Times of the band's onsets with low <= time <= high, in list order.
+
+    Uses the precomputed `onset_times` array when the check built one."""
+    times = simple.get("onset_times")
+    if times is None:
+        times = np.asarray([float(onset["time_sec"]) for onset in simple.get("onsets", ())], dtype=np.float64)
+    return times[np.flatnonzero((times >= low) & (times <= high))].tolist()
+
+
 def _simple_displaced_attack(
     simple: Mapping[str, Any], cue_time: float, before_sec: float, after_sec: float, tolerance_sec: float,
 ) -> Optional[float]:
     """The loudest passing attack of the group's band inside the slot but outside tolerance."""
     best = None
-    for onset in simple["onsets"]:
-        onset_time = float(onset["time_sec"])
+    for onset_time in _onset_times_within(simple, cue_time - before_sec - 1.0, cue_time + after_sec + 1.0):
         delta = onset_time - cue_time
         if abs(delta) <= tolerance_sec or delta < -before_sec or delta > after_sec:
             continue
@@ -2972,11 +3025,9 @@ def _simple_supports_time(simple: Mapping[str, Any], at: float, tolerance_sec: f
     Swells are detected a little after their start, so onsets up to 150 ms
     after the template's start time count.
     """
-    for onset in simple["onsets"]:
-        onset_time = float(onset["time_sec"])
-        if at - tolerance_sec <= onset_time <= at + max(tolerance_sec, 0.150):
-            if simple["level_test"](onset_time, simple["cue_index"])["passed"]:
-                return True
+    for onset_time in _onset_times_within(simple, at - tolerance_sec, at + max(tolerance_sec, 0.150)):
+        if simple["level_test"](onset_time, simple["cue_index"])["passed"]:
+            return True
     return False
 
 
@@ -2995,9 +3046,9 @@ def _simple_confirms_stronger_displaced_attack(
     if (displaced_time <= cue_time + tolerance_sec or typical is None
             or cue_level >= float(typical)):
         return False
-    for onset in simple.get("onsets", []):
-        onset_time = float(onset["time_sec"])
-        if abs(onset_time - displaced_time) > max(tolerance_sec, 0.030):
+    window = max(tolerance_sec, 0.030)
+    for onset_time in _onset_times_within(simple, displaced_time - window - 1.0, displaced_time + window + 1.0):
+        if abs(onset_time - displaced_time) > window:
             continue
         test = simple["level_test"](onset_time, simple["cue_index"])
         if (test["rise_db"] >= _SIMPLE_ATTACK_DB
@@ -3574,6 +3625,8 @@ def sync_check(
     by_group: Dict[str, List[Dict[str, Any]]] = {}
     for item in uncued_raw:
         members = [index for index, cue in enumerate(normalized) if cue["group"] == item["group"]]
+        if len(by_group.get(item["group"], ())) > max(1, _UNCUED_MAX_SHARE * len(members)):
+            continue  # this group already matches the backing; none of its items will be kept
         anchor = min(members, key=lambda index: abs(float(normalized[index]["time_sec"]) - item["time_sec"]))
         simple = simple_checks[anchor]
         at = float(item["time_sec"])
