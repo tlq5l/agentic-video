@@ -1,0 +1,25 @@
+"""End-to-end: frame tools must work when a sample lands after the last frame's start time."""
+from pathlib import Path
+
+from PIL import Image
+
+from src.core.config import Config
+from src.executor import mcp_server
+
+FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "synthetic_bench_60s.mp4"
+
+
+def test_inspect_moments_anchor_at_video_end(tmp_path, monkeypatch):
+    # 60.0 s at 25 fps: the last frame starts at 59.96 s, so a seek to 59.999 s (the clamped end of the window) decodes no frame.
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path)
+    outcome = mcp_server.handle_call("inspect_moments", {
+        "source": str(FIXTURE),
+        "moments": [{"timestamp_sec": 59.5, "label": "end"}],
+        "before_sec": 1.0, "after_sec": 1.0, "samples_per_moment": 3,
+    })
+    assert outcome["ok"]
+    moment = outcome["data"]["moments"][0]
+    assert moment["sample_count"] == 3
+    assert moment["sample_timestamps"][-1] == 59.999
+    with Image.open(moment["contact_sheet_path"]) as sheet:
+        assert sheet.width > 0

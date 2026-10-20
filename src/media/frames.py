@@ -12,7 +12,21 @@ from src.core.types import FrameInfo, format_timestamp
 from src.core.cache import MediaCache
 from src.media.seeking import build_seek_arguments
 from src.media.overlay import apply_overlay_to_file
+from src.media.probe import probe_video
 from src.media.timing import parse_selected_frame_timestamp
+
+# -sseof lookbacks for fetching a video's last frame; widen only when the
+# narrower one holds no frame (very low frame rates).
+LAST_FRAME_LOOKBACKS_SEC = (0.5, 5.0, 60.0)
+END_TOLERANCE_SEC = 0.001
+
+
+def _within_media(vpath: Path, timestamp_sec: float, cache: MediaCache) -> bool:
+    """True when the timestamp is inside the media (not past its end), so a failed seek there means "after the last frame"."""
+    try:
+        return timestamp_sec <= probe_video(str(vpath), cache=cache).duration_sec + END_TOLERANCE_SEC
+    except Exception:
+        return False
 
 
 def extract_single_frame(
@@ -79,48 +93,66 @@ def extract_single_frame(
     tmp_file = out_file.parent / f"{out_file.stem}.{unique_suffix}.tmp.jpg"
     
     vf = f"showinfo,scale={width}:-2"
-    cmd = ["ffmpeg", "-y", "-copyts"]
-    if threads is not None:
-        cmd.extend(["-threads", str(threads), "-filter_threads", str(threads)])
-    cmd.extend(pre_args)
-    cmd.extend(["-i", str(vpath)])
-    cmd.extend(post_args)
-    cmd.extend(["-frames:v", "1", "-vf", vf, "-q:v", "2", "-update", "1"])
-    if threads is not None:
-        # Input-side -threads bounds decoding; this bounds the JPEG encoder.
-        cmd.extend(["-threads", str(threads)])
-    cmd.append(str(tmp_file))
-    
-    try:
-        proc = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=Config.SUBPROCESS_TIMEOUT_SEC,
-            check=False
-        )
-    except FileNotFoundError as exc:
-        raise DependencyNotFoundError(
-            f"ffmpeg binary not found on system PATH: {exc}",
-            {"dependency": "ffmpeg"}
-        ) from exc
-    except subprocess.TimeoutExpired as exc:
+
+    def _discard_tmp() -> None:
         if tmp_file.exists():
             try:
                 tmp_file.unlink()
             except Exception:
                 pass
-        raise SubprocessTimeoutError(
-            f"FFmpeg timed out extracting frame at {timestamp_sec:.2f}s",
-            {"video": str(vpath), "timestamp": timestamp_sec}
-        ) from exc
+
+    def _run_ffmpeg(seek_args: List[str], one_frame: bool) -> "subprocess.CompletedProcess[str]":
+        cmd = ["ffmpeg", "-y", "-copyts"]
+        if threads is not None:
+            cmd.extend(["-threads", str(threads), "-filter_threads", str(threads)])
+        cmd.extend(seek_args)
+        cmd.extend(["-i", str(vpath)])
+        cmd.extend(post_args)
+        if one_frame:
+            cmd.extend(["-frames:v", "1"])
+        cmd.extend(["-vf", vf, "-q:v", "2", "-update", "1"])
+        if threads is not None:
+            # Input-side -threads bounds decoding; this bounds the JPEG encoder.
+            cmd.extend(["-threads", str(threads)])
+        cmd.append(str(tmp_file))
+        try:
+            return subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=Config.SUBPROCESS_TIMEOUT_SEC,
+                check=False
+            )
+        except FileNotFoundError as exc:
+            raise DependencyNotFoundError(
+                f"ffmpeg binary not found on system PATH: {exc}",
+                {"dependency": "ffmpeg"}
+            ) from exc
+        except subprocess.TimeoutExpired as exc:
+            _discard_tmp()
+            raise SubprocessTimeoutError(
+                f"FFmpeg timed out extracting frame at {timestamp_sec:.2f}s",
+                {"video": str(vpath), "timestamp": timestamp_sec}
+            ) from exc
+
+    proc = _run_ffmpeg(pre_args, one_frame=True)
+    last_frame_fallback = False
+    if (proc.returncode != 0 or not tmp_file.exists()) and _within_media(vpath, timestamp_sec, cache):
+        # The seek landed after the last frame's start time (a video ends at its
+        # duration, but its last frame starts a frame earlier), so no frame was
+        # decoded. Show that last frame; decoded_timestamp/timestamp_delta below
+        # report which frame it really is.
+        _discard_tmp()
+        for lookback_sec in LAST_FRAME_LOOKBACKS_SEC:
+            retry = _run_ffmpeg(["-sseof", f"-{lookback_sec}"], one_frame=False)
+            if retry.returncode == 0 and tmp_file.exists():
+                proc = retry
+                last_frame_fallback = True
+                break
+            _discard_tmp()
 
     if proc.returncode != 0 or not tmp_file.exists():
-        if tmp_file.exists():
-            try:
-                tmp_file.unlink()
-            except Exception:
-                pass
+        _discard_tmp()
         raise MediaCorruptError(
             f"FFmpeg failed extracting frame at {timestamp_sec:.2f}s: {proc.stderr.strip()}",
             {"video": str(vpath), "stderr": proc.stderr}
@@ -151,7 +183,7 @@ def extract_single_frame(
     # ``showinfo`` was part of the exact FFmpeg command that wrote this
     # artifact, so its PTS identifies the selected frame rather than merely a
     # nearby source frame returned by a separate probe.
-    decoded_timestamp = parse_selected_frame_timestamp(proc.stderr)
+    decoded_timestamp = parse_selected_frame_timestamp(proc.stderr, last=last_frame_fallback)
     timestamp_delta = (
         round(decoded_timestamp - float(timestamp_sec), 6)
         if decoded_timestamp is not None

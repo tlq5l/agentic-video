@@ -20,7 +20,7 @@ from typing import Iterable, Optional
 _SHOWINFO_PTS_RE = re.compile(r"\bpts_time:(-?(?:\d+(?:\.\d*)?|\.\d+))\b")
 
 
-def parse_selected_frame_timestamp(stderr: str) -> Optional[float]:
+def parse_selected_frame_timestamp(stderr: str, last: bool = False) -> Optional[float]:
     """Parse the source PTS emitted by FFmpeg's ``showinfo`` filter.
 
     This is intentionally separate from ``probe_decoded_frame_timestamps``:
@@ -28,10 +28,14 @@ def parse_selected_frame_timestamp(stderr: str) -> Optional[float]:
     actually wrote to disk, especially across VFR PTS gaps.  Callers that
     request one output frame should add ``showinfo`` to that same FFmpeg
     command and use this value as the selected-frame receipt.
+
+    With ``last=True`` the receipt is the final frame shown (for commands that
+    overwrite one output file with every frame and keep the last).
     """
     if not isinstance(stderr, str):
         return None
-    for match in _SHOWINFO_PTS_RE.finditer(stderr):
+    matches = list(_SHOWINFO_PTS_RE.finditer(stderr))
+    for match in (reversed(matches) if last else matches):
         try:
             value = float(match.group(1))
         except (TypeError, ValueError):
