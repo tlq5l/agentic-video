@@ -206,7 +206,7 @@ def test_overview_chunks_partitions_full_span_without_gaps(monkeypatch):
             frame_height=180,
         )
 
-    monkeypatch.setattr(engine, "overview", fake_overview)
+    monkeypatch.setattr(engine, "_overview_batch", lambda ranges: [fake_overview(**r) for r in ranges])
     chunks = engine.overview_chunks(
         start_sec=5.0,
         end_sec=52.0,

@@ -1,6 +1,7 @@
 """High-level Agentic Video Engine."""
 import math
-from typing import List, Optional, Dict, Any, Union
+from concurrent.futures import ThreadPoolExecutor
+from typing import List, Optional, Dict, Any, Tuple, Union
 from src.core.types import (
     VideoMetadata,
     TranscriptResult,
@@ -18,7 +19,8 @@ from src.media.frames import extract_window_frames
 from src.media.sampling import sample_sparse_frames
 from src.media.contact_sheet import (
     generate_video_overview,
-    build_contact_sheet,
+    generate_video_overviews,
+    build_contact_sheets,
     compose_contact_sheet,
     default_sheet_path,
 )
@@ -31,6 +33,9 @@ from src.media.audio import (
     spectrogram_window as render_spectrogram_window,
     sync_check as compare_audio_video_sync,
 )
+
+# Most windows one inspect_windows call extracts side by side.
+WINDOW_WORKERS = 4
 
 
 def _timestamp_provenance(frame: Any) -> Dict[str, Optional[float]]:
@@ -142,6 +147,10 @@ class AgenticVideoEngine:
             deadline_sec=deadline_sec,
         )
 
+    def _overview_batch(self, ranges: List[Dict[str, Any]]) -> List[ContactSheetResult]:
+        """Overviews for several ranges, extracted together from one shared worker pool."""
+        return generate_video_overviews(self.source_path, ranges, cache=self._cache)
+
     def overview_chunks(
         self,
         chunk_sec: float = 60.0,
@@ -187,16 +196,17 @@ class AgenticVideoEngine:
                 {"chunk_count": count, "max_chunks": max_count, "chunk_sec": chunk},
             )
 
-        chunks: List[Dict[str, Any]] = []
+        bounds: List[Tuple[float, float]] = []
         cursor = start
-        for index in range(count):
+        for _ in range(count):
             chunk_end = min(end, cursor + chunk)
-            sheet = self.overview(
-                samples=samples_per_chunk,
-                cols=cols,
-                start_sec=cursor,
-                end_sec=chunk_end,
-            )
+            bounds.append((cursor, chunk_end))
+            cursor = chunk_end
+        sheets = self._overview_batch(
+            [{"samples": samples_per_chunk, "cols": cols, "start_sec": a, "end_sec": b} for a, b in bounds]
+        )
+        chunks: List[Dict[str, Any]] = []
+        for index, ((cursor, chunk_end), sheet) in enumerate(zip(bounds, sheets)):
             chunk_item = sheet.to_dict()
             chunk_item.update({
                 "index": index + 1,
@@ -204,7 +214,6 @@ class AgenticVideoEngine:
                 "range_end_sec": chunk_end,
             })
             chunks.append(chunk_item)
-            cursor = chunk_end
         return chunks
 
     def refine_temporal_beam(
@@ -329,7 +338,8 @@ class AgenticVideoEngine:
                 },
             )
 
-        total_samples = 0
+        # Collect every overview this call needs, then extract all frames from one shared pool.
+        requests: List[Dict[str, Any]] = []
         for parent in parents:
             start = parent["start_sec"]
             end = parent["end_sec"]
@@ -354,17 +364,10 @@ class AgenticVideoEngine:
 
             if compact_parent_sheet:
                 compact_samples = fanout_value * samples_value
-                compact_sheet = self.overview(
-                    samples=compact_samples,
-                    cols=min(4, compact_samples),
-                    start_sec=start,
-                    end_sec=end,
-                )
-                parent["compact_contact_sheet_path"] = compact_sheet.file_path
-                parent["compact_sample_timestamps"] = list(compact_sheet.timestamps)
-                parent["compact_sample_count"] = compact_sheet.sample_count
-
-            children: List[Dict[str, Any]] = []
+                requests.append({
+                    "parent": parent, "child_index": None,
+                    "range": {"samples": compact_samples, "cols": min(4, compact_samples), "start_sec": start, "end_sec": end},
+                })
             for child_index in range(fanout_value):
                 child_start = boundaries[child_index]
                 child_end = boundaries[child_index + 1]
@@ -378,22 +381,29 @@ class AgenticVideoEngine:
                             "end_sec": child_end,
                         },
                     )
-                sheet = self.overview(
-                    samples=samples_value,
-                    cols=cols_value,
-                    start_sec=child_start,
-                    end_sec=child_end,
-                )
-                total_samples += sheet.sample_count
-                children.append({
-                    "child_index": child_index + 1,
-                    "start_sec": child_start,
-                    "end_sec": child_end,
-                    "sample_timestamps": list(sheet.timestamps),
-                    "contact_sheet_path": sheet.file_path,
-                    "sample_count": sheet.sample_count,
+                requests.append({
+                    "parent": parent, "child_index": child_index,
+                    "range": {"samples": samples_value, "cols": cols_value, "start_sec": child_start, "end_sec": child_end},
                 })
-            parent["children"] = children
+
+        sheets = self._overview_batch([r["range"] for r in requests])
+        total_samples = 0
+        for request, sheet in zip(requests, sheets):
+            parent = request["parent"]
+            if request["child_index"] is None:
+                parent["compact_contact_sheet_path"] = sheet.file_path
+                parent["compact_sample_timestamps"] = list(sheet.timestamps)
+                parent["compact_sample_count"] = sheet.sample_count
+                continue
+            total_samples += sheet.sample_count
+            parent.setdefault("children", []).append({
+                "child_index": request["child_index"] + 1,
+                "start_sec": request["range"]["start_sec"],
+                "end_sec": request["range"]["end_sec"],
+                "sample_timestamps": list(sheet.timestamps),
+                "contact_sheet_path": sheet.file_path,
+                "sample_count": sheet.sample_count,
+            })
 
         return {
             "parents": parents,
@@ -893,7 +903,7 @@ class AgenticVideoEngine:
         side = samples // 2
         last_valid = max(0.0, meta.duration_sec - 0.001)
         items: List[Dict[str, Any]] = []
-        total_samples = 0
+        jobs: List[Dict[str, Any]] = []
         for input_index, item in enumerate(moments):
             if not isinstance(item, dict) or "timestamp_sec" not in item:
                 raise ExtractionBoundsError("Each inspect_moments item requires timestamp_sec (seconds), e.g. {\"timestamp_sec\": 12.5}", {"input_index": input_index})
@@ -911,14 +921,6 @@ class AgenticVideoEngine:
             anchor_index = len(before_ts) + 1
             label = item.get("label")
             label_text = f" [{label}]" if label is not None else ""
-            sheet = build_contact_sheet(
-                self.source_path,
-                timestamps,
-                cols=min(cols_value, len(timestamps)),
-                title=f"Moment {input_index + 1}{label_text}: anchor #{anchor_index} @ {format_timestamp(anchor)}",
-                cache=self._cache,
-            )
-            total_samples += sheet.sample_count
             items.append({
                 "index": input_index + 1,
                 "timestamp_sec": anchor,
@@ -926,8 +928,18 @@ class AgenticVideoEngine:
                 "start_sec": start,
                 "end_sec": end,
                 "anchor_sample_index": anchor_index,
+            })
+            jobs.append({
+                "timestamps": timestamps,
+                "cols": min(cols_value, len(timestamps)),
+                "title": f"Moment {input_index + 1}{label_text}: anchor #{anchor_index} @ {format_timestamp(anchor)}",
+            })
+        total_samples = 0
+        for moment, sheet in zip(items, build_contact_sheets(self.source_path, jobs, cache=self._cache)):
+            total_samples += sheet.sample_count
+            moment.update({
                 "sample_timestamps": list(sheet.timestamps),
-                "relative_offsets_sec": [round(ts - anchor, 6) for ts in sheet.timestamps],
+                "relative_offsets_sec": [round(ts - moment["timestamp_sec"], 6) for ts in sheet.timestamps],
                 "contact_sheet_path": sheet.file_path,
                 "sample_count": sheet.sample_count,
             })
@@ -1016,12 +1028,13 @@ class AgenticVideoEngine:
         items: List[Dict[str, Any]] = []
         total_frames = 0
         total_tokens = 0
-        for index, item in enumerate(selected, start=1):
-            result = self.inspect_window(
-                start_sec=item["start_sec"],
-                end_sec=item["end_sec"],
-                fps=fps_value,
-            )
+        # Windows are independent ffmpeg runs; a few at once (capped, the machine is shared), results in order.
+        with ThreadPoolExecutor(max_workers=min(WINDOW_WORKERS, len(selected))) as pool:
+            results = list(pool.map(
+                lambda item: self.inspect_window(start_sec=item["start_sec"], end_sec=item["end_sec"], fps=fps_value),
+                selected,
+            ))
+        for index, (item, result) in enumerate(zip(selected, results), start=1):
             payload = result.to_dict()
             frame_count = len(payload["frames"])
             total_frames += frame_count

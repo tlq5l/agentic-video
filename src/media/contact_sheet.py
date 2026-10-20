@@ -133,26 +133,25 @@ def compose_contact_sheet(
     )
 
 
-def build_contact_sheet(
+def build_contact_sheets(
     video_path: Union[str, Path],
-    timestamps: List[float],
-    output_path: Optional[Union[str, Path]] = None,
-    cols: int = 4,
+    jobs: Sequence[dict],
     width: int = Config.DEFAULT_FRAME_WIDTH,
-    title: Optional[str] = None,
     cache: Optional[MediaCache] = None,
     deadline_sec: Optional[float] = None,
-) -> ContactSheetResult:
-    """Extract frames at specified timestamps and compose a contact sheet.
+) -> List[ContactSheetResult]:
+    """Build several sheets from one shared extraction pool, in job order.
 
-    With `deadline_sec`, frame extraction stops waiting after that long and
-    raises SubprocessTimeoutError; frames already extracted stay cached, so a
-    repeat call continues from there.
+    Each job is ``{"timestamps": [...], "cols": int, "title": str | None,
+    "output_path": path | None}``. All frames of all jobs are queued at once, so the
+    workers never idle between sheets. With `deadline_sec`, extraction stops waiting
+    after that long and raises SubprocessTimeoutError; frames already extracted stay
+    cached, so a repeat call continues from there.
     """
     from src.media.frames import extract_single_frame
     if cache is None:
         cache = MediaCache()
-        
+
     vpath = Path(video_path).resolve()
 
     def _extract(t: float) -> FrameInfo:
@@ -163,49 +162,64 @@ def build_contact_sheet(
     # One ffmpeg process per frame; running a few at once keeps large sheets
     # well inside the MCP request timeout.
     pool = ThreadPoolExecutor(max_workers=SHEET_EXTRACT_WORKERS)
-    futures = [pool.submit(_extract, t) for t in timestamps]
-    done, pending = wait(futures, timeout=deadline_sec)
+    job_futures = [[pool.submit(_extract, t) for t in job["timestamps"]] for job in jobs]
+    everything = [future for futures in job_futures for future in futures]
+    done, pending = wait(everything, timeout=deadline_sec)
     if pending:
         pool.shutdown(wait=False, cancel_futures=True)
         raise SubprocessTimeoutError(
-            f"Extracted {len(done)} of {len(timestamps)} frames before the {deadline_sec:g} s limit "
+            f"Extracted {len(done)} of {len(everything)} frames before the {deadline_sec:g} s limit "
             "(the machine is busy or the video is slow to seek). Extracted frames are cached, so the "
             "same call again continues from there; or ask for fewer samples",
-            {"extracted": len(done), "requested": len(timestamps), "deadline_sec": deadline_sec},
+            {"extracted": len(done), "requested": len(everything), "deadline_sec": deadline_sec},
         )
     pool.shutdown()
-    frames: List[FrameInfo] = [future.result() for future in futures]
-    for idx, f in enumerate(frames):
-        f.index = idx + 1
 
-    if output_path is None:
-        out_path = default_sheet_path(cache, vpath, timestamps, cols)
-    else:
-        out_path = Path(output_path).resolve()
-        
-    return compose_contact_sheet(
-        frames=frames,
-        output_path=out_path,
-        title=title or f"CONTACT SHEET: {vpath.name}",
-        cols=cols
-    )
+    sheets: List[ContactSheetResult] = []
+    for job, futures in zip(jobs, job_futures):
+        frames: List[FrameInfo] = [future.result() for future in futures]
+        for idx, f in enumerate(frames):
+            f.index = idx + 1
+        cols = job["cols"]
+        if job.get("output_path") is None:
+            out_path = default_sheet_path(cache, vpath, job["timestamps"], cols)
+        else:
+            out_path = Path(job["output_path"]).resolve()
+        sheets.append(compose_contact_sheet(
+            frames=frames,
+            output_path=out_path,
+            title=job.get("title") or f"CONTACT SHEET: {vpath.name}",
+            cols=cols,
+        ))
+    return sheets
 
 
-def generate_video_overview(
+def build_contact_sheet(
     video_path: Union[str, Path],
-    samples: int = 8,
-    cols: int = 4,
+    timestamps: List[float],
     output_path: Optional[Union[str, Path]] = None,
+    cols: int = 4,
     width: int = Config.DEFAULT_FRAME_WIDTH,
+    title: Optional[str] = None,
     cache: Optional[MediaCache] = None,
-    start_sec: float = 0.0,
-    end_sec: Optional[float] = None,
     deadline_sec: Optional[float] = None,
 ) -> ContactSheetResult:
-    """Uniformly sample a whole video or bounded temporal range."""
-    if cache is None:
-        cache = MediaCache()
-        
+    """Extract frames at specified timestamps and compose a contact sheet."""
+    return build_contact_sheets(
+        video_path,
+        [{"timestamps": timestamps, "cols": cols, "title": title, "output_path": output_path}],
+        width=width, cache=cache, deadline_sec=deadline_sec,
+    )[0]
+
+
+def overview_timestamps(
+    video_path: Union[str, Path],
+    samples: int,
+    cache: MediaCache,
+    start_sec: float = 0.0,
+    end_sec: Optional[float] = None,
+) -> List[float]:
+    """Validate an overview range and return its uniformly spaced sample times."""
     vpath = Path(video_path).resolve()
     meta = probe_video(str(vpath), cache=cache)
     duration = meta.duration_sec
@@ -249,10 +263,45 @@ def generate_video_overview(
         step = window_duration / samples
         # Sample center of each interval
         timestamps = [round(start + (i + 0.5) * step, 3) if start == 0.0 and end_sec is None else start + (i + 0.5) * step for i in range(samples)]
-        
+    return timestamps
+
+
+def generate_video_overviews(
+    video_path: Union[str, Path],
+    ranges: Sequence[dict],
+    width: int = Config.DEFAULT_FRAME_WIDTH,
+    cache: Optional[MediaCache] = None,
+) -> List[ContactSheetResult]:
+    """Several overviews (``{"samples", "cols", "start_sec", "end_sec"}`` each) from one extraction pool."""
+    if cache is None:
+        cache = MediaCache()
+    jobs = [
+        {
+            "timestamps": overview_timestamps(video_path, r["samples"], cache, r["start_sec"], r.get("end_sec")),
+            "cols": r["cols"],
+        }
+        for r in ranges
+    ]
+    return build_contact_sheets(video_path, jobs, width=width, cache=cache)
+
+
+def generate_video_overview(
+    video_path: Union[str, Path],
+    samples: int = 8,
+    cols: int = 4,
+    output_path: Optional[Union[str, Path]] = None,
+    width: int = Config.DEFAULT_FRAME_WIDTH,
+    cache: Optional[MediaCache] = None,
+    start_sec: float = 0.0,
+    end_sec: Optional[float] = None,
+    deadline_sec: Optional[float] = None,
+) -> ContactSheetResult:
+    """Uniformly sample a whole video or bounded temporal range."""
+    if cache is None:
+        cache = MediaCache()
     return build_contact_sheet(
-        video_path=vpath,
-        timestamps=timestamps,
+        video_path=video_path,
+        timestamps=overview_timestamps(video_path, samples, cache, start_sec, end_sec),
         output_path=output_path,
         cols=cols,
         width=width,

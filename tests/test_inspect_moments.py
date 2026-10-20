@@ -46,7 +46,10 @@ def test_inspect_moments_includes_exact_anchor_and_symmetric_context(monkeypatch
         calls.append((list(timestamps), cols, title))
         return _fake_sheet(timestamps, cols)
 
-    monkeypatch.setattr("src.retrieval.engine.build_contact_sheet", fake_build)
+    monkeypatch.setattr(
+        "src.retrieval.engine.build_contact_sheets",
+        lambda video_path, jobs, cache=None: [fake_build(video_path, **job) for job in jobs],
+    )
     result = engine.inspect_moments(
         moments=[{"timestamp_sec": 50.0, "label": "candidate-A"}],
         before_sec=4.0,
@@ -73,7 +76,10 @@ def test_inspect_moments_preserves_input_order_and_labels(monkeypatch):
     def fake_build(video_path, timestamps, output_path=None, cols=4, width=640, title=None, cache=None):
         return _fake_sheet(timestamps, cols)
 
-    monkeypatch.setattr("src.retrieval.engine.build_contact_sheet", fake_build)
+    monkeypatch.setattr(
+        "src.retrieval.engine.build_contact_sheets",
+        lambda video_path, jobs, cache=None: [fake_build(video_path, **job) for job in jobs],
+    )
     result = engine.inspect_moments(
         moments=[{"timestamp_sec": 20.0, "label": "B"}, {"timestamp_sec": 10.0, "label": "A"}],
         samples_per_moment=5,
@@ -91,7 +97,10 @@ def test_inspect_moments_clamps_context_to_media_bounds(monkeypatch):
     def fake_build(video_path, timestamps, output_path=None, cols=4, width=640, title=None, cache=None):
         return _fake_sheet(timestamps, cols)
 
-    monkeypatch.setattr("src.retrieval.engine.build_contact_sheet", fake_build)
+    monkeypatch.setattr(
+        "src.retrieval.engine.build_contact_sheets",
+        lambda video_path, jobs, cache=None: [fake_build(video_path, **job) for job in jobs],
+    )
     result = engine.inspect_moments(
         moments=[{"timestamp_sec": 1.0}, {"timestamp_sec": 99.0}],
         before_sec=4.0,

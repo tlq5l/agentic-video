@@ -45,7 +45,7 @@ def test_stat_change_invalidates_fingerprint_memo(tmp_path, monkeypatch):
     assert len(opens) == 2
 
 
-def test_fingerprint_memo_isolated_between_cache_instances(tmp_path, monkeypatch):
+def test_fingerprint_memo_shared_between_cache_instances(tmp_path, monkeypatch):
     source = tmp_path / "video.bin"
     source.write_bytes(b"content")
     first_cache = MediaCache(tmp_path / "cache-a")
@@ -56,7 +56,7 @@ def test_fingerprint_memo_isolated_between_cache_instances(tmp_path, monkeypatch
     second = second_cache.compute_fingerprint(str(source))
 
     assert first == second
-    assert len(opens) == 2
+    assert len(opens) == 1
 
 
 def test_fingerprint_exact_digest_and_missing_path_behavior(tmp_path):

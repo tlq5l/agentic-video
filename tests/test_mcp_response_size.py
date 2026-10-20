@@ -118,7 +118,7 @@ def test_inspect_window_composes_sheet_from_dense_frames(tmp_path, monkeypatch):
         raise AssertionError("inspect_window must not seek each frame again with its own ffmpeg run")
 
     monkeypatch.setattr("src.media.frames.extract_single_frame", no_per_frame_seek)
-    monkeypatch.setattr("src.retrieval.engine.build_contact_sheet", no_per_frame_seek)
+    monkeypatch.setattr("src.retrieval.engine.build_contact_sheets", no_per_frame_seek)
     engine = AgenticVideoEngine(str(video), cache=MediaCache(tmp_path / "cache"))
 
     result = engine.inspect_window(0.5, 2.0, fps=4)
