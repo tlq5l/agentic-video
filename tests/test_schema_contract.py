@@ -75,6 +75,26 @@ def test_transcribe_contract_documents_cached_fallback_and_progress_result():
     assert "requested_model_size" in output["properties"]
 
 
+def test_transcribe_and_search_schemas_accept_the_model_substitution_note():
+    # asr.request_transcription adds this field when the requested model is not installed;
+    # search_transcript passes that status payload through unchanged while ASR runs.
+    contract = json.loads(CANONICAL.read_text(encoding="utf-8"))
+    response = {
+        "status": "in_progress",
+        "requested_model_size": "turbo",
+        "requested_model_cached": False,
+        "transcription_status": "started",
+        "retry_after_seconds": 5,
+        "transcription_message": "Transcription started.",
+        "model_substitution": "The base model is not installed here; used turbo instead.",
+    }
+    for tool in ("transcribe", "search_transcript"):
+        output = contract["tools"][tool]["outputSchema"]
+        assert set(response) <= set(output["properties"]), tool
+        _assert_schema_accepts(output, response)
+    assert "model_substitution" in PUBLIC_TS.read_text(encoding="utf-8")
+
+
 def test_public_frame_and_asr_provenance_fields_are_declared():
     declarations = PUBLIC_TS.read_text(encoding="utf-8")
     for field in ("requested_timestamp", "decoded_timestamp", "timestamp_delta", "confidence", "uncertainty"):
@@ -117,8 +137,10 @@ def _assert_schema_accepts(schema, value):
         assert isinstance(value, (int, float)) and not isinstance(value, bool)
     elif schema_type == "string":
         assert isinstance(value, str)
+    elif schema_type == "boolean":
+        assert isinstance(value, bool)
     else:
-        raise AssertionError(f"Unsupported contact_sheet schema type: {schema_type!r}")
+        raise AssertionError(f"Unsupported schema type: {schema_type!r}")
 
     if schema_type in ("integer", "number"):
         if "minimum" in schema:

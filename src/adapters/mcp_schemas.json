@@ -932,6 +932,7 @@
           "transcription_status": { "type": "string", "enum": ["started", "in_progress", "busy", "start_failed", "failed"] },
           "retry_after_seconds": { "type": "integer", "minimum": 0 },
           "transcription_message": { "type": "string" },
+          "model_substitution": { "type": "string", "description": "Only when the requested model is not installed: names the installed model used instead." },
           "status": { "type": "string", "enum": ["in_progress", "busy", "start_failed", "failed"] }
         },
         "oneOf": [
@@ -988,7 +989,8 @@
           "requested_model_cached": { "type": "boolean" },
           "transcription_status": { "type": "string", "enum": ["started", "in_progress", "busy", "start_failed", "failed"] },
           "retry_after_seconds": { "type": "integer", "minimum": 0 },
-          "transcription_message": { "type": "string" }
+          "transcription_message": { "type": "string" },
+          "model_substitution": { "type": "string", "description": "Only when the requested model is not installed: names the installed model used instead." }
         },
         "oneOf": [
           { "required": ["hits", "total"] },
