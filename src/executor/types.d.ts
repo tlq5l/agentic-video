@@ -163,6 +163,8 @@ export interface TranscribeTranscriptOutput {
   transcription_status?: "started" | "in_progress" | "busy" | "start_failed" | "failed";
   retry_after_seconds?: number;
   transcription_message?: string;
+  /** Only when the requested model is not installed: names the installed model used instead. */
+  model_substitution?: string;
   /** Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument. */
   note?: string;
 }
@@ -174,6 +176,8 @@ export interface TranscriptionStatusOutput {
   transcription_status: "started" | "in_progress" | "busy" | "start_failed" | "failed";
   retry_after_seconds: number;
   transcription_message: string;
+  /** Only when the requested model is not installed: names the installed model used instead. */
+  model_substitution?: string;
   /** Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument. */
   note?: string;
 }
