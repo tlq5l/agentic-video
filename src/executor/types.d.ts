@@ -485,7 +485,7 @@ export interface CheckFrameCadenceInput {
 }
 
 export interface CadenceRange {
-  /** Time of the first repeated frame in seconds. */
+  /** Time of the frame the first repeat copies, in seconds. */
   start_sec: number;
   /** Time just after the last repeated frame in seconds. */
   end_sec: number;
@@ -498,7 +498,7 @@ export interface CadenceRange {
 }
 
 export interface CheckFrameCadenceOutput {
-  /** Container frame rate in frames per second. */
+  /** Frame rate in frames per second (the stream's r_frame_rate; a variable-rate file is decoded at it, gaps filled with copies). */
   frame_rate: number;
   /** Frames decoded. */
   frames: number;

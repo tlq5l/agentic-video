@@ -1729,7 +1729,7 @@
           "retry_after_seconds": { "type": "integer", "minimum": 0 },
           "note": { "type": "string", "description": "Plain-English remark about the call: omitted items or an ignored unknown argument." },
           "ranges_omitted": { "type": "integer", "minimum": 1, "description": "How many ranges entries were left out of the list." },
-          "frame_rate": { "type": "number", "description": "Container frame rate in frames per second." },
+          "frame_rate": { "type": "number", "description": "Frame rate in frames per second (the stream's r_frame_rate; a variable-rate file is decoded at it, gaps filled with copies)." },
           "frames": { "type": "integer", "minimum": 0, "description": "Frames decoded." },
           "held_frames": { "type": "integer", "minimum": 0, "description": "Frames inside holds (runs of repeats longer than 0.5 s), left out of the ranges." },
           "ranges": {
@@ -1737,7 +1737,7 @@
             "items": {
               "type": "object",
               "properties": {
-                "start_sec": { "type": "number", "description": "Time of the first repeated frame in seconds." },
+                "start_sec": { "type": "number", "description": "Time of the frame the first repeat copies, in seconds." },
                 "end_sec": { "type": "number", "description": "Time just after the last repeated frame in seconds." },
                 "frames": { "type": "integer", "minimum": 1, "description": "Frames from start_sec to end_sec." },
                 "duplicate_frames": { "type": "integer", "minimum": 1, "description": "Frames in the range that repeat the frame before them." },

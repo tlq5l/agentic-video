@@ -32,9 +32,9 @@ _MIN_DISPLACED_SHARE = 0.02
 _WINDOW_BEATS = 1.5
 
 
-def _frame_rate(path: Path) -> float:
+def _frame_rate(path: Path, entry: str = "avg_frame_rate") -> float:
     probe = subprocess.run(
-        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=avg_frame_rate",
+        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=" + entry,
          "-of", "csv=p=0", str(path)], capture_output=True, text=True, check=False,
         timeout=Config.SUBPROCESS_TIMEOUT_SEC,
     )
@@ -359,24 +359,25 @@ def frame_cadence(source: str) -> Dict[str, Any]:
     half a second is a hold (still shot, title card, stall) and is left out.
     """
     path = _video_path(source)
-    rate = _frame_rate(path)
-    repeat: List[bool] = [False]
+    # FFmpeg decodes a variable-rate file at r_frame_rate, filling gaps with copies,
+    # so frame indexes are on that clock, not avg_frame_rate's.
+    rate = _frame_rate(path, "r_frame_rate")
+    repeat: List[bool] = []
     previous: Optional[np.ndarray] = None
     for frame in _grid_frames(path):
-        if previous is not None:
-            repeat.append(_near_identical(np.abs(frame - previous)))
+        repeat.append(previous is not None and _near_identical(np.abs(frame - previous)))
         previous = frame
     count = len(repeat)
     result: Dict[str, Any] = {"frame_rate": rate, "frames": count, "held_frames": 0, "ranges": [], "total": 0}
 
     # Take long runs of repeats out of the count: they are holds, and they split ranges.
     held = np.zeros(count, dtype=bool)
-    max_hold = int(_CADENCE_MAX_HOLD_SEC * rate)
+    min_hold = int(math.ceil(_CADENCE_MAX_HOLD_SEC * rate))  # the shortest run frozen_pictures reports
     run_start = 0
     for index in range(count + 1):
         if index < count and repeat[index]:
             continue
-        if index - run_start > max_hold:
+        if index - run_start >= min_hold:
             held[run_start:index] = True
         run_start = index + 1
     result["held_frames"] = int(held.sum())
@@ -401,10 +402,11 @@ def frame_cadence(source: str) -> Dict[str, Any]:
         while end + 1 < count and covered[end + 1]:
             end += 1
         repeats_at = np.flatnonzero(repeated[index:end + 1]) + index
-        first, last = int(repeats_at[0]), int(repeats_at[-1])
+        # Start at the frame the first repeat copies, so doubled frames read as exactly half the rate.
+        first, last = int(repeats_at[0]) - 1, int(repeats_at[-1])
         frames = last - first + 1
         if frames / rate >= _CADENCE_MIN_RANGE_SEC:
-            duplicates = int(repeated[first:last + 1].sum())
+            duplicates = int(repeated[first + 1:last + 1].sum())
             duration = frames / rate
             result["ranges"].append({
                 "start_sec": round(first / rate, 3),
