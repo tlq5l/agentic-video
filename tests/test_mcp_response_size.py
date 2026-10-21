@@ -29,6 +29,7 @@ def _patch_dispatch(monkeypatch, data_or_exc):
 
 
 def test_large_contact_sheet_is_downscaled_inline_and_keeps_full_path(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENTIC_VIDEO_INLINE_IMAGES", "1")
     sheet = _noisy_jpeg(tmp_path / "sheet.jpg")
     full_b64 = len(mcp_server.make_tool_file(sheet)["data"])
     limit = full_b64 // 3
@@ -55,6 +56,7 @@ def test_large_contact_sheet_is_downscaled_inline_and_keeps_full_path(tmp_path, 
 
 
 def test_small_images_are_untouched(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENTIC_VIDEO_INLINE_IMAGES", "1")
     sheet = _noisy_jpeg(tmp_path / "small.jpg", size=(64, 48))
     _patch_dispatch(monkeypatch, lambda: {"file_path": sheet, "tool_file": mcp_server.make_tool_file(sheet)})
     result = json.loads(mcp_server.tool_call_response(1, "contact_sheet", {"source": "video.mp4"}))["result"]

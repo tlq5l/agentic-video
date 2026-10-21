@@ -2,6 +2,17 @@
 
 agentic-video lets an AI agent that reads text and images, but not video, work with video files on your own machine. It is a Python library plus a stdio MCP server. The agent asks small, targeted questions ("show me 12 frames from 0:40 to 1:10", "when is 'launch' spoken?") and gets back measurements, transcripts and contact sheets: grids of frames, each with its timestamp burned into the pixels. Nothing is uploaded; everything runs locally with FFmpeg, Whisper and optional local models.
 
+In 2 minutes (macOS) your agent can answer "what happens in this video?" and "when is X said?" for a local video file. You get the length and size, a contact sheet image with timestamps, the cuts, a loudness summary and searchable speech. Nothing leaves your machine. Setup for Claude Code:
+
+```sh
+brew install ffmpeg uv
+git clone https://github.com/tlq5l/agentic-video.git && cd agentic-video
+uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r requirements.txt
+claude mcp add -s user agentic-video -e PYTHONPATH="$PWD" -- "$PWD/.venv/bin/python" -m src.executor.mcp_server
+```
+
+Then ask: "Use agentic-video to review `/path/to/video.mp4`." Other clients and details: [Run the MCP server](#run-the-mcp-server).
+
 **Status:** experimental. The author uses it every day; support is best-effort. Issues and pull requests are welcome, but expect slow replies.
 
 ## What it gives an agent
@@ -28,8 +39,10 @@ git clone https://github.com/tlq5l/agentic-video.git
 cd agentic-video
 uv venv --python 3.12 .venv
 uv pip install --python .venv/bin/python -r requirements.txt pytest
-.venv/bin/python -m pytest -q
+.venv/bin/python -m pytest -q   # optional: about 3 minutes
 ```
+
+The test run is optional for users.
 
 To lint before every commit (`uvx ruff check .`, the core rules in `ruff.toml`), turn the hook on once per clone: `git config core.hooksPath .githooks`.
 
@@ -86,6 +99,29 @@ To add it to an MCP client (Claude Code, Claude Desktop, Cursor and others), use
 
 Give tools absolute video paths. Results are cached under `~/.cache/agentic-video` (change it with `AGENTIC_VIDEO_CACHE_DIR`).
 
+### Add it to Claude Code (one command)
+
+Run this from the cloned folder (it uses the current folder's path). `-s user` makes the tool available in every project, not only this folder:
+
+```sh
+claude mcp add -s user agentic-video -e PYTHONPATH="$PWD" -- "$PWD/.venv/bin/python" -m src.executor.mcp_server
+```
+
+By default results stay small enough for Claude Code: images are saved as JPEG files and the result gives their `file_path` (the agent opens the file), and a long `transcribe` result lists the first part of the transcript plus a `transcript_path` file for the rest. A client that renders images from the result itself can add `-e AGENTIC_VIDEO_INLINE_IMAGES=1`; results then carry base64 images and can pass 1 MB. Changed: earlier versions included base64 images by default; if you relied on that, set `AGENTIC_VIDEO_INLINE_IMAGES=1` to restore it.
+
+### Tell your agent to use it (paste into your AGENTS.md or CLAUDE.md)
+
+An always-loaded note works better than hoping the agent finds the tool:
+
+```md
+## Video files (agentic-video MCP)
+You cannot watch video. For any .mp4/.mov/.webm question, use the agentic-video MCP tools; never guess from the filename.
+- First look: `review_video` with an absolute path. It returns metadata, a contact sheet, cuts and loudness. Open the JPEG at `file_path` to see the frames.
+- Spoken words: `search_transcript` (when is X said) or `transcribe`. Do this before looking at frames.
+- A short range: `inspect_window` (start_sec, end_sec). Counting: `count_occurrences`. Sync and audio faults: `sync_check`, `loudness_timeline`.
+- Sampling can miss brief events and a missing hit is not proof. Quote the burned-in timestamps. Full guide: AGENTS.md in the agentic-video repo.
+```
+
 ### Five-line example
 
 From the repository folder: a handshake, the video's metadata, and a 6-frame contact sheet (its JPEG path is in `file_path`):
@@ -120,7 +156,7 @@ It does not beat Gemini's video understanding in general.
 
 ## Limits
 
-- **Images come back as files.** Image tools return `file_path` plus a base64 copy inside `structuredContent`, not an MCP image content block. Many clients show the agent only the JSON text, so the agent has to open the JPEG at `file_path` itself (for example with its file-reading tool).
+- **Images come back as files.** Image tools return `file_path`, not an MCP image content block; the base64 copy in `structuredContent` is off by default (set `AGENTIC_VIDEO_INLINE_IMAGES=1` to include it). Many clients show the agent only the JSON text, so the agent has to open the JPEG at `file_path` itself (for example with its file-reading tool).
 - **Sampling can miss things.** Contact sheets and visual search look at sampled frames; something brief between samples can be missed, and a missing hit does not prove absence. Visual search runs CLIP on the CPU and is slow on long videos.
 - **Transcripts can invent lines.** Whisper (especially turbo) can invent lines over music or silence. A line repeated 3 or more times in a row is flagged `suspect`; a single invented line is not.
 - **Cuts can be missed.** A hard cut between two similar pictures that scores under the 0.25 threshold can be missed.

@@ -165,6 +165,10 @@ export interface TranscribeTranscriptOutput {
   transcription_message?: string;
   /** Only when the requested model is not installed: names the installed model used instead. */
   model_substitution?: string;
+  /** Only when the transcript was too long to list in full: path of a JSON file with every segment. */
+  transcript_path?: string;
+  /** Only with transcript_path: how many segments are left out of `segments`. */
+  segments_omitted?: number;
   /** Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument. */
   note?: string;
 }
@@ -178,6 +182,12 @@ export interface TranscriptionStatusOutput {
   transcription_message: string;
   /** Only when the requested model is not installed: names the installed model used instead. */
   model_substitution?: string;
+  /** While status is in_progress: seconds since the background transcription started. */
+  elapsed_sec?: number;
+  /** While status is in_progress: rough estimate of the whole run. */
+  estimated_total_sec?: number;
+  /** While status is in_progress: elapsed / estimated total, capped at 99. An estimate. */
+  estimated_percent?: number;
   /** Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument. */
   note?: string;
 }
