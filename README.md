@@ -8,7 +8,7 @@ In 2 minutes (macOS) your agent can answer "what happens in this video?" and "wh
 brew install ffmpeg uv
 git clone https://github.com/tlq5l/agentic-video.git && cd agentic-video
 uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r requirements.txt
-claude mcp add agentic-video -e PYTHONPATH="$PWD" -- "$PWD/.venv/bin/python" -m src.executor.mcp_server
+claude mcp add -s user agentic-video -e PYTHONPATH="$PWD" -- "$PWD/.venv/bin/python" -m src.executor.mcp_server
 ```
 
 Then ask: "Use agentic-video to review `/path/to/video.mp4`." Other clients and details: [Run the MCP server](#run-the-mcp-server).
@@ -101,13 +101,13 @@ Give tools absolute video paths. Results are cached under `~/.cache/agentic-vide
 
 ### Add it to Claude Code (one command)
 
-Run this from the cloned folder (it uses the current folder's path):
+Run this from the cloned folder (it uses the current folder's path). `-s user` makes the tool available in every project, not only this folder:
 
 ```sh
-claude mcp add agentic-video -e PYTHONPATH="$PWD" -- "$PWD/.venv/bin/python" -m src.executor.mcp_server
+claude mcp add -s user agentic-video -e PYTHONPATH="$PWD" -- "$PWD/.venv/bin/python" -m src.executor.mcp_server
 ```
 
-By default results stay small enough for Claude Code: images are saved as JPEG files and the result gives their `file_path` (the agent opens the file), and a long `transcribe` result lists the first part of the transcript plus a `transcript_path` file for the rest. A client that renders images from the result itself can add `-e AGENTIC_VIDEO_INLINE_IMAGES=1`; results then carry base64 images and can pass 1 MB.
+By default results stay small enough for Claude Code: images are saved as JPEG files and the result gives their `file_path` (the agent opens the file), and a long `transcribe` result lists the first part of the transcript plus a `transcript_path` file for the rest. A client that renders images from the result itself can add `-e AGENTIC_VIDEO_INLINE_IMAGES=1`; results then carry base64 images and can pass 1 MB. Changed: earlier versions included base64 images by default; if you relied on that, set `AGENTIC_VIDEO_INLINE_IMAGES=1` to restore it.
 
 ### Tell your agent to use it (paste into your AGENTS.md or CLAUDE.md)
 
@@ -156,7 +156,7 @@ It does not beat Gemini's video understanding in general.
 
 ## Limits
 
-- **Images come back as files.** Image tools return `file_path` plus a base64 copy inside `structuredContent`, not an MCP image content block. Many clients show the agent only the JSON text, so the agent has to open the JPEG at `file_path` itself (for example with its file-reading tool).
+- **Images come back as files.** Image tools return `file_path`, not an MCP image content block; the base64 copy in `structuredContent` is off by default (set `AGENTIC_VIDEO_INLINE_IMAGES=1` to include it). Many clients show the agent only the JSON text, so the agent has to open the JPEG at `file_path` itself (for example with its file-reading tool).
 - **Sampling can miss things.** Contact sheets and visual search look at sampled frames; something brief between samples can be missed, and a missing hit does not prove absence. Visual search runs CLIP on the CPU and is slow on long videos.
 - **Transcripts can invent lines.** Whisper (especially turbo) can invent lines over music or silence. A line repeated 3 or more times in a row is flagged `suspect`; a single invented line is not.
 - **Cuts can be missed.** A hard cut between two similar pictures that scores under the 0.25 threshold can be missed.
