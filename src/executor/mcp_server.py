@@ -12,7 +12,7 @@ from typing import Dict, Any, Iterator, List, Optional
 from src.retrieval.engine import AgenticVideoEngine
 from src.core.config import Config
 from src.core.errors import AgenticVideoError, MediaNotFoundError
-from src.media import fetch
+from src.media import fetch, visual_timing
 from src.transcript import asr
 
 # Readable fallback kept for source compatibility; runtime discovery below is
@@ -263,6 +263,7 @@ MAX_CUTS = 500
 MAX_ONSETS = 500
 MAX_LOUDNESS_WINDOWS = 500
 MAX_SYNC_ITEMS = 500
+MAX_CADENCE_RANGES = 500
 
 
 def format_tool_error(exc: Exception, tool: Optional[str] = None) -> str:
@@ -801,6 +802,11 @@ def _dispatch(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
                       "kind": getattr(c, "kind", "cut")} for c in cuts]
         data = {"cuts": cut_items, "total": len(cut_items)}
         _bound_list(data, "cuts", MAX_CUTS, "Raise threshold (up to 1) to keep only stronger cuts, or pass start_sec/end_sec to list a later range.")
+        return {"ok": True, "data": data}
+
+    elif name == "check_frame_cadence":
+        data = visual_timing.frame_cadence(source)
+        _bound_list(data, "ranges", MAX_CADENCE_RANGES, "Ranges are in time order, so the omitted ones are later in the file.")
         return {"ok": True, "data": data}
 
     elif name == "audio_onsets":

@@ -30,6 +30,7 @@ EXPECTED_TOOLS = {
     "inspect_windows",
     "inspect_window",
     "detect_cuts",
+    "check_frame_cadence",
     "audio_onsets",
     "loudness_timeline",
     "spectrogram_window",

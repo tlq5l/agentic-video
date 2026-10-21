@@ -21,7 +21,7 @@ from src.media.audio import (audio_onsets, clipping_runs, loudness_timeline, spe
                              sync_check)
 from src.media.contact_sheet import build_contact_sheet
 from src.media.probe import probe_video
-from src.media.visual_timing import blank_flashes, frame_splices, frozen_pictures, text_cue_timing, text_overflow
+from src.media.visual_timing import blank_flashes, frame_cadence, frame_splices, frozen_pictures, text_cue_timing, text_overflow
 from src.jev import decide as jev_decide
 from src.jev import scrub as scrub_jev
 
@@ -1842,6 +1842,11 @@ def _cmd_check(args: argparse.Namespace) -> int:
     return 1 if confirmed else 0
 
 
+def _cmd_cadence(args: argparse.Namespace) -> int:
+    print(json.dumps(frame_cadence(args.video), indent=2))
+    return 0
+
+
 def _cmd_run(args: argparse.Namespace) -> int:
     summary = run_loop(args.config)
     print("{} after {} fixer round(s). Summary: {}/summary.md".format(
@@ -1863,6 +1868,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     check.add_argument("--out", default=DEFAULT_OUTPUT_DIR)
     check.add_argument("--judge", choices=("jev", "none"), default="none")
     check.set_defaults(func=_cmd_check)
+    cadence = commands.add_parser("cadence", help="print time ranges where the unique-frame rate is below the file's frame rate (same result as the check_frame_cadence tool)")
+    cadence.add_argument("video")
+    cadence.set_defaults(func=_cmd_cadence)
     run = commands.add_parser("run", help="run the build/check/fix/re-check loop")
     run.add_argument("--config", required=True)
     run.set_defaults(func=_cmd_run)

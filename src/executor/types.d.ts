@@ -476,6 +476,43 @@ export interface DetectCutsOutput {
 }
 
 // ============================================================================
+// Tool: check_frame_cadence
+// ============================================================================
+
+export interface CheckFrameCadenceInput {
+  /** Video source path */
+  source: string;
+}
+
+export interface CadenceRange {
+  /** Time of the first repeated frame in seconds. */
+  start_sec: number;
+  /** Time just after the last repeated frame in seconds. */
+  end_sec: number;
+  /** Frames from start_sec to end_sec. */
+  frames: number;
+  /** Frames in the range that repeat the frame before them. */
+  duplicate_frames: number;
+  /** Unique frames per second inside the range: (frames - duplicate_frames) / (end_sec - start_sec). */
+  effective_fps: number;
+}
+
+export interface CheckFrameCadenceOutput {
+  /** Container frame rate in frames per second. */
+  frame_rate: number;
+  /** Frames decoded. */
+  frames: number;
+  /** Frames inside holds (runs of repeats longer than 0.5 s), left out of the ranges. */
+  held_frames: number;
+  ranges: CadenceRange[];
+  /** Number of ranges found. */
+  total: number;
+  note?: string;
+  /** How many `ranges` entries were left out of the list; `note` says how to see them. */
+  ranges_omitted?: number;
+}
+
+// ============================================================================
 // Tool 5: inspect_window
 // ============================================================================
 
@@ -1136,6 +1173,9 @@ export interface AgenticVideoIntegration {
    * List hard scene cuts and transitions (at most 500 listed; total is the full count).
    */
   detect_cuts(input: DetectCutsInput): Promise<ToolResult<WithUrlSource<DetectCutsOutput>>>;
+
+  /** Find stretches where the unique-frame rate is below the container frame rate (duplicate-frame judder); at most 500 listed, total is the full count. */
+  check_frame_cadence(input: CheckFrameCadenceInput): Promise<ToolResult<WithUrlSource<CheckFrameCadenceOutput>>>;
 
   /** Split candidate windows into contiguous child ranges with one contact sheet each (budget: windows x fanout x samples_per_child). */
   refine_temporal_beam(input: RefineTemporalBeamInput): Promise<ToolResult<WithUrlSource<RefineTemporalBeamOutput>>>;

@@ -252,6 +252,12 @@ _FROZEN_CONTEXT_ACTIVE_SHARE = 0.001
 _FROZEN_CUT_SHARE = 0.20
 
 
+def _near_identical(delta: np.ndarray) -> bool:
+    """Whether a frame-to-frame grey difference is small enough to call the frames the same picture."""
+    return (float(np.mean(delta)) <= _FROZEN_MAX_MEAN_DELTA
+            and float(np.mean(delta > 2.0)) <= _FROZEN_MAX_CHANGED_SHARE)
+
+
 def frozen_pictures(source: str) -> Dict[str, Any]:
     """Find held frames inside a shot that moves on both sides.
 
@@ -289,9 +295,7 @@ def frozen_pictures(source: str) -> Dict[str, Any]:
             delta = np.abs(previous - frame)
             changed_share = float(np.mean(delta > 2.0))
             changes.append(changed_share)
-            near_identical = (float(np.mean(delta)) <= _FROZEN_MAX_MEAN_DELTA
-                              and changed_share <= _FROZEN_MAX_CHANGED_SHARE)
-            if near_identical:
+            if _near_identical(delta):
                 if run_start is None:
                     run_start = pair_index
                     run_start_frame = previous
@@ -331,6 +335,90 @@ def frozen_pictures(source: str) -> Dict[str, Any]:
                 "motion_before_share": round(motion_before, 4),
                 "motion_after_share": round(motion_after, 4),
             })
+    return result
+
+
+# Cadence: repeated frames spread through moving footage, so the unique-frame
+# rate falls below the container rate (a 30 fps capture padded to 60 fps).
+# A run of repeats as long as frozen_pictures reports is a hold (still, title card,
+# stall), not cadence.
+_CADENCE_WINDOW_SEC = 0.5
+_CADENCE_MIN_DUP_SHARE = 0.25
+_CADENCE_MAX_HOLD_SEC = _FROZEN_MIN_SEC
+_CADENCE_MIN_RANGE_SEC = 0.5
+
+
+def _rolling_sums(flags: np.ndarray, window: int) -> np.ndarray:
+    """Number of set flags in every run of `window` consecutive entries."""
+    running = np.concatenate(([0], np.cumsum(flags)))
+    return running[window:] - running[:-window]
+
+
+def frame_cadence(source: str) -> Dict[str, Any]:
+    """Find time ranges where the unique-frame rate is below the container frame rate.
+
+    A frame is a repeat when it is near-identical to the one before it. A range
+    is covered by half-second windows in which at least a quarter of the frames
+    are repeats, with changing frames in between. A run of repeats longer than
+    half a second is a hold (still shot, title card, stall) and is left out.
+    """
+    path = _video_path(source)
+    rate = _frame_rate(path)
+    repeat: List[bool] = [False]
+    previous: Optional[np.ndarray] = None
+    for frame in _grid_frames(path):
+        if previous is not None:
+            repeat.append(_near_identical(np.abs(frame - previous)))
+        previous = frame
+    count = len(repeat)
+    result: Dict[str, Any] = {"frame_rate": rate, "frames": count, "held_frames": 0, "ranges": [], "total": 0}
+
+    # Take long runs of repeats out of the count: they are holds, and they split ranges.
+    held = np.zeros(count, dtype=bool)
+    max_hold = int(_CADENCE_MAX_HOLD_SEC * rate)
+    run_start = 0
+    for index in range(count + 1):
+        if index < count and repeat[index]:
+            continue
+        if index - run_start > max_hold:
+            held[run_start:index] = True
+        run_start = index + 1
+    result["held_frames"] = int(held.sum())
+    repeated = np.asarray(repeat) & ~held
+
+    window = max(4, int(round(_CADENCE_WINDOW_SEC * rate)))
+    if count < window:
+        return result
+    sums = _rolling_sums(repeated, window)
+    held_sums = _rolling_sums(held, window)
+    flagged = (sums >= _CADENCE_MIN_DUP_SHARE * window) & (held_sums == 0)
+    covered = np.zeros(count, dtype=bool)
+    for start in np.flatnonzero(flagged):
+        covered[start:start + window] = True
+
+    index = 0
+    while index < count:
+        if not covered[index]:
+            index += 1
+            continue
+        end = index
+        while end + 1 < count and covered[end + 1]:
+            end += 1
+        repeats_at = np.flatnonzero(repeated[index:end + 1]) + index
+        first, last = int(repeats_at[0]), int(repeats_at[-1])
+        frames = last - first + 1
+        if frames / rate >= _CADENCE_MIN_RANGE_SEC:
+            duplicates = int(repeated[first:last + 1].sum())
+            duration = frames / rate
+            result["ranges"].append({
+                "start_sec": round(first / rate, 3),
+                "end_sec": round((last + 1) / rate, 3),
+                "frames": frames,
+                "duplicate_frames": duplicates,
+                "effective_fps": round((frames - duplicates) / duration, 2),
+            })
+        index = end + 1
+    result["total"] = len(result["ranges"])
     return result
 
 

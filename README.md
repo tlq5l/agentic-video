@@ -17,15 +17,15 @@ Then ask: "Use agentic-video to review `/path/to/video.mp4`." Other clients and 
 
 ## What it gives an agent
 
-The MCP server exposes 21 tools (full schemas in `src/adapters/mcp_schemas.json`):
+The MCP server exposes 22 tools (full schemas in `src/adapters/mcp_schemas.json`):
 
 - **Look:** `review_video` (first look in one call: metadata, contact sheet, cuts and a loudness summary), `probe_video` (duration, fps, size, codecs, audio), `contact_sheet`, `overview_chunks` (consecutive sheets across a long video), `inspect_window` / `inspect_windows` (dense frames for short ranges), `inspect_moments` (frames around given instants), `refine_temporal_beam` (zoom into candidate windows).
 - **Listen:** `transcribe` (timestamped speech, cached), `search_transcript` (find when words are spoken).
-- **Find:** `detect_cuts` (hard cuts and animated scene changes), `build_visual_index` + `search_visual` (local CLIP search for things that are visible, optional).
+- **Find:** `detect_cuts` (hard cuts and animated scene changes), `check_frame_cadence` (stretches where frames repeat so the picture updates less often than the frame rate, such as 30 fps padded to 60), `build_visual_index` + `search_visual` (local CLIP search for things that are visible, optional).
 - **Count and track:** `count_occurrences` (separate appearances of an object or on-screen text), `count_repetitions` (cycles of a repeated action), `track_region_changes` / `track_region_events` (changes inside one fixed rectangle).
 - **Audio and sync:** `audio_onsets`, `loudness_timeline`, `spectrogram_window`, `sync_check` (cuts and sound cues against measured audio).
 
-There is also a command-line checker for rendered videos: `python -m src.loop check <video>` measures sync, loudness, onsets, cuts and some picture faults, then writes `report.md` plus evidence images.
+There is also a command-line checker for rendered videos: `python -m src.loop check <video>` measures sync, loudness, onsets, cuts and some picture faults, then writes `report.md` plus evidence images. `python -m src.loop cadence <video>` prints the `check_frame_cadence` result as JSON.
 
 `AGENTS.md` is a guide for agents on which tool to use when. `FEATURES.md` maps each feature to its code and tests.
 
