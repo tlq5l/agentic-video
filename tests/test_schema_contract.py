@@ -75,10 +75,10 @@ def test_transcribe_contract_documents_cached_fallback_and_progress_result():
     assert "requested_model_size" in output["properties"]
 
 
-def test_transcribe_schema_accepts_the_model_substitution_note():
-    # asr.request_transcription adds this field when the requested model is not installed.
+def test_transcribe_and_search_schemas_accept_the_model_substitution_note():
+    # asr.request_transcription adds this field when the requested model is not installed;
+    # search_transcript passes that status payload through unchanged while ASR runs.
     contract = json.loads(CANONICAL.read_text(encoding="utf-8"))
-    output = contract["tools"]["transcribe"]["outputSchema"]
     response = {
         "status": "in_progress",
         "requested_model_size": "turbo",
@@ -88,8 +88,10 @@ def test_transcribe_schema_accepts_the_model_substitution_note():
         "transcription_message": "Transcription started.",
         "model_substitution": "The base model is not installed here; used turbo instead.",
     }
-    assert set(response) <= set(output["properties"])
-    _assert_schema_accepts(output, response)
+    for tool in ("transcribe", "search_transcript"):
+        output = contract["tools"][tool]["outputSchema"]
+        assert set(response) <= set(output["properties"]), tool
+        _assert_schema_accepts(output, response)
     assert "model_substitution" in PUBLIC_TS.read_text(encoding="utf-8")
 
 
