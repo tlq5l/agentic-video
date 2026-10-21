@@ -898,7 +898,7 @@ def test_blank_flashes_finds_stray_black_frames_but_not_fades(monkeypatch, tmp_p
               + [black] + fade_in + [picture] * 30                  # a cut into a scene that fades in
               + [black] * 30 + [picture] * 10)                      # a dark scene
     monkeypatch.setattr(visual_timing, "_frame_rate", lambda path: 30.0)
-    monkeypatch.setattr(visual_timing, "_grid_frames", lambda path: iter(frames))
+    monkeypatch.setattr(visual_timing, "_grid_frames", lambda path, rate: iter(frames))
     flashes = visual_timing.blank_flashes(str(video))["flashes"]
     assert [(row["start_sec"], row["frames"]) for row in flashes] == [(1.0, 2)]
     rows = _build_candidates({}, {}, {}, [], visual={"flashes": flashes})
@@ -918,19 +918,19 @@ def test_frame_splices_find_short_insertions_but_not_motion_cuts_or_black_runs(m
     monkeypatch.setattr(visual_timing, "_frame_rate", lambda path: 30.0)
 
     monkeypatch.setattr(visual_timing, "_grid_frames",
-                        lambda path: iter([picture] * 5 + [splice] + [picture] * 6))
+                        lambda path, rate: iter([picture] * 5 + [splice] + [picture] * 6))
     [single] = visual_timing.frame_splices(str(video))["splices"]
     assert (single["start_sec"], single["frames"], single["context_delta"]) == (0.167, 1, 0.0)
 
     monkeypatch.setattr(visual_timing, "_grid_frames",
-                        lambda path: iter([picture] * 5 + [splice] * 2 + [picture] * 6))
+                        lambda path, rate: iter([picture] * 5 + [splice] * 2 + [picture] * 6))
     [double] = visual_timing.frame_splices(str(video))["splices"]
     assert (double["start_sec"], double["frames"]) == (0.167, 2)
 
     moving_with_insert = ([np.roll(picture, shift, axis=1) for shift in range(15)]
                           + [splice] * 2
                           + [np.roll(picture, shift, axis=1) for shift in range(17, 34)])
-    monkeypatch.setattr(visual_timing, "_grid_frames", lambda path: iter(moving_with_insert))
+    monkeypatch.setattr(visual_timing, "_grid_frames", lambda path, rate: iter(moving_with_insert))
     [moving_splice] = visual_timing.frame_splices(str(video))["splices"]
     assert (moving_splice["start_sec"], moving_splice["frames"]) == (0.5, 2)
     assert moving_splice["context_delta"] > 2.0
@@ -942,7 +942,7 @@ def test_frame_splices_find_short_insertions_but_not_motion_cuts_or_black_runs(m
     hard_cut = [picture] * 6 + [second_shot] * 6
     black_cut = [picture] * 6 + [np.zeros_like(picture)] * 8
     for frames in (moving, fast, fade, hard_cut, black_cut):
-        monkeypatch.setattr(visual_timing, "_grid_frames", lambda path, frames=frames: iter(frames))
+        monkeypatch.setattr(visual_timing, "_grid_frames", lambda path, rate, frames=frames: iter(frames))
         assert visual_timing.frame_splices(str(video))["splices"] == []
 
     row = _build_candidates({}, {}, {}, [], visual={"frame_splices": [single]})[0]
@@ -969,7 +969,7 @@ def test_frozen_pictures_need_motion_on_both_sides_and_ignore_still_cards(monkey
     moving_after = [np.roll(moving_before[-1], shift, axis=1) for shift in range(1, 31)]
     monkeypatch.setattr(visual_timing, "_frame_rate", lambda path: 30.0)
     monkeypatch.setattr(visual_timing, "_grid_frames",
-                        lambda path: iter(moving_before + held + moving_after))
+                        lambda path, rate: iter(moving_before + held + moving_after))
     found = visual_timing.frozen_pictures(str(video))["frozen_pictures"]
     assert len(found) == 1
     assert found[0]["duration_sec"] >= 0.5
@@ -977,14 +977,14 @@ def test_frozen_pictures_need_motion_on_both_sides_and_ignore_still_cards(monkey
 
     # An end card and a gradual fade are not held frames inside moving footage.
     card = np.full((90, 160), 230.0, dtype=np.float32)
-    monkeypatch.setattr(visual_timing, "_grid_frames", lambda path: iter([card] * 80))
+    monkeypatch.setattr(visual_timing, "_grid_frames", lambda path, rate: iter([card] * 80))
     assert visual_timing.frozen_pictures(str(video))["frozen_pictures"] == []
     moving_scene = [np.roll(still, shift, axis=1) for shift in range(30)]
     title_card = moving_scene[:15] + [card] * 30 + moving_scene[15:]
-    monkeypatch.setattr(visual_timing, "_grid_frames", lambda path: iter(title_card))
+    monkeypatch.setattr(visual_timing, "_grid_frames", lambda path, rate: iter(title_card))
     assert visual_timing.frozen_pictures(str(video))["frozen_pictures"] == []
     fade = [np.full((90, 160), value, dtype=np.float32) for value in range(20, 201, 4)]
-    monkeypatch.setattr(visual_timing, "_grid_frames", lambda path: iter(fade))
+    monkeypatch.setattr(visual_timing, "_grid_frames", lambda path, rate: iter(fade))
     assert visual_timing.frozen_pictures(str(video))["frozen_pictures"] == []
 
 
