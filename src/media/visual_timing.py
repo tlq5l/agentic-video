@@ -381,7 +381,7 @@ def frame_cadence(source: str) -> Dict[str, Any]:
             held[run_start:index] = True
         run_start = index + 1
     result["held_frames"] = int(held.sum())
-    repeated = np.asarray(repeat) & ~held
+    repeated = np.asarray(repeat, dtype=bool) & ~held
 
     window = max(4, int(round(_CADENCE_WINDOW_SEC * rate)))
     if count < window:
