@@ -338,10 +338,6 @@ def frozen_pictures(source: str) -> Dict[str, Any]:
     return result
 
 
-# Cadence: repeated frames spread through moving footage, so the unique-frame
-# rate falls below the container rate (a 30 fps capture padded to 60 fps).
-# A run of repeats as long as frozen_pictures reports is a hold (still, title card,
-# stall), not cadence.
 _CADENCE_WINDOW_SEC = 0.5
 _CADENCE_MIN_DUP_SHARE = 0.25
 _CADENCE_MAX_HOLD_SEC = _FROZEN_MIN_SEC
