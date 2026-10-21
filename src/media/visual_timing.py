@@ -33,10 +33,7 @@ _WINDOW_BEATS = 1.5
 
 
 def _frame_rate(path: Path) -> float:
-    """The rate FFmpeg decodes the file at: r_frame_rate, with gaps in a variable-rate file filled by copies.
-
-    Frame indexes from the decode are on this clock, not avg_frame_rate's.
-    """
+    """The stream's r_frame_rate, the clock ``_grid_frames`` resamples the picture to."""
     probe = subprocess.run(
         ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=r_frame_rate",
          "-of", "csv=p=0", str(path)], capture_output=True, text=True, check=False,
@@ -63,8 +60,12 @@ def _share_key(path: Path) -> tuple:
     return (str(path), stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
 
 
-def _grid_frames(path: Path) -> Iterator[np.ndarray]:
-    """Each frame as a flat 160x90 grey grid, streamed from FFmpeg; a repeat scan of one file reuses the first decode."""
+def _grid_frames(path: Path, rate: float) -> Iterator[np.ndarray]:
+    """Each frame as a flat 160x90 grey grid, streamed from FFmpeg; a repeat scan of one file reuses the first decode.
+
+    The fps filter puts frame i at i / rate by timestamp, copying frames over a variable-rate file's gaps;
+    FFmpeg's default constant-rate output goes by frame durations and drifted 0.2 s on screen captures.
+    """
     global _shared
     width, height = _GRID
     size = width * height
@@ -77,7 +78,7 @@ def _grid_frames(path: Path) -> Iterator[np.ndarray]:
     kept: Optional[bytearray] = bytearray()
     process = subprocess.Popen(
         ["ffmpeg", "-nostdin", "-v", "error", "-filter_threads", "1", "-i", str(path), "-map", "0:v:0", "-an",
-         "-vf", "scale={}:{}:flags=area,format=gray".format(width, height), "-f", "rawvideo", "-"],
+         "-vf", "fps={},scale={}:{}:flags=area,format=gray".format(Fraction(rate).limit_denominator(1001000), width, height), "-f", "rawvideo", "-"],
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
     )
     try:
@@ -112,7 +113,7 @@ def change_shares(source: str) -> Dict[str, Any]:
     rate = _frame_rate(path)
     shares: List[float] = []
     previous: Optional[np.ndarray] = None
-    for frame in _grid_frames(path):
+    for frame in _grid_frames(path, rate):
         shares.append(0.0 if previous is None else float(np.mean(np.abs(frame - previous) > _CELL_CHANGE)))
         previous = frame
     return {"frame_rate": rate, "shares": np.asarray(shares)}
@@ -144,7 +145,7 @@ def blank_flashes(source: str) -> Dict[str, Any]:
     """
     path = _video_path(source)
     rate = _frame_rate(path)
-    bright = np.asarray([float(np.percentile(frame, 99)) for frame in _grid_frames(path)])
+    bright = np.asarray([float(np.percentile(frame, 99)) for frame in _grid_frames(path, rate)])
     blank = bright < _BLANK_P99
     flashes: List[Dict[str, Any]] = []
     index = 0
@@ -177,7 +178,7 @@ def frame_splices(source: str) -> Dict[str, Any]:
     """
     path = _video_path(source)
     rate = _frame_rate(path)
-    frames = [frame.astype(np.uint8) for frame in _grid_frames(path)]
+    frames = [frame.astype(np.uint8) for frame in _grid_frames(path, rate)]
     splices: List[Dict[str, Any]] = []
 
     def difference(left: np.ndarray, right: np.ndarray) -> tuple:
@@ -293,7 +294,7 @@ def frozen_pictures(source: str) -> Dict[str, Any]:
         if not gradual_change:
             held_runs.append((run_start, run_end))
 
-    for frame_index, frame in enumerate(_grid_frames(path)):
+    for frame_index, frame in enumerate(_grid_frames(path, rate)):
         if previous is not None:
             pair_index = frame_index - 1
             delta = np.abs(previous - frame)
@@ -366,7 +367,7 @@ def frame_cadence(source: str) -> Dict[str, Any]:
     rate = _frame_rate(path)
     repeat: List[bool] = []
     previous: Optional[np.ndarray] = None
-    for frame in _grid_frames(path):
+    for frame in _grid_frames(path, rate):
         repeat.append(previous is not None and _near_identical(np.abs(frame - previous)))
         previous = frame
     count = len(repeat)
