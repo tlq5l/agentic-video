@@ -1135,7 +1135,7 @@ def check_video(
         from src.media.scene import detect_scenes
         cuts = detect_scenes(str(video), cache=cache)
         sync = {
-            "cuts": [dict(timestamp_sec=cut.timestamp_sec, score=cut.score, timecode=cut.timecode,
+            "cuts": [dict(time_sec=cut.timestamp_sec, score=cut.score, timecode=cut.timecode,
                           nearest_onset=None, offset_ms=None) for cut in cuts],
             "cues": [dict(time_sec=_cue_time(cue), label=cue.get("label", "cue"), status="missing",
                            matched_onset_time_sec=None, offset_ms=None) for cue in cues],
