@@ -32,9 +32,13 @@ _MIN_DISPLACED_SHARE = 0.02
 _WINDOW_BEATS = 1.5
 
 
-def _frame_rate(path: Path, entry: str = "avg_frame_rate") -> float:
+def _frame_rate(path: Path) -> float:
+    """The rate FFmpeg decodes the file at: r_frame_rate, with gaps in a variable-rate file filled by copies.
+
+    Frame indexes from the decode are on this clock, not avg_frame_rate's.
+    """
     probe = subprocess.run(
-        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=" + entry,
+        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=r_frame_rate",
          "-of", "csv=p=0", str(path)], capture_output=True, text=True, check=False,
         timeout=Config.SUBPROCESS_TIMEOUT_SEC,
     )
@@ -359,9 +363,7 @@ def frame_cadence(source: str) -> Dict[str, Any]:
     half a second is a hold (still shot, title card, stall) and is left out.
     """
     path = _video_path(source)
-    # FFmpeg decodes a variable-rate file at r_frame_rate, filling gaps with copies,
-    # so frame indexes are on that clock, not avg_frame_rate's.
-    rate = _frame_rate(path, "r_frame_rate")
+    rate = _frame_rate(path)
     repeat: List[bool] = []
     previous: Optional[np.ndarray] = None
     for frame in _grid_frames(path):
