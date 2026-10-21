@@ -1709,6 +1709,50 @@
         "additionalProperties": false
       }
     },
+    "check_frame_cadence": {
+      "name": "check_frame_cadence",
+      "description": "Find stretches where the picture updates less often than the file's frame rate, e.g. a 30 fps capture padded to 60 fps so every frame is doubled (judder). It decodes every frame at 160x90 grey and calls a frame a repeat when it is near-identical to the one before; a range is a stretch of at least 0.5 s where repeats fill at least a quarter of every half second while other frames still change. Each range gives start_sec, end_sec, frames, duplicate_frames and effective_fps (unique frames per second; compare with frame_rate). Runs of repeats longer than 0.5 s are holds (still shots, title cards, stalls) and are not ranges; held_frames counts them (use detect_cuts and the frozen-picture check in `python -m src.loop check` for those). It does not judge whether a range is intended: a 24 fps film in a 60 fps file is one range covering the whole file, and a slow, smooth pan can look like repeats. Look at a range with inspect_window to see what moves there. At most 500 ranges are listed; `total` is the full count. Reads the whole file: about 1 s per 700 frames of 1080p; there are no range arguments.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." }
+        },
+        "required": ["source"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "source_url": { "type": "string", "description": "The video URL you passed as `source`; only present when `source` was a URL." },
+          "local_path": { "type": "string", "description": "Cached local copy of `source_url`; pass it to other tools or ffmpeg to skip the URL lookup." },
+          "status": { "type": "string", "enum": ["in_progress"] },
+          "retry_after_seconds": { "type": "integer", "minimum": 0 },
+          "note": { "type": "string", "description": "Plain-English remark about the call: omitted items or an ignored unknown argument." },
+          "ranges_omitted": { "type": "integer", "minimum": 1, "description": "How many ranges entries were left out of the list." },
+          "frame_rate": { "type": "number", "description": "Frame rate in frames per second (the stream's r_frame_rate; a variable-rate file is decoded at it, gaps filled with copies)." },
+          "frames": { "type": "integer", "minimum": 0, "description": "Frames decoded." },
+          "held_frames": { "type": "integer", "minimum": 0, "description": "Frames inside holds (runs of repeats longer than 0.5 s), left out of the ranges." },
+          "ranges": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "start_sec": { "type": "number", "description": "Time of the frame the first repeat copies, in seconds." },
+                "end_sec": { "type": "number", "description": "Time just after the last repeated frame in seconds." },
+                "frames": { "type": "integer", "minimum": 1, "description": "Frames from start_sec to end_sec." },
+                "duplicate_frames": { "type": "integer", "minimum": 1, "description": "Frames in the range that repeat the frame before them." },
+                "effective_fps": { "type": "number", "description": "Unique frames per second inside the range: (frames - duplicate_frames) / (end_sec - start_sec)." }
+              },
+              "required": ["start_sec", "end_sec", "frames", "duplicate_frames", "effective_fps"],
+              "additionalProperties": false
+            }
+          },
+          "total": { "type": "integer", "minimum": 0, "description": "Number of ranges found." }
+        },
+        "anyOf": [{ "required": ["frame_rate", "frames", "held_frames", "ranges", "total"] }, { "required": ["status", "source_url", "retry_after_seconds"], "not": { "required": ["local_path"] } }],
+        "additionalProperties": false
+      }
+    },
     "audio_onsets": {
       "name": "audio_onsets",
       "description": "List non-speech sound attacks (hits, claps, beats) with millisecond timestamps and five-band energy profiles, optionally restricted to a frequency band (band_hz: sub, low_mid, mid, high, air, or [low_hz, high_hz]) and compared with another source (compare_to). min_strength 0-1 (default 0.12): raise it for only strong onsets. At most 500 onsets are listed; `total` is the full count and the result says how to see the rest. Needs an audio track (probe_video has_audio). For level over time use loudness_timeline; for speech use transcribe.",

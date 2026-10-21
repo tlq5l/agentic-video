@@ -59,6 +59,10 @@ Use `python -m src.loop run --config loop.json` to build, check, fix the source 
   2. Call `inspect_window({ source, start_sec: 14.0, end_sec: 16.0, fps: 4.0 })`.
   3. Read the burned timestamp overlays directly from the high-resolution crop frames.
 
+### 5. Judder and Doubled Frames
+- **Question Examples**: *"Does the motion stutter?"*, *"Is this 60 fps file really 60 fps?"*
+- **Action**: Call `check_frame_cadence({ source })`. Each range gives `effective_fps` (unique frames per second); compare it with `frame_rate`. It reports where frames repeat, not whether that was intended.
+
 ---
 
 ## Negative Controls & Falsification Safety
