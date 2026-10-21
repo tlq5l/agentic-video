@@ -997,7 +997,7 @@ def _transcription_progress(duration_sec: float, model_size: str) -> Dict[str, A
     """Elapsed time, an estimated total and a percent for the running worker (empty if unknown)."""
     try:
         with open(Path(Config.BASE_CACHE_DIR) / "asr-worker.lock", "rb") as handle:
-            owner = json.loads(handle.read().lstrip(b"\0").decode("utf-8"))
+            owner = _read_background_lock_owner(handle) or {}
         elapsed = max(0.0, time.time() - float(owner["started_at"]))
     except (OSError, ValueError, KeyError, TypeError):
         return {}

@@ -165,11 +165,11 @@ export interface TranscribeTranscriptOutput {
   transcription_message?: string;
   /** Only when the requested model is not installed: names the installed model used instead. */
   model_substitution?: string;
-  /** Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument. */
   /** Only when the transcript was too long to list in full: path of a JSON file with every segment. */
   transcript_path?: string;
   /** Only with transcript_path: how many segments are left out of `segments`. */
   segments_omitted?: number;
+  /** Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument. */
   note?: string;
 }
 

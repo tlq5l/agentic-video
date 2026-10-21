@@ -376,10 +376,11 @@ def _success_result(data: Dict[str, Any]) -> Dict[str, Any]:
     # Default: no base64 anywhere. Claude Code rejects results this large (contact_sheet ~0.4-2 MB,
     # review_video ~1.4 MB); the agent opens the JPEG at file_path instead.
     # AGENTIC_VIDEO_INLINE_IMAGES=1 puts the images back in structuredContent for clients that render them.
-    inline = os.environ.get("AGENTIC_VIDEO_INLINE_IMAGES", "0") == "1"
+    text_data = _text_copy(data)
+    inline = os.environ.get("AGENTIC_VIDEO_INLINE_IMAGES") == "1"
     return {
-        "content": [{"type": "text", "text": json.dumps(_text_copy(data), separators=(",", ":"))}],
-        "structuredContent": data if inline else _text_copy(data),
+        "content": [{"type": "text", "text": json.dumps(text_data, separators=(",", ":"))}],
+        "structuredContent": data if inline else text_data,
     }
 
 
@@ -442,17 +443,19 @@ MAX_TRANSCRIPT_INLINE_CHARS = 20_000
 def _fit_transcript(data: Dict[str, Any]) -> None:
     """Keep a long transcript inside an agent client's result limit; the full one goes to a file."""
     segments = data.get("segments")
-    if not isinstance(segments, list) or len(json.dumps(segments, separators=(",", ":"))) <= MAX_TRANSCRIPT_INLINE_CHARS:
+    if not isinstance(segments, list):
         return
-    path = Config.BASE_CACHE_DIR / "transcripts" / f"{hashlib.sha1(str(data.get('source_path')).encode()).hexdigest()[:12]}.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, separators=(",", ":")))
-    used, keep = 0, 0
+    used, keep = 1, 0  # list brackets, then each segment plus its comma
     for segment in segments:
         used += len(json.dumps(segment, separators=(",", ":"))) + 1
         if used > MAX_TRANSCRIPT_INLINE_CHARS:
             break
         keep += 1
+    if keep == len(segments):
+        return
+    path = Config.BASE_CACHE_DIR / "transcripts" / f"{hashlib.sha1(str(data.get('source_path')).encode()).hexdigest()[:12]}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, separators=(",", ":")))
     data["transcript_path"] = str(path)
     _bound_list(data, "segments", keep,
                 f"The full transcript is in the JSON file at transcript_path; use search_transcript to find specific words. "
