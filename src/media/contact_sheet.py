@@ -29,6 +29,13 @@ def default_sheet_path(
     return cache.get_sheets_dir(fingerprint) / f"sheet_{len(timestamps)}samples_{cols}cols_{t_hash:x}.jpg"
 
 
+def _load_font(size: int):
+    try:
+        return ImageFont.load_default(size=size)
+    except TypeError:  # Pillow older than 10.1 has one fixed-size font
+        return ImageFont.load_default()
+
+
 def compose_contact_sheet(
     frames: List[FrameInfo],
     output_path: Union[str, Path],
@@ -63,23 +70,27 @@ def compose_contact_sheet(
     sample_im.close()
     
     canvas_w = cols * tile_w + (cols + 1) * pad
-    canvas_h = header_height + rows * tile_h + (rows + 1) * pad
-    
-    canvas = Image.new("RGB", (canvas_w, canvas_h), color=bg_color)
-    draw = ImageDraw.Draw(canvas)
-    
-    try:
-        font_title = ImageFont.load_default(size=14)
-        font_badge = ImageFont.load_default(size=12)
-    except TypeError:
-        font_title = ImageFont.load_default()
-        font_badge = ImageFont.load_default()
-        
+
     t_start = frames[0].timestamp_sec
     t_end = frames[-1].timestamp_sec
-    header_str = f"{title} | {total} Frames | [{format_timestamp(t_start)} -> {format_timestamp(t_end)}] | Grid: {cols}x{rows}"
-    draw.text((pad + 4, 10), header_str, fill=header_text_color, font=font_title)
-    
+    # Say exactly what the layout is, so the caption can never contradict the picture.
+    layout = f"{cols} column{'s' if cols != 1 else ''} x {rows} row{'s' if rows != 1 else ''}, read left to right, top to bottom"
+    header_str = f"{title} | {total} frames | {format_timestamp(t_start)} -> {format_timestamp(t_end)} | {layout}"
+
+    # Labels scale with the tile width so they stay readable when the sheet is shown downsized.
+    badge_size = max(16, tile_w // 24)
+    title_size = max(16, tile_w // 28)
+    font_badge = _load_font(badge_size)
+    font_title = _load_font(title_size)
+    while title_size > 12 and font_title.getlength(header_str) > canvas_w - 2 * (pad + 4):
+        title_size -= 1
+        font_title = _load_font(title_size)
+    header_height = max(header_height, title_size + 20)
+    canvas_h = header_height + rows * tile_h + (rows + 1) * pad
+    canvas = Image.new("RGB", (canvas_w, canvas_h), color=bg_color)
+    draw = ImageDraw.Draw(canvas)
+    draw.text((pad + 4, (header_height - title_size) // 2 - 2), header_str, fill=header_text_color, font=font_title)
+
     timestamps: List[float] = []
     
     for idx, f_info in enumerate(frames):
@@ -99,10 +110,10 @@ def compose_contact_sheet(
         
         badge_text = f"#{idx+1}  {format_timestamp(f_info.timestamp_sec)}"
         bbox = font_badge.getbbox(badge_text)
-        bw, bh = bbox[2] - bbox[0] + 8, bbox[3] - bbox[1] + 4
+        bw, bh = bbox[2] - bbox[0] + 12, bbox[3] - bbox[1] + 8
         bx, by = x + 4, y + 4
         draw.rectangle([bx, by, bx + bw, by + bh], fill=(10, 12, 16), outline=(0, 200, 255), width=1)
-        draw.text((bx + 4, by + 2), badge_text, fill=(255, 255, 255), font=font_badge)
+        draw.text((bx + 6 - bbox[0], by + 4 - bbox[1]), badge_text, fill=(255, 255, 255), font=font_badge)
         
     tmp_out = out_path.parent / f"{out_path.stem}.{os.getpid()}_{uuid.uuid4().hex[:8]}.tmp.jpg"
     canvas.save(tmp_out, quality=Config.JPEG_QUALITY)

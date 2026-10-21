@@ -933,6 +933,11 @@
           "retry_after_seconds": { "type": "integer", "minimum": 0 },
           "transcription_message": { "type": "string" },
           "model_substitution": { "type": "string", "description": "Only when the requested model is not installed: names the installed model used instead." },
+          "transcript_path": { "type": "string", "description": "Only when the transcript was too long to list in full: path of a JSON file with every segment." },
+          "segments_omitted": { "type": "integer", "minimum": 1, "description": "Only with transcript_path: how many segments are left out of `segments`." },
+          "elapsed_sec": { "type": "integer", "minimum": 0, "description": "While status=in_progress: seconds since the background transcription started." },
+          "estimated_total_sec": { "type": "integer", "minimum": 0, "description": "While status=in_progress: rough estimate of the whole run, from the audio length and model speed." },
+          "estimated_percent": { "type": "integer", "minimum": 0, "maximum": 99, "description": "While status=in_progress: elapsed / estimated total, capped at 99. An estimate, not a measurement." },
           "status": { "type": "string", "enum": ["in_progress", "busy", "start_failed", "failed"] }
         },
         "oneOf": [

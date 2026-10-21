@@ -326,6 +326,7 @@ def _acquire_background_process_lock(
             "pid": os.getpid(),
             "source_path": source_path,
             "model_size": model_size,
+            "started_at": time.time(),
         }).encode("utf-8"))
         lock_file.flush()
         os.fsync(lock_file.fileno())
@@ -988,6 +989,26 @@ def default_model_size() -> str:
     return "turbo" if _whisper_installed("turbo") else Config.DEFAULT_WHISPER_MODEL
 
 
+# Rough ASR speed as a share of the audio's length (measured: turbo ~3 min for a 65 min video).
+_ASR_SPEED_VS_AUDIO = {"turbo": 0.05, "tiny": 0.04, "base": 0.08, "small": 0.2}
+
+
+def _transcription_progress(duration_sec: float, model_size: str) -> Dict[str, Any]:
+    """Elapsed time, an estimated total and a percent for the running worker (empty if unknown)."""
+    try:
+        with open(Path(Config.BASE_CACHE_DIR) / "asr-worker.lock", "rb") as handle:
+            owner = json.loads(handle.read().lstrip(b"\0").decode("utf-8"))
+        elapsed = max(0.0, time.time() - float(owner["started_at"]))
+    except (OSError, ValueError, KeyError, TypeError):
+        return {}
+    total = max(10.0, duration_sec * _ASR_SPEED_VS_AUDIO.get(model_size, 0.2))
+    return {
+        "elapsed_sec": round(elapsed),
+        "estimated_total_sec": round(total),
+        "estimated_percent": min(99, int(100 * elapsed / total)),
+    }
+
+
 def request_transcription(source_path: str, model_size: str) -> Dict[str, Any]:
     """Serve cached MCP transcripts immediately and schedule uncached ASR."""
     installed = [] if _whisper_installed(model_size) else _installed_whisper_models()
@@ -1041,10 +1062,15 @@ def request_transcription(source_path: str, model_size: str) -> Dict[str, Any]:
         })
         return data
 
+    running = state in {"started", "in_progress"}
+    progress = _transcription_progress(meta.duration_sec, model_size) if running else {}
+    if progress:
+        message += (
+            f" About {progress['estimated_percent']}% done (estimate): {progress['elapsed_sec']} s elapsed "
+            f"of roughly {progress['estimated_total_sec']} s."
+        )
     return {
-        "status": (
-            "in_progress" if state in {"started", "in_progress"} else state
-        ),
+        "status": "in_progress" if running else state,
         "requested_model_size": model_size,
         "requested_model_cached": False,
         "transcription_status": state,
@@ -1053,6 +1079,7 @@ def request_transcription(source_path: str, model_size: str) -> Dict[str, Any]:
             message if state == "failed"
             else f"{message} Retry in about {retry_after} seconds."
         ),
+        **progress,
     }
 
 

@@ -4,6 +4,8 @@ import json
 import math
 import sys
 import base64
+import hashlib
+import os
 from pathlib import Path
 from typing import Dict, Any, Iterator, List, Optional
 
@@ -340,7 +342,7 @@ MAX_RESPONSE_BYTES = 8_000_000
 # Executor also gives up on a call after 60 s; stop extracting before that so
 # the caller gets a message that says what to do instead of a timeout.
 FRAME_EXTRACT_DEADLINE_SEC = 40.0
-_TEXT_IMAGE_PLACEHOLDER = "<base64 image omitted from text; it is in structuredContent, and file_path has the image on disk>"
+_TEXT_IMAGE_PLACEHOLDER = "<base64 image omitted; file_path has the image on disk (set AGENTIC_VIDEO_INLINE_IMAGES=1 to embed it in structuredContent)>"
 
 
 def _is_tool_file(node: Any) -> bool:
@@ -371,9 +373,13 @@ def _text_copy(node: Any) -> Any:
 
 
 def _success_result(data: Dict[str, Any]) -> Dict[str, Any]:
+    # Default: no base64 anywhere. Claude Code rejects results this large (contact_sheet ~0.4-2 MB,
+    # review_video ~1.4 MB); the agent opens the JPEG at file_path instead.
+    # AGENTIC_VIDEO_INLINE_IMAGES=1 puts the images back in structuredContent for clients that render them.
+    inline = os.environ.get("AGENTIC_VIDEO_INLINE_IMAGES", "0") == "1"
     return {
         "content": [{"type": "text", "text": json.dumps(_text_copy(data), separators=(",", ":"))}],
-        "structuredContent": data,
+        "structuredContent": data if inline else _text_copy(data),
     }
 
 
@@ -428,6 +434,31 @@ def fit_response(data: Dict[str, Any]) -> int:
             shrunk += 1
     return shrunk
 
+# Claude Code refuses tool results over 25k tokens, and timestamped JSON costs about 3 characters per token
+# (a 60,000-character transcript was refused), so list at most 20,000 characters of segments.
+MAX_TRANSCRIPT_INLINE_CHARS = 20_000
+
+
+def _fit_transcript(data: Dict[str, Any]) -> None:
+    """Keep a long transcript inside an agent client's result limit; the full one goes to a file."""
+    segments = data.get("segments")
+    if not isinstance(segments, list) or len(json.dumps(segments, separators=(",", ":"))) <= MAX_TRANSCRIPT_INLINE_CHARS:
+        return
+    path = Config.BASE_CACHE_DIR / "transcripts" / f"{hashlib.sha1(str(data.get('source_path')).encode()).hexdigest()[:12]}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, separators=(",", ":")))
+    used, keep = 0, 0
+    for segment in segments:
+        used += len(json.dumps(segment, separators=(",", ":"))) + 1
+        if used > MAX_TRANSCRIPT_INLINE_CHARS:
+            break
+        keep += 1
+    data["transcript_path"] = str(path)
+    _bound_list(data, "segments", keep,
+                f"The full transcript is in the JSON file at transcript_path; use search_transcript to find specific words. "
+                f"The listed segments cover 0 to {segments[keep - 1]['end_sec']:g} s.")
+
+
 def handle_call(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
     """Validate the call, download URL sources, clamp over-cap arguments, and dispatch to AgenticVideoEngine."""
     if name not in _TOOL_SCHEMAS:
@@ -461,6 +492,8 @@ def handle_call(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         if source_url:
             data.update(source_url=source_url, local_path=args["source"])
         _report_clamps(name, data, clamped)
+        if name == "transcribe":
+            _fit_transcript(data)
         if unknown:
             _add_note(data, f"Ignored unknown argument(s): {', '.join(unknown)}. Valid arguments: {', '.join(schema.get('properties', {}))}.")
         shrunk = fit_response(data)

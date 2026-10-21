@@ -16,7 +16,7 @@ import pytest
 
 from src.core.cache import MediaCache
 from src.core.config import Config
-from src.core.errors import ASRModelError
+from src.core.errors import ASRModelError, MediaCorruptError
 from src.core.types import TranscriptResult, TranscriptSegment, VideoMetadata
 from src.executor.mcp_server import handle_call
 from src.transcript import asr
@@ -864,7 +864,11 @@ def test_turbo_transcribes_real_speech_through_whisper_cpp(tmp_path, monkeypatch
     speech, video = tmp_path / "speech.aiff", tmp_path / "speech.mp4"
     subprocess.run(["say", "-o", str(speech), "The orange cat sat on the red mat."], check=True)
     subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=black:s=64x64:d=4", "-i", str(speech),
-                    "-shortest", "-c:v", "libx264", "-c:a", "aac", str(video)], check=True)
+                    "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(video)], check=True)
+    try:
+        asr.probe_video(str(video))
+    except MediaCorruptError as exc:  # this machine's ffmpeg/say could not build the test clip
+        pytest.skip(f"could not build a speech test clip here: {exc}")
     result = asr.transcribe_video(str(video), model_size="turbo", allow_long_run=True)
     text = " ".join(segment.text for segment in result.segments).lower()
     assert "orange cat" in text and "red mat" in text
