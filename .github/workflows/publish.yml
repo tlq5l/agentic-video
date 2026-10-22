@@ -1,0 +1,22 @@
+# Publishes to PyPI through a trusted publisher (no stored token).
+# PyPI side: project agentic-video, owner tlq5l, repo agentic-video,
+# workflow publish.yml, environment pypi.
+name: publish
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  pypi:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv build
+      - uses: pypa/gh-action-pypi-publish@release/v1
