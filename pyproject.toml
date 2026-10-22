@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling", "hatch-requirements-txt"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agentic-video"
+version = "0.1.0"
+description = "Local video tools for AI agents that read text and images but not video: contact sheets, transcripts, cut, loudness and sync checks, served over MCP."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [{ name = "tlq5l" }]
+keywords = ["mcp", "video", "agents", "ffmpeg", "whisper", "contact-sheet"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Topic :: Multimedia :: Video",
+]
+dynamic = ["dependencies", "optional-dependencies"]
+
+[project.urls]
+Homepage = "https://github.com/tlq5l/agentic-video"
+Repository = "https://github.com/tlq5l/agentic-video"
+Issues = "https://github.com/tlq5l/agentic-video/issues"
+
+[project.scripts]
+agentic-video = "src.executor.mcp_server:main"
+agentic-video-check = "src.loop:main"
+
+# Dependencies stay in requirements*.txt so the README install and the package agree.
+[tool.hatch.metadata.hooks.requirements_txt]
+files = ["requirements.txt"]
+
+[tool.hatch.metadata.hooks.requirements_txt.optional-dependencies]
+visual = ["requirements-visual.txt"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "/README.md", "LICENSE", "requirements.txt", "requirements-visual.txt"]

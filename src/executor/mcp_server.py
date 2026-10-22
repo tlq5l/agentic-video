@@ -941,7 +941,7 @@ def run_stdio_server():
                 "result": {
                     "protocolVersion": "2024-11-05",
                     "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "agentic-video", "version": "1.0.0"}
+                    "serverInfo": {"name": "agentic-video", "version": _package_version()}
                 }
             }
             sys.stdout.write(json.dumps(resp) + "\n")
@@ -976,6 +976,32 @@ def run_stdio_server():
             }
             sys.stdout.write(json.dumps(resp) + "\n")
             sys.stdout.flush()
+
+def _package_version():
+    """Installed package version; "dev" when run from a source checkout (how Executor starts it)."""
+    from importlib.metadata import PackageNotFoundError, version
+    try:
+        return version("agentic-video")
+    except PackageNotFoundError:
+        return "dev"
+
+
+def main(argv=None):
+    """Console-script entry point: `agentic-video` starts the stdio MCP server."""
+    args = sys.argv[1:] if argv is None else list(argv)
+    if args in (["--version"], ["-V"]):
+        print("agentic-video " + _package_version())
+    elif args:
+        print(
+            "usage: agentic-video [--version]\n\n"
+            "Starts the agentic-video MCP server on stdin/stdout (add it to an MCP client as: uvx agentic-video).\n"
+            "Checker for rendered videos: agentic-video-check --help"
+        )
+        return 0 if args in (["-h"], ["--help"]) else 2
+    else:
+        run_stdio_server()
+    return 0
+
 
 if __name__ == "__main__":
     run_stdio_server()
