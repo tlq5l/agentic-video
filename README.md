@@ -2,6 +2,12 @@
 
 agentic-video lets an AI agent that reads text and images, but not video, work with video files on your own machine. It is a Python library plus a stdio MCP server. The agent asks small, targeted questions ("show me 12 frames from 0:40 to 1:10", "when is 'launch' spoken?") and gets back measurements, transcripts and contact sheets: grids of frames, each with its timestamp burned into the pixels. Nothing is uploaded; everything runs locally with FFmpeg, Whisper and optional local models.
 
+**Install:** `brew install ffmpeg`, then add it to Claude Code with `claude mcp add -s user agentic-video -- uvx agentic-video` (or `pipx install agentic-video`). Other clients: [Run the MCP server](#run-the-mcp-server).
+
+![A contact sheet made by agentic-video from a 5-second clip: six frames, each with its timestamp burned in](https://raw.githubusercontent.com/tlq5l/agentic-video/main/docs/images/contact-sheet.jpg)
+
+*One `contact_sheet` call on a 5-second clip: six frames, each stamped with its time, as a single image the agent can read.*
+
 In 2 minutes (macOS) your agent can answer "what happens in this video?" and "when is X said?" for a local video file. You get the length and size, a contact sheet image with timestamps, the cuts, a loudness summary and searchable speech. Nothing leaves your machine. Setup for Claude Code:
 
 ```sh

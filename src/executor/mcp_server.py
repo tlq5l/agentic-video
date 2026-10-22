@@ -977,5 +977,24 @@ def run_stdio_server():
             sys.stdout.write(json.dumps(resp) + "\n")
             sys.stdout.flush()
 
+def main(argv=None):
+    """Console-script entry point: `agentic-video` starts the stdio MCP server."""
+    args = sys.argv[1:] if argv is None else list(argv)
+    if args in (["--version"], ["-V"]):
+        from importlib.metadata import version
+
+        print("agentic-video " + version("agentic-video"))
+    elif args:
+        print(
+            "usage: agentic-video [--version]\n\n"
+            "Starts the agentic-video MCP server on stdin/stdout (add it to an MCP client as: uvx agentic-video).\n"
+            "Checker for rendered videos: agentic-video-check --help"
+        )
+        return 0 if args in (["-h"], ["--help"]) else 2
+    else:
+        run_stdio_server()
+    return 0
+
+
 if __name__ == "__main__":
     run_stdio_server()
