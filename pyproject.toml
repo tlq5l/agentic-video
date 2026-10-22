@@ -40,4 +40,4 @@ visual = ["requirements-visual.txt"]
 packages = ["src"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src", "README.md", "LICENSE", "requirements.txt", "requirements-visual.txt"]
+include = ["src", "/README.md", "LICENSE", "requirements.txt", "requirements-visual.txt"]

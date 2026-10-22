@@ -941,7 +941,7 @@ def run_stdio_server():
                 "result": {
                     "protocolVersion": "2024-11-05",
                     "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "agentic-video", "version": "1.0.0"}
+                    "serverInfo": {"name": "agentic-video", "version": _package_version()}
                 }
             }
             sys.stdout.write(json.dumps(resp) + "\n")
@@ -977,13 +977,20 @@ def run_stdio_server():
             sys.stdout.write(json.dumps(resp) + "\n")
             sys.stdout.flush()
 
+def _package_version():
+    """Installed package version; "dev" when run from a source checkout (how Executor starts it)."""
+    from importlib.metadata import PackageNotFoundError, version
+    try:
+        return version("agentic-video")
+    except PackageNotFoundError:
+        return "dev"
+
+
 def main(argv=None):
     """Console-script entry point: `agentic-video` starts the stdio MCP server."""
     args = sys.argv[1:] if argv is None else list(argv)
     if args in (["--version"], ["-V"]):
-        from importlib.metadata import version
-
-        print("agentic-video " + version("agentic-video"))
+        print("agentic-video " + _package_version())
     elif args:
         print(
             "usage: agentic-video [--version]\n\n"
