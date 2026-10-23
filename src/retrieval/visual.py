@@ -287,6 +287,44 @@ def _build_locked(engine, stamp, duration, report):
         conn.close()
 
 
+MIN_WINDOW_SEC = 15.0
+
+
+def _overlaps(a, b):
+    return a["start_sec"] < b["end_sec"] and b["start_sec"] < a["end_sec"]
+
+
+def widen_top_interval(intervals, lower, upper, minimum=MIN_WINDOW_SEC):
+    """Give the interval holding rank 1 a window of at least `minimum` seconds, then merge overlapping intervals into it.
+
+    A shorter interval is widened evenly around its centre and slid back inside [lower, upper] when it passes an edge.
+    If the video (or the searched range) is shorter than `minimum`, the window is all of [lower, upper].
+    An interval already that long is unchanged. Other intervals that overlap the widened one are merged into it
+    (union, ranks and scores combined), repeatedly, so the returned intervals never overlap.
+    """
+    top = next(item for item in intervals if 1 in item["ranks"])
+    others = [item for item in intervals if item is not top]
+    start, end = top["start_sec"], top["end_sec"]
+    if end - start < minimum:
+        length = min(minimum, upper - lower)
+        start = min(max((start + end) / 2 - length / 2, lower), upper - length)
+        end = start + length
+    top = {**top, "start_sec": start, "end_sec": end}
+    while others:
+        for other in others:
+            if _overlaps(top, other):
+                top["start_sec"] = min(top["start_sec"], other["start_sec"])
+                top["end_sec"] = max(top["end_sec"], other["end_sec"])
+                top["ranks"] = sorted(top["ranks"] + other["ranks"])
+                top["score"] = max(top["score"], other["score"])
+                top["last_sample_sec"] = max(top["last_sample_sec"], other["last_sample_sec"])
+                others.remove(other)
+                break
+        else:
+            break
+    return sorted([top] + others, key=lambda item: item["start_sec"])
+
+
 def _validate_search(query, top_k, start, end):
     if not isinstance(query, str) or not query.strip() or len(query) > 2000:
         raise ValueError("query must contain 1 to 2000 characters; describe the visible content in a short phrase, e.g. 'person in a red jacket'")
@@ -380,6 +418,7 @@ def search_index(engine, query, top_k=5, start_sec=0.0, end_sec=None):
                                   "score": hit["score"], "ranks": [hit["rank"]]})
         sheet = None
         if ranked:
+            intervals = widen_top_interval(intervals, start_sec, covered_end)
             import hashlib
             tag = hashlib.sha256(repr((query, top_k, start_sec, end, progress["indexed_until_sec"])).encode()).hexdigest()[:20]
             path = engine._cache.get_sheets_dir(engine.metadata.fingerprint) / f"visual_{tag}.jpg"
@@ -393,7 +432,7 @@ def search_index(engine, query, top_k=5, start_sec=0.0, end_sec=None):
         _check_source(engine, stamp)
         return {"status": state, "hits": hits, "intervals": intervals, "contact_sheet": sheet, **pending,
                 "index_complete": progress["indexed_until_sec"] >= duration, **progress,
-                "note": "Cosine similarity is not confidence. Sample-based intervals are approximate; verify badges and inspect_window. Empty results do not establish absence."}
+                "note": "Cosine similarity is not confidence. Sample-based intervals are approximate; the interval holding rank 1 is at least 15 s long (or the whole searched range if shorter). Verify badges and inspect_window. Empty results do not establish absence."}
     finally:
         conn.close()
 
