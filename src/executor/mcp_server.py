@@ -43,13 +43,14 @@ _INLINE_MANIFEST_FALLBACK = [
     },
     {
         "name": "search_transcript",
-        "description": "Search cached timestamped transcript segments. If ASR is needed, start or join the background transcription and return status=in_progress with retry_after_seconds instead of waiting for transcription.",
+        "description": "Search cached timestamped transcript segments: keyword matches first, then matches by meaning (mode=hybrid, default; mode=lexical for keyword matches only). If ASR is needed, start or join the background transcription and return status=in_progress with retry_after_seconds instead of waiting for transcription.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "source": {"type": "string", "description": "Path to video file"},
                 "query": {"type": "string", "description": "Search query terms"},
-                "top_k": {"type": "integer", "default": 5}
+                "top_k": {"type": "integer", "default": 5},
+                "mode": {"type": "string", "enum": ["hybrid", "lexical"], "default": "hybrid"}
             },
             "required": ["source", "query"]
         }
@@ -551,8 +552,13 @@ def _dispatch(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         if isinstance(top_k, bool) or not isinstance(top_k, (int, float)) or top_k < 1:
             raise ValueError(f"top_k must be an integer from 1 to 50 (got {top_k!r}); omit it for the default of 5")
         top_k = int(top_k)
-        # Ask for one extra hit so the result can say whether more matches exist.
-        results = engine.search_transcript(query, top_k=top_k + 1)
+        mode = args.get("mode", "hybrid")
+        if mode not in ("hybrid", "lexical"):
+            raise ValueError(f"mode must be 'hybrid' (keyword hits, then matches by meaning) or 'lexical' (keyword hits only) (got {mode!r}); omit it for hybrid")
+        hybrid = mode == "hybrid"
+        # Lexical: ask for one extra hit so the result can say whether more matches exist.
+        # Hybrid: the search itself notes more keyword matches.
+        results = engine.search_transcript(query, top_k=top_k if hybrid else top_k + 1, hybrid=hybrid)
         if isinstance(results, dict):
             data = dict(results)
             hits = data.get("hits")
@@ -861,6 +867,29 @@ def _dispatch(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
             _bound_list(data, key, MAX_SYNC_ITEMS, "total_cuts and total_cues count everything; use detect_cuts or audio_onsets with start_sec/end_sec to inspect a later range.")
         return {"ok": True, "data": data}
         
+    elif name == "watch_for":
+        end_raw = args.get("end_sec")
+        data = engine.watch_for(
+            conditions=args.get("conditions"),
+            start_sec=float(args.get("start_sec", 0.0)),
+            end_sec=None if end_raw is None else float(end_raw),
+            interval_sec=float(args.get("interval_sec", 5.0)),
+            cut=float(args.get("cut", 0.5)),
+            consecutive=int(args.get("consecutive", 2)),
+            cooldown_sec=float(args.get("cooldown_sec", 30.0)),
+        )
+        return {"ok": True, "data": data}
+
+    elif name == "label_sounds":
+        window_raw = args.get("window_sec")
+        data = engine.label_sounds(
+            start_sec=float(args.get("start_sec")),
+            end_sec=float(args.get("end_sec")),
+            labels=args.get("labels"),
+            window_sec=5.0 if window_raw is None else float(window_raw),
+        )
+        return {"ok": True, "data": data}
+
     else:
         return {"ok": False, "error": {"code": "unknown_tool", "message": f"Tool '{name}' not found"}}
 

@@ -33,6 +33,8 @@ from src.media.audio import (
     spectrogram_window as render_spectrogram_window,
     sync_check as compare_audio_video_sync,
 )
+from src.media.watch import watch_for as watch_frames
+from src.media.sound_labels import label_sounds as name_sounds
 
 # Most windows one inspect_windows call extracts side by side.
 WINDOW_WORKERS = 4
@@ -93,8 +95,9 @@ class AgenticVideoEngine:
         query: str,
         top_k: int = 5,
         time_range: Optional[tuple[float, float]] = None,
+        hybrid: bool = False,
     ) -> Union[List[SearchResult], Dict[str, Any]]:
-        return search_transcript(self.source_path, query, top_k=top_k, time_range=time_range)
+        return search_transcript(self.source_path, query, top_k=top_k, time_range=time_range, hybrid=hybrid)
 
     def build_visual_index(self) -> Dict[str, Any]:
         """Start/resume local indexing in a background worker; repeat to poll."""
@@ -1240,6 +1243,32 @@ class AgenticVideoEngine:
             search_window_ms=max(500.0, float(tolerance_ms)),
             bpm=bpm,
         )
+
+    def watch_for(
+        self,
+        conditions: List[str],
+        start_sec: float = 0.0,
+        end_sec: Optional[float] = None,
+        interval_sec: float = 5.0,
+        cut: float = 0.5,
+        consecutive: int = 2,
+        cooldown_sec: float = 30.0,
+    ) -> Dict[str, Any]:
+        """Wake on yes/no conditions found in sampled frames by a cloud model (sends frames to Cloudflare)."""
+        return watch_frames(
+            self.source_path, conditions, start_sec=start_sec, end_sec=end_sec, interval_sec=interval_sec,
+            cut=cut, consecutive=consecutive, cooldown_sec=cooldown_sec, cache=self._cache,
+        )
+
+    def label_sounds(
+        self,
+        start_sec: float,
+        end_sec: float,
+        labels: Optional[List[str]] = None,
+        window_sec: float = 5.0,
+    ) -> Dict[str, Any]:
+        """Name the sounds in audio windows with a cloud model (sends the audio to Cloudflare)."""
+        return name_sounds(self.source_path, start_sec, end_sec, labels=labels, window_sec=window_sec)
 
     def build_evidence(
         self,

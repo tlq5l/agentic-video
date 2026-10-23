@@ -950,13 +950,14 @@
     },
     "search_transcript": {
       "name": "search_transcript",
-      "description": "Find when a word or phrase is SPOKEN (lexical match on the speech transcript: a multi-word query matches the exact phrase or every content word within one segment). Returns up to top_k timestamped segments (default 5, maximum 50; larger values are clamped and the result says so; `note` says when more matches exist). For text shown on screen use count_occurrences, and for visible things use search_visual. If ASR is needed, starts or joins background transcription and returns status=in_progress with retry_after_seconds instead of waiting; repeat the same call after that delay. A hit on a flagged line carries `suspect` (see transcribe).",
+      "description": "Find when a word or phrase is SPOKEN. Default mode=hybrid lists exact keyword matches first (match=exact: the phrase; match=all_terms: every content word in one segment), then passages that match by meaning (match=semantic: a 20 s window, found on this Mac with EmbeddingGemma 2; nothing is sent to the cloud), so a reworded question still finds the moment. mode=lexical gives keyword matches only. When no hit is exact or all_terms, the words were not found in the speech: semantic hits are the closest passages, not proof, so read their text before answering. If semantic search is not set up or not ready, hits are keyword-only and `note` says why. Returns up to top_k timestamped hits (default 5, maximum 50; larger values are clamped and the result says so; `note` says when more keyword matches exist). For text shown on screen use count_occurrences, and for visible things use search_visual. If ASR is needed, starts or joins background transcription and returns status=in_progress with retry_after_seconds instead of waiting; repeat the same call after that delay. A hit on a flagged line carries `suspect` (see transcribe).",
       "inputSchema": {
         "type": "object",
         "properties": {
           "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
           "query": { "type": "string", "minLength": 1, "description": "Words or a phrase to find in the speech, e.g. 'launch date'. Punctuation and case are ignored." },
-          "top_k": { "type": "integer", "minimum": 1, "maximum": 50, "default": 5, "description": "Maximum hits (default 5, maximum 50; larger values are clamped to 50 and the result says so)." }
+          "top_k": { "type": "integer", "minimum": 1, "maximum": 50, "default": 5, "description": "Maximum hits (default 5, maximum 50; larger values are clamped to 50 and the result says so)." },
+          "mode": { "type": "string", "enum": ["hybrid", "lexical"], "default": "hybrid", "description": "hybrid (default): keyword matches first, then matches by meaning. lexical: keyword matches only." }
         },
         "required": ["source", "query"],
         "additionalProperties": false
@@ -981,7 +982,8 @@
                 "start_timecode": { "type": "string" },
                 "end_timecode": { "type": "string" },
                 "context": { "type": "string" },
-                "suspect": { "type": "string", "description": "Only when the matched line is flagged; see transcribe." }
+                "suspect": { "type": "string", "description": "Only when the matched line is flagged; see transcribe." },
+                "match": { "type": "string", "enum": ["exact", "all_terms", "semantic"], "description": "Why the hit was returned: exact = the query as typed is in the line; all_terms = every content word is in the line; semantic = close in meaning only, so read its text before relying on it." }
               },
               "required": ["segment_id", "start_sec", "end_sec", "text", "score", "start_timecode", "end_timecode", "context"],
               "additionalProperties": false
@@ -1755,7 +1757,7 @@
     },
     "audio_onsets": {
       "name": "audio_onsets",
-      "description": "List non-speech sound attacks (hits, claps, beats) with millisecond timestamps and five-band energy profiles, optionally restricted to a frequency band (band_hz: sub, low_mid, mid, high, air, or [low_hz, high_hz]) and compared with another source (compare_to). min_strength 0-1 (default 0.12): raise it for only strong onsets. At most 500 onsets are listed; `total` is the full count and the result says how to see the rest. Needs an audio track (probe_video has_audio). For level over time use loudness_timeline; for speech use transcribe.",
+      "description": "List non-speech sound attacks (hits, claps, beats) with millisecond timestamps and five-band energy profiles, optionally restricted to a frequency band (band_hz: sub, low_mid, mid, high, air, or [low_hz, high_hz]) and compared with another source (compare_to). min_strength 0-1 (default 0.12): raise it for only strong onsets. At most 500 onsets are listed; `total` is the full count and the result says how to see the rest. Needs an audio track (probe_video has_audio). For level over time use loudness_timeline; for speech use transcribe. To name what a sound is, use label_sounds (cloud).",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -2738,6 +2740,331 @@
           }
         },
         "anyOf": [{ "required": ["source_path", "tolerance_ms", "cue_recovery_window_ms", "cuts", "cues", "unmatched_strong_onsets", "strong_onset_threshold", "total_cuts", "total_cues"] }, { "required": ["status", "source_url", "retry_after_seconds"], "not": { "required": ["local_path"] } }],
+        "additionalProperties": false
+      }
+    },
+    "label_sounds": {
+      "name": "label_sounds",
+      "description": "Name the sounds in a stretch of a video's audio: cuts [start_sec, end_sec] (both required) into windows of window_sec (default 5 s, at most 60 windows per call) and returns, per window, the chance of each label plus none_chance, from a cloud model (Clef-omni on Cloudflare Workers AI). THIS SENDS THE AUDIO TO CLOUDFLARE: never use it on personal recordings. The server needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN (or AGENTIC_VIDEO_CF_TOKEN_COMMAND, a command that prints the token) and the call fails with a message naming what is missing. `labels` (default: 20 common sounds such as dog barking, siren, glass breaking, church bells) is the closed list to choose from, so a sound outside the list is forced onto the nearest label or none: list every sound that may be present. Steady musical chords can be named church bells, so treat top_chance under 0.5 as weak and check a hit with spectrogram_window. top_label is null when none_chance beats every label. It does not search: find candidate times with audio_onsets or loudness_timeline first, then label those ranges. For speech use transcribe or search_transcript. Needs an audio track. No window starts after about 40 s and the call answers within about 50 s: a longer range returns the windows finished in time with complete=false and next_start_sec to continue from.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {"type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source."},
+          "start_sec": {
+            "description": "Start of the range in seconds.",
+            "type": "number",
+            "minimum": 0
+          },
+          "end_sec": {
+            "description": "End of the range in seconds; at least 1 s after start_sec, and the range may hold at most 60 windows.",
+            "type": "number",
+            "minimum": 0
+          },
+          "labels": {
+            "description": "Sound names to choose from, e.g. [\"dog barking\", \"siren\"] (at most 50, distinct). Default: 20 common sounds.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "maxItems": 50
+          },
+          "window_sec": {
+            "description": "Length of each labelled window in seconds (default 5, from 1 to 30). The last window may be shorter; a remainder under 1 s is not labelled.",
+            "type": "number",
+            "minimum": 1,
+            "maximum": 30
+          }
+        },
+        "required": [
+          "source",
+          "start_sec",
+          "end_sec"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "source_url": {"type": "string"},
+          "local_path": {"type": "string"},
+          "status": {"type": "string"},
+          "retry_after_seconds": {"type": "number"},
+          "note": {
+            "type": "string",
+            "description": "Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument."
+          },
+          "source_path": {
+            "type": "string"
+          },
+          "start_sec": {
+            "type": "number"
+          },
+          "end_sec": {
+            "type": "number"
+          },
+          "window_sec": {
+            "type": "number"
+          },
+          "model": {
+            "type": "string"
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "windows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "start_sec": {
+                  "type": "number"
+                },
+                "end_sec": {
+                  "type": "number"
+                },
+                "top_label": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "top_chance": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "none_chance": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "chances": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                }
+              },
+              "required": [
+                "start_sec",
+                "end_sec",
+                "top_label",
+                "top_chance",
+                "none_chance",
+                "chances"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "input_tokens": {
+            "type": "integer"
+          },
+          "complete": {
+            "type": "boolean",
+            "description": "false when the call stopped early (the time limit or a failed window); the windows returned are the finished ones in order."
+          },
+          "next_start_sec": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Where to start the next call so the unfinished windows are covered; null when complete."
+          }
+        },
+        "anyOf": [{"required": ["source_path", "start_sec", "end_sec", "window_sec", "model", "labels", "windows", "input_tokens", "complete"]}, {"required": ["status", "source_url", "retry_after_seconds"], "not": {"required": ["local_path"]}}],
+        "additionalProperties": false
+      }
+    },
+    "watch_for": {
+      "name": "watch_for",
+      "description": "Watch a stretch of a video for yes/no conditions with a cloud model (Clef on Cloudflare Workers AI) and return the moments each one started to hold. One frame every interval_sec (default 5 s, 1 to 600) from [start_sec, end_sec] is asked every condition (1 to 8 yes/no questions about ONE frame, e.g. \"Is a person visible?\"); a condition wakes at the sample where its chance of yes has been at least cut (default 0.5) on `consecutive` samples in a row (default 2), at most once per cooldown_sec (default 30) per condition. THIS SENDS VIDEO FRAMES TO CLOUDFLARE: never use it on personal recordings. The server needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN (or AGENTIC_VIDEO_CF_TOKEN_COMMAND, a command that prints the token) and the call fails naming what is missing, before anything is sent. Only the questions you write can wake: a condition nobody asked about is never reported, so list every event you care about. An event must last at least consecutive x interval_sec to be caught (two samples 5 s apart need about 10 s); lower interval_sec or consecutive for shorter ones, which costs more calls. Accuracy on real footage is not yet measured. At most 720 samples per call; the call answers within about 50 s even when Cloudflare is slow: a longer range, or a sample that keeps failing after its retry, returns the finished samples with complete=false and next_start_sec to continue from (the cooldown does not carry over). This is for finding when something starts to be true; to inspect what happened use inspect_window, for scene changes use detect_cuts, and for sounds use audio_onsets. Results are not cached.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {"type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source."},
+          "conditions": {
+            "description": "1 to 8 distinct yes/no questions about one frame, e.g. [\"Is a person visible?\", \"Is a red rectangle visible?\"]. Name what to look for; vague questions give vague chances.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1,
+            "maxItems": 8
+          },
+          "start_sec": {
+            "description": "Start of the range in seconds (default 0).",
+            "type": "number",
+            "minimum": 0
+          },
+          "end_sec": {
+            "description": "End of the range in seconds (default: the end of the video).",
+            "type": "number",
+            "minimum": 0
+          },
+          "interval_sec": {
+            "description": "Seconds between samples (default 5, from 1 to 600). The range may hold at most 720 samples.",
+            "type": "number",
+            "minimum": 1,
+            "maximum": 600
+          },
+          "cut": {
+            "description": "Chance of yes (above 0, up to 1) at which a sample counts as yes (default 0.5).",
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 1
+          },
+          "consecutive": {
+            "description": "Samples in a row that must count as yes before a wake (1 to 5, default 2).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "cooldown_sec": {
+            "description": "Seconds after a wake during which the same condition wakes no more (0 to 3600, default 30).",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 3600
+          }
+        },
+        "required": [
+          "source",
+          "conditions"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "source_url": {"type": "string"},
+          "local_path": {"type": "string"},
+          "status": {"type": "string"},
+          "retry_after_seconds": {"type": "number"},
+          "note": {
+            "type": "string",
+            "description": "Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument."
+          },
+          "source_path": {
+            "type": "string"
+          },
+          "start_sec": {
+            "type": "number"
+          },
+          "scanned_to_sec": {
+            "type": "number",
+            "description": "Time of the last sample looked at."
+          },
+          "interval_sec": {
+            "type": "number"
+          },
+          "cut": {
+            "type": "number"
+          },
+          "consecutive": {
+            "type": "integer"
+          },
+          "cooldown_sec": {
+            "type": "number"
+          },
+          "model": {
+            "type": "string"
+          },
+          "conditions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "index": {
+                  "type": "integer"
+                },
+                "condition": {
+                  "type": "string"
+                },
+                "wakes": {
+                  "type": "integer"
+                },
+                "dropped_by_cooldown": {
+                  "type": "integer"
+                },
+                "max_chance": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "max_chance_sec": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "index",
+                "condition",
+                "wakes",
+                "dropped_by_cooldown",
+                "max_chance",
+                "max_chance_sec"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "wakes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "time_sec": {
+                  "type": "number",
+                  "description": "Sample that completed the run of yes samples."
+                },
+                "condition_index": {
+                  "type": "integer"
+                },
+                "condition": {
+                  "type": "string"
+                },
+                "first_seen_sec": {
+                  "type": "number",
+                  "description": "First sample of the unbroken run of yes samples."
+                },
+                "chance": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              },
+              "required": [
+                "time_sec",
+                "condition_index",
+                "condition",
+                "first_seen_sec",
+                "chance"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "samples": {
+            "type": "integer"
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "next_start_sec": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Where to continue when complete is false; null when complete."
+          },
+          "input_tokens": {
+            "type": "integer"
+          }
+        },
+        "anyOf": [{"required": ["source_path", "start_sec", "scanned_to_sec", "interval_sec", "cut", "consecutive", "cooldown_sec", "model", "conditions", "wakes", "samples", "complete", "next_start_sec", "input_tokens"]}, {"required": ["status", "source_url", "retry_after_seconds"], "not": {"required": ["local_path"]}}],
         "additionalProperties": false
       }
     }

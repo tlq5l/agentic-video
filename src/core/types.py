@@ -103,11 +103,13 @@ class SearchResult:
     end_timecode: str
     context: str = ""
     suspect: Optional[str] = None
+    match: Optional[str] = None  # hybrid search only: "exact", "all_terms" or "semantic"
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
-        if d["suspect"] is None:
-            del d["suspect"]
+        for optional in ("suspect", "match"):
+            if d[optional] is None:
+                del d[optional]
         return d
 
 @dataclass

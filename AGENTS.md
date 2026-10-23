@@ -30,13 +30,15 @@ When an agent is tasked with answering questions about a video, **never scan the
 - **Action**:
   1. Call `search_transcript({ source, query: "..." })`.
   2. If found, use `start_sec` and `end_sec` to zoom directly to the moment.
-  3. If not found, **STOP immediately** for negative queries. Do not waste vision tokens searching frames for spoken words.
+  3. If there is no `match: exact` or `all_terms` hit, **STOP immediately** for negative queries. `match: semantic` hits are guesses by meaning, never proof the words were said; read their text before relying on them. Do not waste vision tokens searching frames for spoken words.
 
 ### 2. Non-speech Audio & Sync
 - For music, hits, attacks, or audio/video alignment, measure first with `audio_onsets`, `loudness_timeline`, and `sync_check`.
 - Then inspect the suspicious time range with `spectrogram_window`, adding cue or cut markers when useful.
 - Use `band_hz` to isolate pitched events and `compare_to` to find added events against a reference; give `sync_check` a cue band for frequency-specific sounds.
 - Judge loudness outliers by their `direction`, `shape`, and `fault_level`; describe ramps and transients as informational, and use `ignore_ranges` for known intentional sections.
+- To find when something starts to be true in a long recording (a person appears, a screen shows an error), call `watch_for` with one yes/no question per event; it samples a frame every 5 s by default and wakes on 2 samples in a row. It sends frames to Cloudflare, so never use it on personal recordings; only the questions you write can wake, and an event shorter than 2 samples is missed. A long range comes back with `complete: false`: call again from `next_start_sec`.
+- To name a sound (dog, siren, glass breaking), call `label_sounds` on a range you already narrowed with `audio_onsets` or `loudness_timeline`. It sends the audio to Cloudflare, so never use it on personal recordings; a sound not in `labels` is forced onto the nearest label.
 - Never guess timings by ear; use the returned measurements and burned timecodes.
 
 ## Self-running check loop
@@ -69,7 +71,7 @@ Use `python -m src.loop run --config loop.json` to build, check, fix the source 
 
 When answering negative queries (*"Does an elephant appear in this office meeting?"*):
 1. **Never scan 100% of frames blindly** hoping to confirm absence.
-2. Check `search_transcript` first. If speech mentions the topic, inspect that segment.
+2. Check `search_transcript` first. If speech mentions the topic (an `exact` or `all_terms` hit, or a `semantic` hit whose text says it), inspect that segment.
 3. If unmentioned, inspect an 8-tile coarse overview contact sheet. If absent in all tiles, conclude absence with confidence.
 
 ---

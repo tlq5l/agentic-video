@@ -112,14 +112,14 @@ def test_search_transcript_clamps_and_reports_more_matches(fake_engine):
             return {"segment_id": 1}
 
     fake_engine.reply = [Hit() for _ in range(51)]
-    result = handle_call("search_transcript", {"source": "clip.mp4", "query": "x", "top_k": 100})
+    result = handle_call("search_transcript", {"source": "clip.mp4", "query": "x", "top_k": 100, "mode": "lexical"})
     assert fake_engine.calls[-1][1]["top_k"] == 51
     assert result["data"]["total"] == 50 and len(result["data"]["hits"]) == 50
     assert result["data"]["top_k_clamped_from"] == 100
     assert "More matches exist" in result["data"]["note"]
 
     fake_engine.reply = [Hit(), Hit()]
-    result = handle_call("search_transcript", {"source": "clip.mp4", "query": "x"})
+    result = handle_call("search_transcript", {"source": "clip.mp4", "query": "x", "mode": "lexical"})
     assert fake_engine.calls[-1][1]["top_k"] == 6
     assert result["data"] == {"hits": [{"segment_id": 1}] * 2, "total": 2}
 
@@ -371,9 +371,11 @@ def test_every_tool_says_when_to_use_its_nearest_alternative():
         "refine_temporal_beam": ("inspect_windows", "contact_sheet"),
         "track_region_changes": ("track_region_events",),
         "track_region_events": ("track_region_changes", "count_repetitions"),
-        "audio_onsets": ("loudness_timeline",),
+        "audio_onsets": ("loudness_timeline", "label_sounds"),
         "loudness_timeline": ("audio_onsets",),
         "sync_check": ("detect_cuts", "audio_onsets"),
+        "watch_for": ("inspect_window", "detect_cuts", "audio_onsets"),
+        "label_sounds": ("audio_onsets", "loudness_timeline", "spectrogram_window", "search_transcript"),
     }
     for tool, names in pairs.items():
         for other in names:

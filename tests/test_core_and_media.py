@@ -105,7 +105,7 @@ def test_mcp_server_dispatch():
     assert "clamped" in res["data"]["note"]
     
     # search_transcript
-    res = handle_call("search_transcript", {"source": FIXTURE_VIDEO, "query": "Cygnus"})
+    res = handle_call("search_transcript", {"source": FIXTURE_VIDEO, "query": "Cygnus", "mode": "lexical"})
     assert res["ok"] is True
     assert len(res["data"]) > 0
     

@@ -201,10 +201,12 @@ export type TranscribeOutput = TranscribeTranscriptOutput | TranscriptionStatusO
 export interface SearchTranscriptInput {
   /** Video source path */
   source: string;
-  /** Words or a phrase to find in the speech; matched lexically, not semantically. */
+  /** Words or a phrase to find in the speech. */
   query: string;
   /** Maximum matches to return (default 5, maximum 50; larger values are clamped and the result says so). */
   top_k?: number;
+  /** "hybrid" (default): keyword matches first, then matches by meaning. "lexical": keyword matches only. */
+  mode?: "hybrid" | "lexical";
 }
 
 export interface TranscriptMatch {
@@ -223,6 +225,8 @@ export interface TranscriptMatch {
   context: string;
   /** Only when the matched line is flagged; see TranscriptSegment.suspect. */
   suspect?: string;
+  /** exact: the query as typed is in the line; all_terms: every content word is; semantic: close in meaning only, read its text before relying on it. */
+  match?: "exact" | "all_terms" | "semantic";
 }
 
 export interface SearchTranscriptHitsOutput {
@@ -1086,6 +1090,90 @@ export interface SpectrogramWindowOutput {
   note?: string;
 }
 
+export interface WatchForInput {
+  source: string;
+  conditions: string[];
+  start_sec?: number;
+  end_sec?: number;
+  interval_sec?: number;
+  cut?: number;
+  consecutive?: number;
+  cooldown_sec?: number;
+}
+
+export interface WatchCondition {
+  index: number;
+  condition: string;
+  wakes: number;
+  dropped_by_cooldown: number;
+  /** Highest chance of yes over all samples, and the sample time it happened. */
+  max_chance: number;
+  max_chance_sec: number;
+}
+
+export interface WatchWake {
+  /** Sample that completed the run of yes samples. */
+  time_sec: number;
+  condition_index: number;
+  condition: string;
+  /** First sample of the unbroken run of yes samples. */
+  first_seen_sec: number;
+  chance: number;
+}
+
+export interface WatchForOutput {
+  source_path: string;
+  start_sec: number;
+  /** Time of the last sample looked at. */
+  scanned_to_sec: number;
+  interval_sec: number;
+  cut: number;
+  consecutive: number;
+  cooldown_sec: number;
+  model: string;
+  conditions: WatchCondition[];
+  wakes: WatchWake[];
+  samples: number;
+  /** False when the call stopped early to stay under the 60 s tool limit; continue from next_start_sec. */
+  complete: boolean;
+  next_start_sec: number | null;
+  input_tokens: number;
+  note?: string;
+}
+
+export interface LabelSoundsInput {
+  source: string;
+  start_sec: number;
+  end_sec: number;
+  labels?: string[];
+  window_sec?: number;
+}
+
+export interface SoundLabelWindow {
+  start_sec: number;
+  end_sec: number;
+  /** The likeliest label, or null when none_chance beats every label. */
+  top_label: string | null;
+  top_chance: number;
+  none_chance: number;
+  /** Chance of each label for this window; with none_chance they sum to 1. */
+  chances: Record<string, number>;
+}
+
+export interface LabelSoundsOutput {
+  source_path: string;
+  start_sec: number;
+  end_sec: number;
+  window_sec: number;
+  model: string;
+  labels: string[];
+  windows: SoundLabelWindow[];
+  input_tokens: number;
+  complete: boolean;
+  next_start_sec: number | null;
+  note?: string;
+}
+
 export type SyncCueInput =
   | { time_sec: number; t?: number; label?: string; band_hz?: AudioBandSelection }
   | { t: number; time_sec?: number; label?: string; band_hz?: AudioBandSelection };
@@ -1149,7 +1237,7 @@ export interface AgenticVideoIntegration {
   transcribe(input: TranscribeInput): Promise<ToolResult<WithUrlSource<TranscribeOutput>>>;
 
   /**
-   * Find when a word or phrase is spoken (lexical match). For on-screen text use count_occurrences; for visible
+   * Find when a word or phrase is spoken (keyword matches first, then matches by meaning). For on-screen text use count_occurrences; for visible
    * things use search_visual.
    */
   search_transcript(input: SearchTranscriptInput): Promise<ToolResult<WithUrlSource<SearchTranscriptOutput>>>;
@@ -1217,6 +1305,12 @@ export interface AgenticVideoIntegration {
 
   /** Compare visual cut times, sound onsets and optional intended cues (each list shows at most 500 items). */
   sync_check(input: SyncCheckInput): Promise<ToolResult<WithUrlSource<SyncCheckOutput>>>;
+
+  /** Watch a range for yes/no conditions with a cloud model (sends frames to Cloudflare Workers AI; at most 720 samples; answers within about 50 s). */
+  watch_for(input: WatchForInput): Promise<ToolResult<WatchForOutput>>;
+
+  /** Name the sounds in audio windows with a cloud model (sends the audio to Cloudflare Workers AI; at most 60 windows). */
+  label_sounds(input: LabelSoundsInput): Promise<ToolResult<LabelSoundsOutput>>;
 
 }
 
