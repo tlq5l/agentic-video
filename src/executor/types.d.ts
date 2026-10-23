@@ -1086,6 +1086,88 @@ export interface SpectrogramWindowOutput {
   note?: string;
 }
 
+export interface WatchForInput {
+  source: string;
+  conditions: string[];
+  start_sec?: number;
+  end_sec?: number;
+  interval_sec?: number;
+  cut?: number;
+  consecutive?: number;
+  cooldown_sec?: number;
+}
+
+export interface WatchCondition {
+  index: number;
+  condition: string;
+  wakes: number;
+  dropped_by_cooldown: number;
+  /** Highest chance of yes over all samples, and the sample time it happened. */
+  max_chance: number;
+  max_chance_sec: number;
+}
+
+export interface WatchWake {
+  /** Sample that completed the run of yes samples. */
+  time_sec: number;
+  condition_index: number;
+  condition: string;
+  /** First sample of the unbroken run of yes samples. */
+  first_seen_sec: number;
+  chance: number;
+}
+
+export interface WatchForOutput {
+  source_path: string;
+  start_sec: number;
+  /** Time of the last sample looked at. */
+  scanned_to_sec: number;
+  interval_sec: number;
+  cut: number;
+  consecutive: number;
+  cooldown_sec: number;
+  model: string;
+  conditions: WatchCondition[];
+  wakes: WatchWake[];
+  samples: number;
+  /** False when the call stopped early to stay under the 60 s tool limit; continue from next_start_sec. */
+  complete: boolean;
+  next_start_sec: number | null;
+  input_tokens: number;
+  note?: string;
+}
+
+export interface LabelSoundsInput {
+  source: string;
+  start_sec: number;
+  end_sec: number;
+  labels?: string[];
+  window_sec?: number;
+}
+
+export interface SoundLabelWindow {
+  start_sec: number;
+  end_sec: number;
+  /** The likeliest label, or null when none_chance beats every label. */
+  top_label: string | null;
+  top_chance: number;
+  none_chance: number;
+  /** Chance of each label for this window; with none_chance they sum to 1. */
+  chances: Record<string, number>;
+}
+
+export interface LabelSoundsOutput {
+  source_path: string;
+  start_sec: number;
+  end_sec: number;
+  window_sec: number;
+  model: string;
+  labels: string[];
+  windows: SoundLabelWindow[];
+  input_tokens: number;
+  note?: string;
+}
+
 export type SyncCueInput =
   | { time_sec: number; t?: number; label?: string; band_hz?: AudioBandSelection }
   | { t: number; time_sec?: number; label?: string; band_hz?: AudioBandSelection };
@@ -1217,6 +1299,12 @@ export interface AgenticVideoIntegration {
 
   /** Compare visual cut times, sound onsets and optional intended cues (each list shows at most 500 items). */
   sync_check(input: SyncCheckInput): Promise<ToolResult<WithUrlSource<SyncCheckOutput>>>;
+
+  /** Watch a range for yes/no conditions with a cloud model (sends frames to Cloudflare Workers AI; at most 720 samples; answers within about 50 s). */
+  watch_for(input: WatchForInput): Promise<ToolResult<WatchForOutput>>;
+
+  /** Name the sounds in audio windows with a cloud model (sends the audio to Cloudflare Workers AI; at most 60 windows). */
+  label_sounds(input: LabelSoundsInput): Promise<ToolResult<LabelSoundsOutput>>;
 
 }
 

@@ -37,6 +37,8 @@ When an agent is tasked with answering questions about a video, **never scan the
 - Then inspect the suspicious time range with `spectrogram_window`, adding cue or cut markers when useful.
 - Use `band_hz` to isolate pitched events and `compare_to` to find added events against a reference; give `sync_check` a cue band for frequency-specific sounds.
 - Judge loudness outliers by their `direction`, `shape`, and `fault_level`; describe ramps and transients as informational, and use `ignore_ranges` for known intentional sections.
+- To find when something starts to be true in a long recording (a person appears, a screen shows an error), call `watch_for` with one yes/no question per event; it samples a frame every 5 s by default and wakes on 2 samples in a row. It sends frames to Cloudflare, so never use it on personal recordings; only the questions you write can wake, and an event shorter than 2 samples is missed. A long range comes back with `complete: false`: call again from `next_start_sec`.
+- To name a sound (dog, siren, glass breaking), call `label_sounds` on a range you already narrowed with `audio_onsets` or `loudness_timeline`. It sends the audio to Cloudflare, so never use it on personal recordings; a sound not in `labels` is forced onto the nearest label.
 - Never guess timings by ear; use the returned measurements and burned timecodes.
 
 ## Self-running check loop

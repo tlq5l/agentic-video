@@ -35,6 +35,8 @@ EXPECTED_TOOLS = {
     "loudness_timeline",
     "spectrogram_window",
     "sync_check",
+    "watch_for",
+    "label_sounds",
 }
 
 

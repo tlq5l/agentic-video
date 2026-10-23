@@ -861,6 +861,29 @@ def _dispatch(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
             _bound_list(data, key, MAX_SYNC_ITEMS, "total_cuts and total_cues count everything; use detect_cuts or audio_onsets with start_sec/end_sec to inspect a later range.")
         return {"ok": True, "data": data}
         
+    elif name == "watch_for":
+        end_raw = args.get("end_sec")
+        data = engine.watch_for(
+            conditions=args.get("conditions"),
+            start_sec=float(args.get("start_sec", 0.0)),
+            end_sec=None if end_raw is None else float(end_raw),
+            interval_sec=float(args.get("interval_sec", 5.0)),
+            cut=float(args.get("cut", 0.5)),
+            consecutive=int(args.get("consecutive", 2)),
+            cooldown_sec=float(args.get("cooldown_sec", 30.0)),
+        )
+        return {"ok": True, "data": data}
+
+    elif name == "label_sounds":
+        window_raw = args.get("window_sec")
+        data = engine.label_sounds(
+            start_sec=float(args.get("start_sec")),
+            end_sec=float(args.get("end_sec")),
+            labels=args.get("labels"),
+            window_sec=5.0 if window_raw is None else float(window_raw),
+        )
+        return {"ok": True, "data": data}
+
     else:
         return {"ok": False, "error": {"code": "unknown_tool", "message": f"Tool '{name}' not found"}}
 

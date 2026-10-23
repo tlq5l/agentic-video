@@ -371,9 +371,11 @@ def test_every_tool_says_when_to_use_its_nearest_alternative():
         "refine_temporal_beam": ("inspect_windows", "contact_sheet"),
         "track_region_changes": ("track_region_events",),
         "track_region_events": ("track_region_changes", "count_repetitions"),
-        "audio_onsets": ("loudness_timeline",),
+        "audio_onsets": ("loudness_timeline", "label_sounds"),
         "loudness_timeline": ("audio_onsets",),
         "sync_check": ("detect_cuts", "audio_onsets"),
+        "watch_for": ("inspect_window", "detect_cuts", "audio_onsets"),
+        "label_sounds": ("audio_onsets", "loudness_timeline", "spectrogram_window", "search_transcript"),
     }
     for tool, names in pairs.items():
         for other in names:
