@@ -201,10 +201,12 @@ export type TranscribeOutput = TranscribeTranscriptOutput | TranscriptionStatusO
 export interface SearchTranscriptInput {
   /** Video source path */
   source: string;
-  /** Words or a phrase to find in the speech; matched lexically, not semantically. */
+  /** Words or a phrase to find in the speech. */
   query: string;
   /** Maximum matches to return (default 5, maximum 50; larger values are clamped and the result says so). */
   top_k?: number;
+  /** "hybrid" (default): keyword matches first, then matches by meaning. "lexical": keyword matches only. */
+  mode?: "hybrid" | "lexical";
 }
 
 export interface TranscriptMatch {
@@ -223,6 +225,8 @@ export interface TranscriptMatch {
   context: string;
   /** Only when the matched line is flagged; see TranscriptSegment.suspect. */
   suspect?: string;
+  /** exact: the query as typed is in the line; all_terms: every content word is; semantic: close in meaning only, read its text before relying on it. */
+  match?: "exact" | "all_terms" | "semantic";
 }
 
 export interface SearchTranscriptHitsOutput {
@@ -1231,7 +1235,7 @@ export interface AgenticVideoIntegration {
   transcribe(input: TranscribeInput): Promise<ToolResult<WithUrlSource<TranscribeOutput>>>;
 
   /**
-   * Find when a word or phrase is spoken (lexical match). For on-screen text use count_occurrences; for visible
+   * Find when a word or phrase is spoken (keyword matches first, then matches by meaning). For on-screen text use count_occurrences; for visible
    * things use search_visual.
    */
   search_transcript(input: SearchTranscriptInput): Promise<ToolResult<WithUrlSource<SearchTranscriptOutput>>>;

@@ -950,13 +950,14 @@
     },
     "search_transcript": {
       "name": "search_transcript",
-      "description": "Find when a word or phrase is SPOKEN (lexical match on the speech transcript: a multi-word query matches the exact phrase or every content word within one segment). Returns up to top_k timestamped segments (default 5, maximum 50; larger values are clamped and the result says so; `note` says when more matches exist). For text shown on screen use count_occurrences, and for visible things use search_visual. If ASR is needed, starts or joins background transcription and returns status=in_progress with retry_after_seconds instead of waiting; repeat the same call after that delay. A hit on a flagged line carries `suspect` (see transcribe).",
+      "description": "Find when a word or phrase is SPOKEN. Default mode=hybrid lists exact keyword matches first (match=exact: the phrase; match=all_terms: every content word in one segment), then passages that match by meaning (match=semantic: a 20 s window, found on this Mac with EmbeddingGemma 2; nothing is sent to the cloud), so a reworded question still finds the moment. mode=lexical gives keyword matches only. When no hit is exact or all_terms, the words were not found in the speech: semantic hits are the closest passages, not proof, so read their text before answering. If semantic search is not set up or not ready, hits are keyword-only and `note` says why. Returns up to top_k timestamped hits (default 5, maximum 50; larger values are clamped and the result says so; `note` says when more keyword matches exist). For text shown on screen use count_occurrences, and for visible things use search_visual. If ASR is needed, starts or joins background transcription and returns status=in_progress with retry_after_seconds instead of waiting; repeat the same call after that delay. A hit on a flagged line carries `suspect` (see transcribe).",
       "inputSchema": {
         "type": "object",
         "properties": {
           "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
           "query": { "type": "string", "minLength": 1, "description": "Words or a phrase to find in the speech, e.g. 'launch date'. Punctuation and case are ignored." },
-          "top_k": { "type": "integer", "minimum": 1, "maximum": 50, "default": 5, "description": "Maximum hits (default 5, maximum 50; larger values are clamped to 50 and the result says so)." }
+          "top_k": { "type": "integer", "minimum": 1, "maximum": 50, "default": 5, "description": "Maximum hits (default 5, maximum 50; larger values are clamped to 50 and the result says so)." },
+          "mode": { "type": "string", "enum": ["hybrid", "lexical"], "default": "hybrid", "description": "hybrid (default): keyword matches first, then matches by meaning. lexical: keyword matches only." }
         },
         "required": ["source", "query"],
         "additionalProperties": false
@@ -981,7 +982,8 @@
                 "start_timecode": { "type": "string" },
                 "end_timecode": { "type": "string" },
                 "context": { "type": "string" },
-                "suspect": { "type": "string", "description": "Only when the matched line is flagged; see transcribe." }
+                "suspect": { "type": "string", "description": "Only when the matched line is flagged; see transcribe." },
+                "match": { "type": "string", "enum": ["exact", "all_terms", "semantic"], "description": "Why the hit was returned: exact = the query as typed is in the line; all_terms = every content word is in the line; semantic = close in meaning only, so read its text before relying on it." }
               },
               "required": ["segment_id", "start_sec", "end_sec", "text", "score", "start_timecode", "end_timecode", "context"],
               "additionalProperties": false

@@ -30,7 +30,7 @@ When an agent is tasked with answering questions about a video, **never scan the
 - **Action**:
   1. Call `search_transcript({ source, query: "..." })`.
   2. If found, use `start_sec` and `end_sec` to zoom directly to the moment.
-  3. If not found, **STOP immediately** for negative queries. Do not waste vision tokens searching frames for spoken words.
+  3. If there is no `match: exact` or `all_terms` hit, **STOP immediately** for negative queries. `match: semantic` hits are guesses by meaning, never proof the words were said; read their text before relying on them. Do not waste vision tokens searching frames for spoken words.
 
 ### 2. Non-speech Audio & Sync
 - For music, hits, attacks, or audio/video alignment, measure first with `audio_onsets`, `loudness_timeline`, and `sync_check`.
@@ -71,7 +71,7 @@ Use `python -m src.loop run --config loop.json` to build, check, fix the source 
 
 When answering negative queries (*"Does an elephant appear in this office meeting?"*):
 1. **Never scan 100% of frames blindly** hoping to confirm absence.
-2. Check `search_transcript` first. If speech mentions the topic, inspect that segment.
+2. Check `search_transcript` first. If speech mentions the topic (an `exact` or `all_terms` hit, or a `semantic` hit whose text says it), inspect that segment.
 3. If unmentioned, inspect an 8-tile coarse overview contact sheet. If absent in all tiles, conclude absence with confidence.
 
 ---

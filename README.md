@@ -26,7 +26,7 @@ Then ask: "Use agentic-video to review `/path/to/video.mp4`." Other clients and 
 The MCP server exposes 24 tools (full schemas in `src/adapters/mcp_schemas.json`):
 
 - **Look:** `review_video` (first look in one call: metadata, contact sheet, cuts and a loudness summary), `probe_video` (duration, fps, size, codecs, audio), `contact_sheet`, `overview_chunks` (consecutive sheets across a long video), `inspect_window` / `inspect_windows` (dense frames for short ranges), `inspect_moments` (frames around given instants), `refine_temporal_beam` (zoom into candidate windows).
-- **Listen:** `transcribe` (timestamped speech, cached), `search_transcript` (find when words are spoken).
+- **Listen:** `transcribe` (timestamped speech, cached), `search_transcript` (find when words are spoken: exact words first, then passages that match by meaning when the optional on-device EmbeddingGemma 2 model is set up; keyword-only without it).
 - **Find:** `detect_cuts` (hard cuts and animated scene changes), `check_frame_cadence` (stretches where frames repeat so the picture updates less often than the frame rate, such as 30 fps padded to 60), `build_visual_index` + `search_visual` (local CLIP search for things that are visible, optional). `watch_for` (cloud: wakes when yes/no questions about the picture start to hold, from sampled frames).
 - **Count and track:** `count_occurrences` (separate appearances of an object or on-screen text), `count_repetitions` (cycles of a repeated action), `track_region_changes` / `track_region_events` (changes inside one fixed rectangle).
 - **Audio and sync:** `audio_onsets`, `loudness_timeline`, `spectrogram_window`, `sync_check` (cuts and sound cues against measured audio). `label_sounds` (cloud: names the sounds in a stretch of audio).
@@ -89,6 +89,10 @@ This installs PyTorch, Transformers and (on macOS) the Apple Vision bindings, an
 - `CLOUDFLARE_API_TOKEN`: a token with Workers AI access. Or set `AGENTIC_VIDEO_CF_TOKEN_COMMAND` to a command whose last printed line is the token (for example, `wrangler auth token`); the command runs at most once every 50 minutes.
 
 Without them the two tools fail with a message naming what is missing, and nothing is sent.
+
+### Optional: hybrid transcript search (macOS, EmbeddingGemma 2)
+
+`search_transcript` answers with exact keyword hits first, then passages that match by meaning. The meaning part needs the EmbeddingGemma 2 Core ML model folder and an interpreter with `coremltools`, `tokenizers` and `numpy`. Set `AGENTIC_VIDEO_EG2_DIR` to the model folder and `AGENTIC_VIDEO_EG2_PYTHON` to that interpreter, then restart the server. Without them the tool answers with keyword hits only and a `note` says why. Details and measured memory: `docs/features/transcribe.md`.
 
 ## Run the MCP server
 

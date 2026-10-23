@@ -95,8 +95,9 @@ class AgenticVideoEngine:
         query: str,
         top_k: int = 5,
         time_range: Optional[tuple[float, float]] = None,
+        hybrid: bool = False,
     ) -> Union[List[SearchResult], Dict[str, Any]]:
-        return search_transcript(self.source_path, query, top_k=top_k, time_range=time_range)
+        return search_transcript(self.source_path, query, top_k=top_k, time_range=time_range, hybrid=hybrid)
 
     def build_visual_index(self) -> Dict[str, Any]:
         """Start/resume local indexing in a background worker; repeat to poll."""

@@ -112,14 +112,14 @@ def test_search_transcript_clamps_and_reports_more_matches(fake_engine):
             return {"segment_id": 1}
 
     fake_engine.reply = [Hit() for _ in range(51)]
-    result = handle_call("search_transcript", {"source": "clip.mp4", "query": "x", "top_k": 100})
+    result = handle_call("search_transcript", {"source": "clip.mp4", "query": "x", "top_k": 100, "mode": "lexical"})
     assert fake_engine.calls[-1][1]["top_k"] == 51
     assert result["data"]["total"] == 50 and len(result["data"]["hits"]) == 50
     assert result["data"]["top_k_clamped_from"] == 100
     assert "More matches exist" in result["data"]["note"]
 
     fake_engine.reply = [Hit(), Hit()]
-    result = handle_call("search_transcript", {"source": "clip.mp4", "query": "x"})
+    result = handle_call("search_transcript", {"source": "clip.mp4", "query": "x", "mode": "lexical"})
     assert fake_engine.calls[-1][1]["top_k"] == 6
     assert result["data"] == {"hits": [{"segment_id": 1}] * 2, "total": 2}
 
