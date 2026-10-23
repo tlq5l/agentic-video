@@ -2749,10 +2749,7 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "source": {
-            "type": "string",
-            "minLength": 1
-          },
+          "source": {"type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source."},
           "start_sec": {
             "description": "Start of the range in seconds.",
             "type": "number",
@@ -2789,6 +2786,10 @@
       "outputSchema": {
         "type": "object",
         "properties": {
+          "source_url": {"type": "string"},
+          "local_path": {"type": "string"},
+          "status": {"type": "string"},
+          "retry_after_seconds": {"type": "number"},
           "note": {
             "type": "string",
             "description": "Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument."
@@ -2865,16 +2866,7 @@
             "type": "integer"
           }
         },
-        "required": [
-          "source_path",
-          "start_sec",
-          "end_sec",
-          "window_sec",
-          "model",
-          "labels",
-          "windows",
-          "input_tokens"
-        ],
+        "anyOf": [{"required": ["source_path", "start_sec", "end_sec", "window_sec", "model", "labels", "windows", "input_tokens"]}, {"required": ["status", "source_url", "retry_after_seconds"], "not": {"required": ["local_path"]}}],
         "additionalProperties": false
       }
     },
@@ -2884,10 +2876,7 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "source": {
-            "type": "string",
-            "minLength": 1
-          },
+          "source": {"type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source."},
           "conditions": {
             "description": "1 to 8 distinct yes/no questions about one frame, e.g. [\"Is a person visible?\", \"Is a red rectangle visible?\"]. Name what to look for; vague questions give vague chances.",
             "type": "array",
@@ -2942,6 +2931,10 @@
       "outputSchema": {
         "type": "object",
         "properties": {
+          "source_url": {"type": "string"},
+          "local_path": {"type": "string"},
+          "status": {"type": "string"},
+          "retry_after_seconds": {"type": "number"},
           "note": {
             "type": "string",
             "description": "Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument."
@@ -3060,22 +3053,7 @@
             "type": "integer"
           }
         },
-        "required": [
-          "source_path",
-          "start_sec",
-          "scanned_to_sec",
-          "interval_sec",
-          "cut",
-          "consecutive",
-          "cooldown_sec",
-          "model",
-          "conditions",
-          "wakes",
-          "samples",
-          "complete",
-          "next_start_sec",
-          "input_tokens"
-        ],
+        "anyOf": [{"required": ["source_path", "start_sec", "scanned_to_sec", "interval_sec", "cut", "consecutive", "cooldown_sec", "model", "conditions", "wakes", "samples", "complete", "next_start_sec", "input_tokens"]}, {"required": ["status", "source_url", "retry_after_seconds"], "not": {"required": ["local_path"]}}],
         "additionalProperties": false
       }
     }

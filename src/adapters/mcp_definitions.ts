@@ -222,7 +222,7 @@ export const SpectrogramWindowInputSchema = {
 };
 
 export const WatchForInputSchema = {
-  source: z.string().trim().min(1),
+  source: SourceSchema,
   conditions: z.array(z.string().trim().min(1)).min(1).max(8).describe("1 to 8 distinct yes/no questions about one frame, e.g. [\"Is a person visible?\", \"Is a red rectangle visible?\"]. Name what to look for; vague questions give vague chances."),
   start_sec: z.number().min(0).describe("Start of the range in seconds (default 0).").optional(),
   end_sec: z.number().min(0).describe("End of the range in seconds (default: the end of the video).").optional(),
@@ -233,7 +233,7 @@ export const WatchForInputSchema = {
 };
 
 export const LabelSoundsInputSchema = {
-  source: z.string().trim().min(1),
+  source: SourceSchema,
   start_sec: z.number().min(0).describe("Start of the range in seconds."),
   end_sec: z.number().min(0).describe("End of the range in seconds; at least 1 s after start_sec, and the range may hold at most 60 windows."),
   labels: z.array(z.string().trim().min(1)).max(50).describe("Sound names to choose from, e.g. [\"dog barking\", \"siren\"] (at most 50, distinct). Default: 20 common sounds.").optional(),
