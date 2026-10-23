@@ -1,6 +1,6 @@
-"""Cloudflare Workers AI credentials shared by watch_for and label_sounds.
+"""Cloudflare Workers AI calls and credentials shared by watch_for and label_sounds.
 
-One token cache per server process, so the token command (heavy: the wrangler path peaks near 250 MB, and two
+One token cache per server process, so the token command (it runs wrangler, which is slow, and two
 wrangler refreshes at once can log the user out) runs once per refresh, not once per tool.
 """
 
@@ -12,6 +12,8 @@ import shlex
 import subprocess
 import threading
 import time
+import urllib.error
+import urllib.request
 from typing import Optional, Tuple
 
 from src.core.errors import AgenticVideoError
@@ -19,6 +21,12 @@ from src.core.errors import AgenticVideoError
 API_BASE = "https://api.cloudflare.com/client/v4"
 COMMAND_TOKEN_MAX_AGE_SEC = 50 * 60  # wrangler sign-in tokens expire after about an hour
 COMMAND_TIMEOUT_SEC = 30
+# Executor gives up on a tool call after 60 s. No new request starts after DEFAULT_DEADLINE_SEC; a request
+# already sent is cut off REQUEST_GRACE_SEC later, so a call answers inside the limit even when Cloudflare is slow.
+DEFAULT_DEADLINE_SEC = 40.0
+REQUEST_GRACE_SEC = 8.0
+MIN_REQUEST_SEC = 1.0  # a request is not started with less time left than this
+ERROR_EXCERPT_CHARS = 300
 
 _command_token: Optional[str] = None  # last line printed by AGENTIC_VIDEO_CF_TOKEN_COMMAND, kept in memory only
 _command_token_at = 0.0  # time.monotonic() when it was printed
@@ -91,3 +99,45 @@ def forget_command_token() -> None:
 def hide_token(text: str, token: str) -> str:
     """`text` with the token replaced, for messages built from an exception that may quote a request header."""
     return text.replace(token, "[token]") if token else text
+
+
+def reply_excerpt(raw: bytes | str, token: str) -> str:
+    """The start of a Cloudflare reply for an error message. The token is replaced before the cut, so a
+    token that runs past the cut is not left in part."""
+    text = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else raw
+    return hide_token(text, token)[:ERROR_EXCERPT_CHARS]
+
+
+def run_model(model: str, account: str, token: str, body: bytes, timeout_sec: float, cutoff: Optional[float] = None) -> bytes:
+    """POST one Workers AI run and return the raw reply.
+
+    One retry after a 429, 5xx or network error, never past `cutoff` (a time.monotonic() value; None means no
+    limit). A 401 or 403 drops the kept command token. Every error text has the token removed.
+    """
+    request = urllib.request.Request(
+        f"{api_base()}/accounts/{account}/ai/run/@cf/cloudflare/{model}", data=body, method="POST",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+    )
+    failure = "no reply"
+    for attempt in range(2):
+        timeout = timeout_sec if cutoff is None else min(timeout_sec, cutoff - time.monotonic())
+        if timeout < MIN_REQUEST_SEC:
+            failure = "out of time before the call's limit" if attempt == 0 else f"{failure} (no time left to retry)"
+            break
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as reply:
+                return reply.read()
+        except urllib.error.HTTPError as exc:
+            authorization = exc.code in (401, 403)
+            hint = " (the token or account id is wrong, or the token lacks Workers AI access)" if authorization else ""
+            failure = f"HTTP {exc.code}{hint}: {reply_excerpt(exc.read(), token)}"
+            if authorization:
+                forget_command_token()
+                break
+            if exc.code not in (429, 500, 502, 503, 504):
+                break
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            failure = f"{type(exc).__name__}: {hide_token(str(exc), token)[:ERROR_EXCERPT_CHARS]}"
+        if attempt == 0:
+            time.sleep(2.0 if cutoff is None else max(0.0, min(2.0, cutoff - time.monotonic())))
+    raise CloudCallError(f"Cloudflare Workers AI request failed: {failure}")

@@ -12,7 +12,7 @@ def _tiny_default(monkeypatch, request):
 
 @pytest.fixture(autouse=True)
 def _no_semantic_worker_left_behind():
-    # A search_transcript call in any test may start the 1.5 GB EmbeddingGemma worker; never let it outlive the test.
+    # A search_transcript call in any test may start the EmbeddingGemma worker (a large model process); never let it outlive the test.
     from src.transcript import semantic
 
     semantic._WORKER.reopen()

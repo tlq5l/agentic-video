@@ -9,12 +9,16 @@ import json
 import os
 import subprocess
 import sys
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 CLOUD_VARS = ("CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN", "AGENTIC_VIDEO_CF_TOKEN_COMMAND")
+SECRET = "not-a-real-token-8c1f"
 
 
 @pytest.fixture(scope="module")
@@ -29,6 +33,66 @@ def siren_video(tmp_path_factory):
         check=True,
     )
     return path
+
+
+@pytest.fixture(scope="module")
+def minute_tone(tmp_path_factory):
+    """60 s of a steady tone (AAC) for the time-limit check."""
+    path = tmp_path_factory.mktemp("label_sounds_long") / "tone.m4a"
+    subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=f=440:d=60:r=16000",
+                    "-c:a", "aac", str(path)], check=True)
+    return path
+
+
+@pytest.fixture
+def stand_in():
+    """Local Workers AI stand-in for label_sounds. make(reply, delay_sec=0) returns its base URL;
+    reply(number, labels) gives (HTTP status, body bytes) for the request with that number, counted from 0."""
+    servers = []
+
+    def make(reply, delay_sec=0.0):
+        lock = threading.Lock()
+        seen = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                with lock:
+                    number = len(seen)
+                    seen.append(body)
+                time.sleep(delay_sec)
+                status, payload = reply(number, body["questions"]["sound"]["criteria"])
+                self.send_response(status)
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                try:
+                    self.wfile.write(payload)
+                except OSError:  # the caller gave up on a slow reply
+                    pass
+
+            def log_message(self, *args):
+                pass
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        servers.append(server)
+        return f"http://127.0.0.1:{server.server_port}"
+
+    yield make
+    for server in servers:
+        server.shutdown()
+        server.server_close()
+
+
+def well_formed(number, labels):
+    """A valid Clef-omni reply: 'none' takes all the chance."""
+    chances = {key: (1.0 if key == "none" else 0.0) for key in labels}
+    return 200, json.dumps({"success": True, "result": {"answers": {"sound": {"probabilities": chances}},
+                                                        "usage": {"input_tokens": 7}}}).encode()
+
+
+def _cloud_env(base):
+    return {"CLOUDFLARE_ACCOUNT_ID": "a" * 32, "CLOUDFLARE_API_TOKEN": SECRET, "AGENTIC_VIDEO_CF_API_BASE": base}
 
 
 def _server(requests, env_overrides, drop=()):
@@ -88,11 +152,42 @@ def test_missing_audio_track_is_reported(tmp_path):
 
 
 def test_bad_token_is_a_clear_cloud_error_and_never_echoed(siren_video):
-    secret = "not-a-real-token-8c1f"
     result = _call({"source": str(siren_video), "start_sec": 0, "end_sec": 3}, drop=CLOUD_VARS,
-                   env={"CLOUDFLARE_ACCOUNT_ID": "0" * 32, "CLOUDFLARE_API_TOKEN": secret})
+                   env={"CLOUDFLARE_ACCOUNT_ID": "0" * 32, "CLOUDFLARE_API_TOKEN": SECRET})
     text = result["content"][0]["text"]
-    assert result["isError"] and "CloudCallError" in text and secret not in text
+    assert result["isError"] and "CloudCallError" in text and SECRET not in text
+
+
+REDACTED_REPLIES = [
+    pytest.param(lambda n, labels: (400, json.dumps({"errors": [{"message": f"token {SECRET} rejected"}]}).encode()),
+                 id="http-400-body"),
+    pytest.param(lambda n, labels: (200, json.dumps({"result": {"answers": {"sound": {"probabilities": {"o0": SECRET}}}}}).encode()),
+                 id="malformed-chance"),
+    pytest.param(lambda n, labels: (200, json.dumps({"result": {"answers": {"sound": {"probabilities": SECRET}}}}).encode()),
+                 id="no-chances-echo"),
+]
+
+
+@pytest.mark.parametrize("reply", REDACTED_REPLIES)
+def test_token_is_never_echoed_from_a_bad_reply(siren_video, stand_in, reply):
+    base = stand_in(reply)
+    result = _call({"source": str(siren_video), "start_sec": 0, "end_sec": 3}, drop=CLOUD_VARS, env=_cloud_env(base))
+    assert result["isError"] and "CloudCallError" in result["content"][0]["text"]
+    assert SECRET not in json.dumps(result)
+
+
+def test_slow_cloud_returns_finished_windows_within_the_limit(minute_tone, stand_in):
+    """Every reply takes 10 s, so the 60 one-second windows cannot all finish in time; the call must stop and say where to resume."""
+    base = stand_in(well_formed, delay_sec=10.0)
+    began = time.monotonic()
+    result = _call({"source": str(minute_tone), "start_sec": 0, "end_sec": 60, "window_sec": 1},
+                   drop=CLOUD_VARS, env=_cloud_env(base))
+    took = time.monotonic() - began
+    data = result["structuredContent"]
+    assert not result.get("isError") and took < 52, (took, result)  # Executor drops a call at 60 s
+    assert data["complete"] is False and 4 <= len(data["windows"]) < 60
+    assert data["next_start_sec"] == data["windows"][-1]["end_sec"] and "Stopped after" in data["note"]
+    assert SECRET not in json.dumps(result)
 
 
 @pytest.mark.skipif(not any(os.environ.get(v) for v in CLOUD_VARS) or not os.environ.get("CLOUDFLARE_ACCOUNT_ID"),

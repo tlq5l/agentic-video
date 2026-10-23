@@ -37,9 +37,9 @@ def red_box_video(tmp_path_factory):
     return path
 
 
-def _start_stand_in(delay_for):
-    """Local Workers AI stand-in; request number n (from 0) is answered after delay_for(n) seconds.
-    Returns (server, base url, requests seen)."""
+def _start_stand_in(delay_for, override=None):
+    """Local Workers AI stand-in; request number n (from 0) is answered after delay_for(n) seconds, or with the
+    fixed (HTTP status, body bytes) `override` when one is given. Returns (server, base url, requests seen)."""
     seen = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -48,6 +48,13 @@ def _start_stand_in(delay_for):
             number = len(seen)
             seen.append({"path": self.path, "auth": self.headers["Authorization"], "questions": body["questions"]})
             time.sleep(delay_for(number))
+            if override is not None:
+                status, reply = override
+                self.send_response(status)
+                self.send_header("Content-Length", str(len(reply)))
+                self.end_headers()
+                self.wfile.write(reply)
+                return
             image = Image.open(io.BytesIO(base64.b64decode(body["images"][0].split(",", 1)[1]))).convert("RGB")
             red, _, blue = image.getpixel((image.width // 2, image.height // 2))
             chance = 0.95 if red > 150 and blue < 100 else 0.02
@@ -77,11 +84,11 @@ def stand_in(slow_stand_in):
 
 @pytest.fixture
 def slow_stand_in():
-    """Factory for a stand-in with slow replies: slow_stand_in(delay_for) -> (base url, requests seen)."""
+    """Factory for a stand-in with slow replies: slow_stand_in(delay_for, override=None) -> (base url, requests seen)."""
     servers = []
 
-    def make(delay_for):
-        server, base, seen = _start_stand_in(delay_for)
+    def make(delay_for, override=None):
+        server, base, seen = _start_stand_in(delay_for, override)
         servers.append(server)
         return base, seen
 
@@ -142,7 +149,7 @@ def test_wakes_once_when_the_red_box_stays_then_cooldown_holds_the_rest(red_box_
     (lambda n: 0.0 if n < 6 else 25.0, "the API hangs after 6 good replies"),
 ])
 def test_slow_cloud_returns_finished_samples_within_about_50_s(red_box_video, slow_stand_in, tmp_path, delay_for, label):
-    """Real constants: no new sample after 40 s, requests cut at 48 s. Before the fix these calls took 63 s and 86 s."""
+    """Real constants: no new sample after 40 s, requests cut at 48 s, so the call stays inside Executor's 60 s limit."""
     base, seen = slow_stand_in(delay_for)
     temp = tmp_path / "temp"
     env = {"CLOUDFLARE_ACCOUNT_ID": "a" * 32, "CLOUDFLARE_API_TOKEN": SECRET, "AGENTIC_VIDEO_CF_API_BASE": base,
@@ -185,3 +192,16 @@ def test_live_clef_wakes_on_the_red_box(red_box_video):
     assert not result.get("isError"), result
     wakes = result["structuredContent"]["wakes"]
     assert len(wakes) == 1 and 15.0 <= wakes[0]["time_sec"] <= 25.0
+
+
+@pytest.mark.parametrize("status, reply", [
+    (400, json.dumps({"errors": [{"message": f"token {SECRET} rejected"}]}).encode()),
+    (200, json.dumps({"result": {"answers": {"q0": {"noul": SECRET}}}}).encode()),
+], ids=["http-400-body", "malformed-chance"])
+def test_token_is_never_echoed_from_a_bad_reply(red_box_video, slow_stand_in, status, reply):
+    base, _ = slow_stand_in(lambda n: 0, override=(status, reply))
+    env = {"CLOUDFLARE_ACCOUNT_ID": "a" * 32, "CLOUDFLARE_API_TOKEN": SECRET, "AGENTIC_VIDEO_CF_API_BASE": base}
+    result, code = _call({"source": str(red_box_video), "conditions": ["Is a red box visible?"]},
+                         env=env, drop=("AGENTIC_VIDEO_CF_TOKEN_COMMAND",))
+    assert code == 0 and result["isError"] and "CloudCallError" in result["content"][0]["text"]
+    assert SECRET not in json.dumps(result)

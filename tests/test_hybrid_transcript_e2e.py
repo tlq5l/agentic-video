@@ -81,3 +81,13 @@ def test_hybrid_finds_a_paraphrase_and_pins_exact_hits_first(video):
     exact = _search(video, "Supernova")
     assert exact["hits"][0]["match"] == "exact" and "Supernova" in exact["hits"][0]["text"]
     assert list((Path(Config.BASE_CACHE_DIR)).rglob("transcript_eg2.npz"))  # vectors cached for the next call
+
+
+def test_exact_phrase_is_listed_first_even_after_five_partial_matches(video, tmp_path, monkeypatch):
+    """Five earlier lines hold only 'dog'; the one line with the whole phrase 'the dog' must still come first."""
+    monkeypatch.setenv("AGENTIC_VIDEO_EG2_DIR", str(tmp_path / "no-such-model"))  # keyword path only: no model load
+    lines = ["a dog ran", "one dog barked", "dog food", "my dog sleeps", "dog days", "the dog ate the bone"]
+    srt = "".join(f"{i}\n00:00:{2 * i:02d},000 --> 00:00:{2 * i + 1:02d},000\n{text}\n\n" for i, text in enumerate(lines))
+    video.with_suffix(".srt").write_text(srt, encoding="utf-8")
+    hits = _call(video, "the dog")["hits"]
+    assert hits[0]["match"] == "exact" and hits[0]["text"] == "the dog ate the bone"

@@ -1169,6 +1169,8 @@ export interface LabelSoundsOutput {
   labels: string[];
   windows: SoundLabelWindow[];
   input_tokens: number;
+  complete: boolean;
+  next_start_sec: number | null;
   note?: string;
 }
 

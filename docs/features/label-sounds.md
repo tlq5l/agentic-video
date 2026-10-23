@@ -16,4 +16,5 @@ Gotchas:
 - Credentials: the account id comes from `CLOUDFLARE_ACCOUNT_ID` only (none is built in). A token command (the last line it prints is the token) runs at most once every 50 minutes per server process, shared with `watch_for` (the token is kept in memory only, refreshed after 50 minutes because wrangler sign-in tokens last about an hour, and dropped sooner on an HTTP 401 or 403); it is a separate short-lived process.
 - The token is never written into results or errors; a failed request shows at most 300 characters of Cloudflare's reply.
 - Windows are sent 4 at a time. A rate-limit or server error is retried once after 2 s.
+- Time limit: no window starts after about 40 s and a call answers within about 50 s. A longer range returns the windows finished in time, in order, with `complete: false` and `next_start_sec` to continue from.
 - Results are not cached: repeating a call repeats the cloud cost.

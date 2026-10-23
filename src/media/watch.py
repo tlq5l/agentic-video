@@ -19,8 +19,6 @@ import json
 import sys
 import tempfile
 import time
-import urllib.error
-import urllib.request
 from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
@@ -29,7 +27,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from src.core.cache import MediaCache
 from src.core.config import Config
 from src.core.errors import AgenticVideoError, ExtractionBoundsError
-from src.media.cloudflare import CloudCallError, api_base, credentials, forget_command_token, hide_token
+from src.media.cloudflare import DEFAULT_DEADLINE_SEC, REQUEST_GRACE_SEC, CloudCallError, credentials, hide_token, run_model
 from src.media.frames import extract_single_frame
 from src.media.probe import probe_video
 
@@ -47,11 +45,7 @@ MAX_SAMPLES = 720  # one hour at the default interval
 FRAME_WIDTH = 640
 PARALLEL_CALLS = 4
 REQUEST_TIMEOUT_SEC = 20.0
-# Executor gives up on a tool call after 60 s. After DEFAULT_DEADLINE_SEC no new sample starts; requests already
-# sent are cut off at deadline + REQUEST_GRACE_SEC, so a call answers within about 50 s even when Cloudflare is slow.
-DEFAULT_DEADLINE_SEC = 40.0
-REQUEST_GRACE_SEC = 8.0
-MIN_REQUEST_SEC = 1.0  # a request is not started with less time left than this
+
 
 def _credentials() -> Tuple[str, str]:
     return credentials("watch_for", "video frames")
@@ -64,45 +58,23 @@ def _ask(
 
     `cutoff` is a time.monotonic() value: no request waits past it, and the retry is skipped when too little time is left.
     """
-    base = api_base()
     body = json.dumps({
         "model": MODEL,
         "state": "",
         "images": ["data:image/jpeg;base64," + base64.b64encode(jpeg).decode("ascii")],
         "questions": {f"q{i}": {"type": "noul", "instructions": text} for i, text in enumerate(questions)},
     }).encode("utf-8")
-    request = urllib.request.Request(
-        f"{base}/accounts/{account}/ai/run/@cf/cloudflare/{MODEL}", data=body, method="POST",
-        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-    )
-    failure = "no reply"
-    for attempt in range(2):
-        timeout = REQUEST_TIMEOUT_SEC if cutoff is None else min(REQUEST_TIMEOUT_SEC, cutoff - time.monotonic())
-        if timeout < MIN_REQUEST_SEC:
-            failure = "out of time before the call's limit" if attempt == 0 else f"{failure} (no time left to retry)"
-            break
-        try:
-            with urllib.request.urlopen(request, timeout=timeout) as reply:
-                payload = json.loads(reply.read())
-            answers = (payload.get("result") or {}).get("answers") or {}
-            chances = [float(answers[f"q{i}"]["noul"]) for i in range(len(questions))]
-            usage = (payload.get("result") or {}).get("usage") or {}
-            return chances, int(usage.get("input_tokens") or 0)
-        except urllib.error.HTTPError as exc:
-            failure = f"HTTP {exc.code}: {exc.read().decode('utf-8', 'replace')[:300]}"
-            if exc.code in (401, 403):
-                forget_command_token()
-                break
-            if exc.code not in (429, 500, 502, 503, 504):
-                break
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            failure = f"{type(exc).__name__}: {hide_token(str(exc), token)[:300]}"
-        except (KeyError, TypeError, ValueError) as exc:
-            failure = f"unexpected reply ({type(exc).__name__}): {hide_token(str(exc), token)[:200]}"
-            break
-        if attempt == 0:
-            time.sleep(2.0 if cutoff is None else max(0.0, min(2.0, cutoff - time.monotonic())))
-    raise CloudCallError(f"Cloudflare Workers AI request failed: {failure}")
+    raw = run_model(MODEL, account, token, body, REQUEST_TIMEOUT_SEC, cutoff)
+    try:
+        payload = json.loads(raw)
+        answers = (payload.get("result") or {}).get("answers") or {}
+        chances = [float(answers[f"q{i}"]["noul"]) for i in range(len(questions))]
+        usage = (payload.get("result") or {}).get("usage") or {}
+        return chances, int(usage.get("input_tokens") or 0)
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        # the message can quote the reply, so it goes through the token filter
+        raise CloudCallError(f"Cloudflare Workers AI request failed: unexpected reply ({type(exc).__name__}): "
+                             f"{hide_token(str(exc), token)[:200]}") from None
 
 
 def find_wakes(

@@ -19,8 +19,6 @@ import math
 import sys
 import subprocess
 import time
-import urllib.error
-import urllib.request
 import wave
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -37,7 +35,9 @@ from src.core.errors import (
     MediaNotFoundError,
     SubprocessTimeoutError,
 )
-from src.media.cloudflare import CloudCallError, api_base, credentials, forget_command_token, hide_token
+from src.media.cloudflare import (
+    DEFAULT_DEADLINE_SEC, REQUEST_GRACE_SEC, CloudCallError, credentials, reply_excerpt, run_model,
+)
 
 MODEL = "clef-omni"
 SAMPLE_RATE = 16000
@@ -47,7 +47,7 @@ MAX_WINDOW_SEC = 30.0
 MAX_WINDOWS = 60
 MAX_LABELS = 50
 PARALLEL_CALLS = 4
-REQUEST_TIMEOUT_SEC = 60.0
+REQUEST_TIMEOUT_SEC = 60.0  # the deadline (cloudflare.DEFAULT_DEADLINE_SEC) normally ends a request first
 NONE_LABEL = "none of these (silence, speech, music or another sound)"
 # The default closed list of sound names offered to the model when `labels` is not given.
 DEFAULT_LABELS: Tuple[str, ...] = (
@@ -96,45 +96,30 @@ def _wav_base64(samples: np.ndarray) -> str:
     return base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
-def _ask(account: str, token: str, audio_b64: str, options: Dict[str, str]) -> Tuple[Dict[str, float], int]:
+def _ask(
+    account: str, token: str, audio_b64: str, options: Dict[str, str], cutoff: Optional[float] = None,
+) -> Tuple[Dict[str, float], int]:
     """One Clef-omni choice question. Returns ({option id: chance}, input tokens)."""
-    body = {
+    body = json.dumps({
         "model": MODEL,
         "state": "A short sound clip. Name the sound that is heard.",
         "audio": [{"content_type": "audio/wav", "base64": audio_b64}],
         "questions": {"sound": {"type": "choice", "instructions": "Which sound is heard in this clip?", "criteria": options}},
-    }
-    request = urllib.request.Request(
-        f"{api_base()}/accounts/{account}/ai/run/@cf/cloudflare/{MODEL}", data=json.dumps(body).encode(), method="POST",
-        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-    )
-    for attempt in (1, 2):
-        try:
-            with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SEC) as reply:
-                payload = json.loads(reply.read())
-            break
-        except urllib.error.HTTPError as exc:
-            if attempt == 1 and exc.code in (429, 500, 502, 503, 504):
-                time.sleep(2.0)
-                continue
-            detail = exc.read()[:300].decode("utf-8", "replace")
-            if exc.code in (401, 403):
-                forget_command_token()
-            hint = " The token or account id is wrong or lacks Workers AI access." if exc.code in (401, 403) else ""
-            raise CloudCallError(f"Cloudflare Workers AI answered HTTP {exc.code}.{hint}", {"body": detail}) from exc
-        except (urllib.error.URLError, TimeoutError) as exc:
-            if attempt == 1:
-                time.sleep(2.0)
-                continue
-            raise CloudCallError(f"Cloudflare Workers AI could not be reached: {hide_token(str(exc), token)}") from exc
-        except ValueError as exc:  # a bad header or reply; its text can quote the request, so only the type is shown
-            raise CloudCallError(f"Cloudflare Workers AI request failed ({type(exc).__name__})") from None
-    result = payload.get("result") or {}
-    answer = (result.get("answers") or {}).get("sound") or {}
-    chances = answer.get("probabilities")
-    if not isinstance(chances, dict) or not chances:
-        raise CloudCallError("Cloudflare Workers AI returned no label chances", {"reply": json.dumps(payload)[:300]})
-    return {key: float(value) for key, value in chances.items()}, int((result.get("usage") or {}).get("input_tokens") or 0)
+    }).encode("utf-8")
+    raw = run_model(MODEL, account, token, body, REQUEST_TIMEOUT_SEC, cutoff)
+    try:
+        payload = json.loads(raw)
+        result = payload.get("result") or {}
+        answer = (result.get("answers") or {}).get("sound") or {}
+        chances = answer.get("probabilities")
+        if not isinstance(chances, dict) or not chances:
+            raise CloudCallError("Cloudflare Workers AI returned no label chances", {"reply": reply_excerpt(raw, token)})
+        parsed = {key: float(value) for key, value in chances.items()}
+        return parsed, int((result.get("usage") or {}).get("input_tokens") or 0)
+    except (AttributeError, TypeError, ValueError) as exc:
+        # the reply can hold the token; only the error type and the redacted start of the reply are shown
+        raise CloudCallError(f"Cloudflare Workers AI reply was not as expected ({type(exc).__name__})",
+                             {"reply": reply_excerpt(raw, token)}) from None
 
 
 def _check_labels(labels: Optional[Sequence[str]]) -> List[str]:
@@ -154,8 +139,14 @@ def label_sounds(
     end_sec: float,
     labels: Optional[Sequence[str]] = None,
     window_sec: float = DEFAULT_WINDOW_SEC,
+    deadline_sec: Optional[float] = DEFAULT_DEADLINE_SEC,
 ) -> Dict[str, Any]:
-    """Per-window chances for each label over [start_sec, end_sec] of the source's first audio track."""
+    """Per-window chances for each label over [start_sec, end_sec] of the source's first audio track.
+
+    No window starts after `deadline_sec`, and a request already sent ends REQUEST_GRACE_SEC later. The windows
+    finished in time are returned in order with complete=false and next_start_sec to continue from.
+    """
+    started = time.monotonic()  # the 60 s tool limit also counts the token command and the audio decode below
     labels = _check_labels(labels)
     if not (math.isfinite(start_sec) and math.isfinite(end_sec) and math.isfinite(window_sec)):
         raise ValueError("start_sec, end_sec and window_sec must be finite numbers")
@@ -183,12 +174,37 @@ def label_sounds(
         raise MediaCorruptError("The audio track has no sound inside the requested range", {"source": source})
     ids = {f"o{i}": label for i, label in enumerate(labels)}
     options = {**ids, "none": NONE_LABEL}
+    cutoff = None if deadline_sec is None else started + deadline_sec + REQUEST_GRACE_SEC
 
-    def run(job: Tuple[float, float, np.ndarray]) -> Tuple[Dict[str, float], int]:
-        return _ask(account, token, _wav_base64(job[2]), options)
+    def run(job: Tuple[float, float, np.ndarray]) -> Optional[Tuple[Dict[str, float], int]]:
+        if deadline_sec is not None and time.monotonic() - started > deadline_sec:
+            return None  # past the deadline: this window does not start
+        return _ask(account, token, _wav_base64(job[2]), options, cutoff)
 
-    with ThreadPoolExecutor(max_workers=PARALLEL_CALLS) as pool:
-        answers = list(pool.map(run, jobs))
+    # Results are read in time order, so the finished windows always form an unbroken run from the start.
+    answers: List[Tuple[Dict[str, float], int]] = []
+    stop_reason = ""
+    pool = ThreadPoolExecutor(max_workers=PARALLEL_CALLS)
+    futures = [pool.submit(run, job) for job in jobs]
+    try:
+        for future in futures:
+            try:
+                answer = future.result()
+            except Exception as exc:
+                if not answers:
+                    raise  # nothing usable yet: report the failure itself
+                stop_reason = f"error: {type(exc).__name__}: {getattr(exc, 'message', None) or exc}"
+                break
+            if answer is None:
+                stop_reason = "deadline"
+                break
+            answers.append(answer)
+    finally:
+        for future in futures:
+            future.cancel()
+        pool.shutdown(wait=True)  # requests in flight end by the cutoff
+    if not answers:
+        raise CloudCallError(f"No window finished within {deadline_sec:g} s. Call again on a shorter range.")
     windows = []
     tokens = 0
     for (begin, end, _), (chances, used) in zip(jobs, answers):
@@ -201,12 +217,22 @@ def label_sounds(
             "top_label": best if named[best] >= none_chance else None,
             "top_chance": named[best], "none_chance": none_chance, "chances": named,
         })
+    complete = len(answers) == len(jobs)
+    disclosure = ("Audio was sent to Cloudflare Workers AI. Chances are the model's own and sum to 1 with none_chance; "
+                  "top_label is null when 'none of these' is more likely than every label. Sounds outside `labels` are forced "
+                  "onto the nearest label or none, so give every sound that may be present.")
+    note = disclosure
+    next_start = None
+    if not complete:
+        next_start = jobs[len(answers)][0]
+        why = ("to stay under the 60 s tool limit" if stop_reason == "deadline"
+               else f"because a window failed after its retry ({stop_reason[len('error: '):]}); the finished windows are kept")
+        note = (f"Stopped after {len(answers)} of {len(jobs)} windows {why}. Call again with start_sec={next_start:g}. "
+                f"{disclosure}")
     return {
         "source_path": str(Path(source).expanduser().resolve()), "start_sec": start_sec, "end_sec": end_sec,
         "window_sec": window_sec, "model": MODEL, "labels": labels, "windows": windows, "input_tokens": tokens,
-        "note": "Audio was sent to Cloudflare Workers AI. Chances are the model's own and sum to 1 with none_chance; "
-                "top_label is null when 'none of these' is more likely than every label. Sounds outside `labels` are forced "
-                "onto the nearest label or none, so give every sound that may be present.",
+        "complete": complete, "next_start_sec": next_start, "note": note,
     }
 
 
@@ -220,7 +246,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parser.parse_args(argv)
     labels = None if args.labels is None else args.labels.split(",")
     try:
-        print(json.dumps(label_sounds(args.source, args.start_sec, args.end_sec, labels, args.window_sec), indent=2))
+        result = label_sounds(args.source, args.start_sec, args.end_sec, labels, args.window_sec, deadline_sec=None)
+        print(json.dumps(result, indent=2))
     except (AgenticVideoError, ValueError) as exc:
         print(f"{type(exc).__name__}: {getattr(exc, 'message', exc)}", file=sys.stderr)
         return 1

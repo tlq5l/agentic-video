@@ -178,6 +178,9 @@ def search_transcript(
     t_start, t_end = time_range if time_range else (-1.0, 999999.0)
     query_tokens = _content_tokens(query)
     matches = _lexical_matches(segments, query_tokens, t_start, t_end) if query_tokens else []
+    # Whole-phrase hits first (stable: score order kept within each group). This runs before any top_k cut,
+    # so a later exact phrase is not dropped behind earlier partial matches of the same words.
+    matches.sort(key=lambda m: not _is_exact(query, m.text))
     if not hybrid:
         matches = matches[:top_k]
         if status_fields:
