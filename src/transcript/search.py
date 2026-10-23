@@ -25,8 +25,7 @@ def _content_tokens(text: str) -> list[str]:
     never turns a partial OR hit into positive evidence. Matches by meaning come
     only from the separate semantic half (`semantic.py`) and are labelled as such.
     """
-    normalized = unicodedata.normalize("NFKC", text or "").casefold()
-    raw_tokens = re.findall(r"[\w]+(?:['’][\w]+)?", normalized, flags=re.UNICODE)
+    raw_tokens = _words(text)
     tokens = []
     for token in raw_tokens:
         if token.endswith(("'s", "’s")):

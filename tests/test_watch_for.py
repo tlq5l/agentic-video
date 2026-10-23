@@ -70,12 +70,9 @@ def _start_stand_in(delay_for):
 
 
 @pytest.fixture
-def stand_in():
-    """Local Workers AI stand-in that answers at once. Yields (base url, requests seen)."""
-    server, base, seen = _start_stand_in(lambda n: 0)
-    yield base, seen
-    server.shutdown()
-    server.server_close()
+def stand_in(slow_stand_in):
+    """Local Workers AI stand-in that answers at once. Returns (base url, requests seen)."""
+    return slow_stand_in(lambda n: 0)
 
 
 @pytest.fixture

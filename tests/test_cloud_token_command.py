@@ -88,7 +88,7 @@ def _server(calls, base, token_command=None, token=None):
     )
     done = subprocess.run([sys.executable, "-m", "src.executor.mcp_server"], input=lines, capture_output=True, text=True,
                           cwd=ROOT, env=env, timeout=180, check=False)
-    replies = {json.loads(line)["id"]: json.loads(line)["result"] for line in done.stdout.splitlines()}
+    replies = {reply["id"]: reply["result"] for reply in map(json.loads, done.stdout.splitlines())}
     return [replies[i] for i in range(1, len(calls) + 1)], done.returncode
 
 
