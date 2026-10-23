@@ -8,7 +8,7 @@ Protocol on stdin/stdout, one JSON object per line:
   response  {"id": 1, "vectors": "<base64 float32, [n, 768], L2-normalised>"} or {"id": 1, "error": "..."}
 The model loads on the first request, once per process (Core ML function `pack_256`; a text over 256 tokens loads `embed_512` as a second MLModel on first use). The process exits when stdin closes
 (parent gone) or after AGENTIC_VIDEO_EG2_IDLE_SEC seconds without a request (default and maximum 600).
-SIGTERM and SIGINT make it exit normally: Core ML leaves a 0.5 to 0.85 GB EmbeddingGemma2Text_<UUID>.mlmodelc folder in
+SIGTERM and SIGINT make it exit normally: Core ML leaves an EmbeddingGemma2Text_<UUID>.mlmodelc folder in
 TMPDIR for every loaded model unless the process exits normally (SIGKILL leaks it), so the loaded models are released before exit.
 Text only: no GPU model is ever loaded here, so Neural Engine and GPU models never share a process.
 
@@ -33,7 +33,7 @@ MAX_IDLE_SEC = 600.0
 
 class Embedder:
     def __init__(self, model_dir: Path):
-        # coremltools imports torch when it is installed (about 225 MB resident); prediction does not need it.
+        # coremltools imports torch when it is installed (a large import); prediction does not need it.
         for unused in ("torch", "tensorflow"):
             sys.modules.setdefault(unused, None)  # None makes `import torch` raise ImportError, which coremltools handles
         import numpy as np

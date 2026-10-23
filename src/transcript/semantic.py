@@ -38,7 +38,7 @@ GAP_SEC = 20.0
 EMBED_BATCH = 128
 INDEX_WAIT_SEC = 30.0       # a search waits this long for a missing index, then answers keyword-only
 QUERY_WAIT_SEC = 30.0       # first query pays the model load (about 20 s)
-CLOSE_WAIT_SEC = 5.0        # close() gives the worker this long to exit on its own, and again after SIGKILL
+CLOSE_WAIT_SEC = 5.0        # close() gives the worker this long to exit on its own after its input closes
 TERMINATE_WAIT_SEC = 40.0   # after SIGTERM: a model load (about 25 s on a busy Mac) must finish before the exit is normal
 JOB_TIMEOUT_SEC = 1800.0    # first-ever load on a machine compiles for the Neural Engine
 _WORKER_PATH = Path(__file__).with_name("eg2_worker.py")
@@ -82,7 +82,8 @@ class _Worker:
             self.closed = False
 
     def _stop_child(self) -> None:
-        """Stop the child so it exits normally: Core ML leaves a 0.5 to 0.85 GB folder in TMPDIR for a worker that is killed."""
+        """Stop the child so it exits normally. The worker never gets SIGKILL: Core ML leaves a model folder
+        in TMPDIR for a worker that is killed. A worker still alive after the waits is left to exit on its own."""
         with self.state_lock:
             proc, self.proc = self.proc, None
         if proc is None:
@@ -91,9 +92,9 @@ class _Worker:
             proc.stdin.close()  # the worker sees end of input and exits by itself
         except OSError:
             pass
-        # Wait 5 s, then SIGTERM (also a normal exit, but only once a model load or batch in progress finishes:
-        # up to about 30 s), and SIGKILL only if the worker is still alive after that.
-        for stop, wait in ((None, CLOSE_WAIT_SEC), (proc.terminate, TERMINATE_WAIT_SEC), (proc.kill, CLOSE_WAIT_SEC)):
+        # Wait 5 s for that, then SIGTERM (the worker handles it and exits normally, but only once a model load or
+        # batch in progress finishes: up to about 30 s), and wait again. No further signal.
+        for stop, wait in ((None, CLOSE_WAIT_SEC), (proc.terminate, TERMINATE_WAIT_SEC)):
             if stop is not None:
                 stop()
             try:

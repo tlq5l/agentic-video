@@ -49,7 +49,7 @@ MAX_LABELS = 50
 PARALLEL_CALLS = 4
 REQUEST_TIMEOUT_SEC = 60.0
 NONE_LABEL = "none of these (silence, speech, music or another sound)"
-# The 20 sound names the 100-clip accuracy in docs/features/label-sounds.md was measured with.
+# The default closed list of sound names offered to the model when `labels` is not given.
 DEFAULT_LABELS: Tuple[str, ...] = (
     "dog barking", "rooster crowing", "ocean waves", "crackling fire", "clock ticking",
     "glass breaking", "siren", "church bells", "chainsaw", "car horn", "thunderstorm",

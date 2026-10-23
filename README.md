@@ -1,6 +1,6 @@
 # agentic-video
 
-agentic-video lets an AI agent that reads text and images, but not video, work with video files on your own machine. It is a Python library plus a stdio MCP server. The agent asks small, targeted questions ("show me 12 frames from 0:40 to 1:10", "when is 'launch' spoken?") and gets back measurements, transcripts and contact sheets: grids of frames, each with its timestamp burned into the pixels. Nothing is uploaded; everything runs locally with FFmpeg, Whisper and optional local models.
+agentic-video lets an AI agent that reads text and images, but not video, work with video files on your own machine. It is a Python library plus a stdio MCP server. The agent asks small, targeted questions ("show me 12 frames from 0:40 to 1:10", "when is 'launch' spoken?") and gets back measurements, transcripts and contact sheets: grids of frames, each with its timestamp burned into the pixels. Everything runs locally with FFmpeg, Whisper and optional local models, except two optional cloud tools (`watch_for`, `label_sounds`), which send frames or audio to Cloudflare Workers AI only when you set credentials and call them.
 
 **Install:** `brew install ffmpeg`, then add it to Claude Code with `claude mcp add -s user agentic-video -- uvx agentic-video` (or `pipx install agentic-video`). Other clients: [Run the MCP server](#run-the-mcp-server).
 
@@ -8,7 +8,7 @@ agentic-video lets an AI agent that reads text and images, but not video, work w
 
 *One `contact_sheet` call on a 5-second clip: six frames, each stamped with its time, as a single image the agent can read.*
 
-In 2 minutes (macOS) your agent can answer "what happens in this video?" and "when is X said?" for a local video file. You get the length and size, a contact sheet image with timestamps, the cuts, a loudness summary and searchable speech. Nothing leaves your machine. Setup for Claude Code:
+In 2 minutes (macOS) your agent can answer "what happens in this video?" and "when is X said?" for a local video file. You get the length and size, a contact sheet image with timestamps, the cuts, a loudness summary and searchable speech. Nothing leaves your machine unless you use the optional cloud tools below. Setup for Claude Code:
 
 ```sh
 brew install ffmpeg uv
@@ -79,7 +79,7 @@ uv pip install --python .venv/bin/python -r requirements-visual.txt
 .venv/bin/python -c 'from huggingface_hub import snapshot_download; snapshot_download(repo_id="openai/clip-vit-base-patch32", revision="3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268", allow_patterns=["*.json", "*.txt", "pytorch_model.bin"])'
 ```
 
-This installs PyTorch, Transformers and (on macOS) the Apple Vision bindings, and downloads about 605 MB of CLIP weights. The server only loads local files and never calls a paid API. Without these, `search_visual` and `build_visual_index` return an error that explains the setup.
+This installs PyTorch, Transformers and (on macOS) the Apple Vision bindings, and downloads about 605 MB of CLIP weights. The visual search only loads local files and never calls a paid API. Without these, `search_visual` and `build_visual_index` return an error that explains the setup.
 
 ### Optional: cloud tools (`watch_for`, `label_sounds`)
 
@@ -92,7 +92,7 @@ Without them the two tools fail with a message naming what is missing, and nothi
 
 ### Optional: hybrid transcript search (macOS, EmbeddingGemma 2)
 
-`search_transcript` answers with exact keyword hits first, then passages that match by meaning. The meaning part needs the EmbeddingGemma 2 Core ML model folder and an interpreter with `coremltools`, `tokenizers` and `numpy`. Set `AGENTIC_VIDEO_EG2_DIR` to the model folder and `AGENTIC_VIDEO_EG2_PYTHON` to that interpreter, then restart the server. Without them the tool answers with keyword hits only and a `note` says why. Details and measured memory: `docs/features/transcribe.md`.
+`search_transcript` answers with exact keyword hits first, then passages that match by meaning. The meaning part needs the EmbeddingGemma 2 Core ML model folder and an interpreter with `coremltools`, `tokenizers` and `numpy`. Set `AGENTIC_VIDEO_EG2_DIR` to the model folder and `AGENTIC_VIDEO_EG2_PYTHON` to that interpreter, then restart the server. Without them the tool answers with keyword hits only and a `note` says why. Details: `docs/features/transcribe.md`.
 
 ## Run the MCP server
 
