@@ -12,6 +12,7 @@ import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from itertools import count
 from pathlib import Path
 
 import pytest
@@ -52,14 +53,13 @@ def stand_in():
 
     def make(reply, delay_sec=0.0):
         lock = threading.Lock()
-        seen = []
+        numbers = count()
 
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 with lock:
-                    number = len(seen)
-                    seen.append(body)
+                    number = next(numbers)
                 time.sleep(delay_sec)
                 status, payload = reply(number, body["questions"]["sound"]["criteria"])
                 self.send_response(status)

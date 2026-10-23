@@ -193,16 +193,14 @@ def label_sounds(
             except Exception as exc:
                 if not answers:
                     raise  # nothing usable yet: report the failure itself
-                stop_reason = f"error: {type(exc).__name__}: {getattr(exc, 'message', None) or exc}"
+                stop_reason = f"{type(exc).__name__}: {getattr(exc, 'message', None) or exc}"
                 break
             if answer is None:
                 stop_reason = "deadline"
                 break
             answers.append(answer)
     finally:
-        for future in futures:
-            future.cancel()
-        pool.shutdown(wait=True)  # requests in flight end by the cutoff
+        pool.shutdown(wait=True, cancel_futures=True)  # requests in flight end by the cutoff
     if not answers:
         raise CloudCallError(f"No window finished within {deadline_sec:g} s. Call again on a shorter range.")
     windows = []
@@ -226,7 +224,7 @@ def label_sounds(
     if not complete:
         next_start = jobs[len(answers)][0]
         why = ("to stay under the 60 s tool limit" if stop_reason == "deadline"
-               else f"because a window failed after its retry ({stop_reason[len('error: '):]}); the finished windows are kept")
+               else f"because a window failed after its retry ({stop_reason}); the finished windows are kept")
         note = (f"Stopped after {len(answers)} of {len(jobs)} windows {why}. Call again with start_sec={next_start:g}. "
                 f"{disclosure}")
     return {

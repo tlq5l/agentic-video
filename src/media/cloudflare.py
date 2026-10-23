@@ -137,7 +137,7 @@ def run_model(model: str, account: str, token: str, body: bytes, timeout_sec: fl
             if exc.code not in (429, 500, 502, 503, 504):
                 break
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            failure = f"{type(exc).__name__}: {hide_token(str(exc), token)[:ERROR_EXCERPT_CHARS]}"
+            failure = f"{type(exc).__name__}: {reply_excerpt(str(exc), token)}"
         if attempt == 0:
             time.sleep(2.0 if cutoff is None else max(0.0, min(2.0, cutoff - time.monotonic())))
     raise CloudCallError(f"Cloudflare Workers AI request failed: {failure}")
