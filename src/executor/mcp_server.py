@@ -619,10 +619,10 @@ def _region_in_tool_keys(name: str, region: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _checked_arguments(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
-    """Drop null arguments, read timecodes and region keys, and reject any value that breaks the tool's schema."""
+    """Read timecodes and region keys, and reject any value that breaks the tool's schema (nulls included)."""
     schema = _TOOL_SCHEMAS[name]
     properties = schema.get("properties", {})
-    kept = {key: value for key, value in args.items() if value is not None}
+    kept = dict(args)
     if isinstance(kept.get("region"), dict) and "region" in properties:
         kept["region"] = _region_in_tool_keys(name, kept["region"])
     kept = _read_timecodes(schema, kept)

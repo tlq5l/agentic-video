@@ -287,8 +287,18 @@ def test_timecode_strings_convert_inside_nested_window_items(real_clip):
     assert timecode["data"] == numeric["data"]
 
 
-def test_null_argument_counts_as_omitted(real_clip):
-    assert handle_call("detect_cuts", {"source": real_clip, "threshold": None})["ok"] is True
+@pytest.mark.parametrize("tool,args,expected", [
+    ("detect_cuts", {"threshold": None}, "detect_cuts: argument 'threshold' must be a number (got None)"),
+    ("count_repetitions", {"fps": None}, "count_repetitions: argument 'fps' must be a number (got None)"),
+])
+def test_null_is_rejected_for_an_argument_whose_schema_has_no_null(real_clip, tool, args, expected):
+    with pytest.raises(ValueError, match=re.escape(expected)):
+        handle_call(tool, {"source": real_clip, **args})
+
+
+def test_null_end_sec_means_the_end_of_the_clip(real_clip):
+    result = handle_call("count_repetitions", {"source": real_clip, "start_sec": 0, "end_sec": None, "method": "motion"})
+    assert result["ok"] is True, result
 
 
 @pytest.mark.parametrize("tool,region", [
