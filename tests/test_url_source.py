@@ -24,7 +24,7 @@ class FakeEngine:
     def __init__(self, source):
         FakeEngine.sources.append(source)
 
-    def probe(self):
+    def probe(self, allow_audio_only=False):
         class Meta:
             def to_dict(self):
                 return {"duration_sec": 63.0}
@@ -186,7 +186,7 @@ def test_url_fields_keep_ready_and_asr_progress_results_valid():
     url = {"source_url": X_URL, "local_path": "/cache/x.mp4"}
     probe = {"source_path": "/cache/x.mp4", "duration_sec": 63.0, "width": 1280, "height": 720, "fps": 30.0,
              "format_name": "mp4", "size_bytes": 1, "has_audio": True, "audio_codec": "aac",
-             "video_codec": "h264", "fingerprint": "abc"}
+             "video_codec": "h264", "fingerprint": "abc", "has_video": True}
     assert _accepts(CONTRACT["probe_video"]["outputSchema"], {**probe, **url})
     asr_progress = {"status": "in_progress", "requested_model_size": "tiny", "requested_model_cached": False,
                     "transcription_status": "started", "retry_after_seconds": 30, "transcription_message": "m"}

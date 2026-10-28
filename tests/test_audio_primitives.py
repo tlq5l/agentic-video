@@ -1,6 +1,8 @@
 """Synthetic-audio coverage for non-speech measurements and sync checking."""
 
+import json
 import subprocess
+import time
 import wave
 from pathlib import Path
 
@@ -9,7 +11,10 @@ import pytest
 from PIL import Image
 
 from src.core.cache import MediaCache
+from src.core.config import Config
+from src.executor.mcp_server import handle_call, tool_call_response
 from src.media.audio import _outlier_sections, audio_onsets, loudness_timeline, spectrogram_window, sync_check
+from src.transcript import asr
 
 
 RATE = 48000
@@ -263,3 +268,46 @@ def test_synthetic_testsrc_video_runs_end_to_end_through_sync_check(tmp_path):
     assert result["total_cues"] == 2
     assert [cue["status"] for cue in result["cues"]] == ["ok", "ok"]
     assert result["total_cuts"] >= 1
+
+
+def _audio_only_m4a(tmp_path: Path) -> str:
+    path = tmp_path / "tone.m4a"
+    subprocess.run(
+        ["ffmpeg", "-nostdin", "-y", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=3",
+         "-c:a", "aac", str(path)],
+        check=True,
+    )
+    return str(path)
+
+
+def test_audio_only_m4a_works_with_audio_tools(monkeypatch, tmp_path):
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    source = _audio_only_m4a(tmp_path)
+
+    probe = handle_call("probe_video", {"source": source})
+    assert probe["ok"] is True
+    assert probe["data"]["has_video"] is False
+    assert probe["data"]["has_audio"] is True
+    assert probe["data"]["duration_sec"] == pytest.approx(3.0, abs=0.1)
+
+    assert handle_call("loudness_timeline", {"source": source})["ok"] is True
+    assert handle_call("search_transcript", {"source": source, "query": "tone", "mode": "lexical"})["ok"] is True
+    transcript = handle_call("transcribe", {"source": source})
+    assert transcript["ok"] is True
+
+    # A background ASR attempt may still be running; let it finish so it cannot outlive this test.
+    deadline = time.monotonic() + 120
+    while asr._BACKGROUND_TRANSCRIPTION_SLOT._active is not None and time.monotonic() < deadline:
+        time.sleep(0.2)
+
+
+def test_visual_tools_refuse_audio_only_m4a_with_audio_only_message(monkeypatch, tmp_path):
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    source = _audio_only_m4a(tmp_path)
+
+    for name, args in [("contact_sheet", {"source": source}),
+                       ("check_frame_cadence", {"source": source}),
+                       ("sync_check", {"source": source, "cues": [{"time_sec": 1.0}]})]:
+        response = json.loads(tool_call_response(1, name, args))
+        assert response["result"]["isError"] is True, name
+        assert "audio only" in response["result"]["content"][0]["text"], name

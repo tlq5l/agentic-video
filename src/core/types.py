@@ -25,7 +25,9 @@ class VideoMetadata:
     audio_codec: Optional[str] = None
     video_codec: Optional[str] = None
     fingerprint: str = ""
-    
+    # False for audio-only files, whose width, height and fps are 0.
+    has_video: bool = True
+
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 

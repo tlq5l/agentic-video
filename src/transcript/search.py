@@ -190,7 +190,7 @@ def search_transcript(
     notes = []
     try:
         chunks = semantic.search(
-            probe_video(source_path).fingerprint, segments, query, top_k, (t_start, t_end))
+            probe_video(source_path, allow_audio_only=True).fingerprint, segments, query, top_k, (t_start, t_end))
         hits = _fuse(matches, chunks, query, max(float(s["end_sec"]) for s in segments), top_k)
         if not any(hit.match in ("exact", "all_terms") for hit in hits):
             notes.append("No keyword match: the words were not found in the speech. match=semantic hits are the "
