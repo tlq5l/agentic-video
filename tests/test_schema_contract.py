@@ -1,10 +1,21 @@
 """Parity checks for the canonical MCP contract."""
 
 import json
+import math
 import re
+import struct
+import subprocess
+import time
+import wave
 from pathlib import Path
+from types import SimpleNamespace
 
-from src.executor.mcp_server import TOOLS_MANIFEST
+import jsonschema
+import pytest
+
+from src.core.config import Config
+from src.executor.mcp_server import TOOLS_MANIFEST, handle_call
+from src.transcript import asr
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -232,3 +243,120 @@ def test_detect_cuts_contract_tells_cuts_and_transitions_apart(monkeypatch):
     data = mcp_server.handle_call("detect_cuts", {"source": "clip.mp4"})["data"]
     assert [cut["kind"] for cut in data["cuts"]] == ["cut", "transition"]
     _assert_schema_accepts(tool["outputSchema"], data)
+
+
+# ---- end-to-end checks: real results against the published schemas --------
+# Each test runs the real tools on small generated clips. Nothing is mocked.
+
+TOOL_SPECS = {tool["name"]: tool for tool in TOOLS_MANIFEST}
+
+
+def _tone_with_bursts_wav(path, seconds=8, rate=44100):
+    """A 440 Hz sine with 1 kHz bursts at 2, 4 and 6 s, so onsets and sound cues have something to match."""
+    samples = bytearray()
+    for n in range(seconds * rate):
+        t = n / rate
+        value = 0.2 * math.sin(2 * math.pi * 440 * t)
+        for start in (2.0, 4.0, 6.0):
+            if 0 <= t - start < 0.08:
+                value += 0.9 * math.sin(2 * math.pi * 1000 * t) * math.sin(math.pi * (t - start) / 0.08)
+        samples += struct.pack("<h", int(max(-1.0, min(1.0, value)) * 32767))
+    with wave.open(str(path), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(rate)
+        wav.writeframes(bytes(samples))
+
+
+@pytest.fixture
+def clips(tmp_path, monkeypatch):
+    """An 8 s 320x240 video with a sine track and a hard cut at 4 s, and a 4 s audio-only file."""
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    tone = tmp_path / "tone.wav"
+    _tone_with_bursts_wav(tone)
+    video = tmp_path / "cut.mp4"
+    subprocess.run([
+        "ffmpeg", "-nostdin", "-v", "error", "-y",
+        "-f", "lavfi", "-i", "color=c=blue:s=320x240:r=10:d=4",
+        "-f", "lavfi", "-i", "testsrc=size=320x240:r=10:d=4",
+        "-i", str(tone),
+        "-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0[v]", "-map", "[v]", "-map", "2:a",
+        "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(video),
+    ], check=True)
+    audio = tmp_path / "tone.m4a"
+    subprocess.run([
+        "ffmpeg", "-nostdin", "-v", "error", "-y",
+        "-f", "lavfi", "-i", "sine=frequency=880:duration=4", "-c:a", "aac", str(audio),
+    ], check=True)
+    return SimpleNamespace(video=str(video), audio=str(audio))
+
+
+LOCAL_CALLS = [
+    ("probe_video", {}),
+    ("contact_sheet", {}),
+    ("detect_cuts", {}),
+    ("check_frame_cadence", {}),
+    ("audio_onsets", {}),
+    ("loudness_timeline", {}),
+    ("spectrogram_window", {"start_sec": 0, "end_sec": 4}),
+    ("inspect_window", {"start_sec": 3, "end_sec": 5}),
+    ("inspect_windows", {"windows": [{"start_sec": 3, "end_sec": 5}]}),
+    ("inspect_moments", {"moments": [{"timestamp_sec": 4.0, "label": "cut"}]}),
+    ("frame_at", {"time_sec": "00:02.500"}),
+    ("sync_check", {"cues": [{"time_sec": 4.0, "label": "hit"}]}),
+    ("overview_chunks", {}),
+    ("track_region_changes", {"region": {"x": 0, "y": 0, "width": 0.5, "height": 0.5}, "start_sec": 0, "end_sec": 8}),
+]
+
+
+def _output_problems(tool, data):
+    validator = jsonschema.validators.validator_for(TOOL_SPECS[tool]["outputSchema"])(TOOL_SPECS[tool]["outputSchema"])
+    return [f"{'/'.join(map(str, error.path)) or '(root)'}: {error.message}" for error in validator.iter_errors(data)][:5]
+
+
+def test_cheap_local_tool_results_match_their_published_output_schemas(clips):
+    problems = {}
+    calls = [(tool, {"source": clips.video, **extra}) for tool, extra in LOCAL_CALLS]
+    calls.append(("probe_video", {"source": clips.audio}))  # audio-only file
+    for tool, args in calls:
+        result = handle_call(tool, args)
+        assert result["ok"] is True, (tool, result)
+        found = _output_problems(tool, result["data"])
+        if found:
+            problems[tool if args["source"] == clips.video else f"{tool} (audio-only)"] = found
+    assert problems == {}
+
+
+def test_search_transcript_in_progress_result_matches_its_output_schema(clips, monkeypatch):
+    monkeypatch.setattr(asr, "_installed_whisper_models", lambda: [])
+
+    class _StartedSlot:
+        def start(self, source_path, model_size):
+            return "in_progress", None
+
+    monkeypatch.setattr(asr, "_BACKGROUND_TRANSCRIPTION_SLOT", _StartedSlot())
+    # The background worker's lock file says the run started 30 s ago, so the progress fields are filled in.
+    Config.BASE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    (Config.BASE_CACHE_DIR / "asr-worker.lock").write_bytes(json.dumps({"started_at": time.time() - 30}).encode("utf-8"))
+
+    response = handle_call("search_transcript", {"source": clips.video, "query": "cached phrase"})
+
+    assert response["ok"] is True
+    data = response["data"]
+    assert data["status"] == "in_progress"
+    assert {"elapsed_sec", "estimated_total_sec", "estimated_percent"} <= set(data)
+    assert _output_problems("search_transcript", data) == []
+
+
+@pytest.mark.parametrize("tool,args,schema_key", [
+    ("frame_at", {"time_sec": "00:02.500"}, "time_sec"),
+    ("inspect_window", {"start_sec": "00:01", "end_sec": "00:02"}, "start_sec"),
+])
+def test_timecode_strings_pass_the_published_input_schema_and_run(clips, tool, args, schema_key):
+    args = {"source": clips.video, **args}
+    schema = TOOL_SPECS[tool]["inputSchema"]
+    jsonschema.validate(args, schema)
+    assert handle_call(tool, args)["ok"] is True
+
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate({**args, schema_key: "abc"}, schema)

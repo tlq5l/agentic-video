@@ -465,14 +465,14 @@ def _fit_transcript(data: Dict[str, Any]) -> None:
                 f"The listed segments cover 0 to {segments[keep - 1]['end_sec']:g} s.")
 
 
-_TIMECODE = re.compile(r"(?:(?:(?P<hours>\d+):)?(?P<minutes>\d+):)?(?P<seconds>\d+(?:\.\d+)?)")
+_TIMECODE = re.compile(r"(?:(?:(?P<hours>[0-9]+):)?(?P<minutes>[0-9]+):)?(?P<seconds>[0-9]+(?:\.[0-9]+)?)")
 _KIND_WORDS = {"number": "a number", "integer": "an integer", "string": "a string", "boolean": "true or false",
                "object": "an object", "array": "a list", "null": "null"}
 
 
 def _parse_timecode(text: str) -> Optional[float]:
     """Seconds from "SS.mmm", "MM:SS(.mmm)" or "HH:MM:SS(.mmm)", the format search_transcript shows; None otherwise."""
-    match = _TIMECODE.fullmatch(text.strip())
+    match = _TIMECODE.fullmatch(text)
     if match is None:
         return None
     hours, minutes = match["hours"], match["minutes"]
@@ -485,6 +485,18 @@ def _parse_timecode(text: str) -> Optional[float]:
 def _schema_types(schema: Dict[str, Any]) -> List[str]:
     kinds = schema.get("type", [])
     return kinds if isinstance(kinds, list) else [kinds]
+
+
+def _accepts(schema: Dict[str, Any], value: Any, key: str = "") -> bool:
+    """True if `value` has one of the schema's types. A string must match the schema's pattern, and a *_sec
+    string must also be a timecode the server can read (the pattern lets through e.g. "1:99", which is not)."""
+    if not any(_is_kind(value, kind) for kind in _schema_types(schema)):
+        return False
+    if not isinstance(value, str) or schema.get("pattern") is None:
+        return True
+    if re.fullmatch(schema["pattern"], value) is None:
+        return False
+    return not key.endswith("_sec") or _parse_timecode(value) is not None
 
 
 def _is_kind(value: Any, kind: str) -> bool:
@@ -554,12 +566,12 @@ def _argument_problem(schema: Dict[str, Any], value: Any, key: str, check_range:
         problems = [_argument_problem(alt, value, key, check_range) for alt in alternatives]
         if all(problems):
             fitting = [problem for alt, problem in zip(alternatives, problems)
-                       if not _schema_types(alt) or any(_is_kind(value, kind) for kind in _schema_types(alt))]
+                       if not _schema_types(alt) or _accepts(alt, value, key)]
             if len(fitting) == 1:
                 return fitting[0]
             return "", "does not match any allowed form", "; or ".join(_describe_alternative(alt, key) for alt in alternatives)
     kinds = _schema_types(schema)
-    if kinds and not any(_is_kind(value, kind) for kind in kinds):
+    if kinds and not _accepts(schema, value, key):
         return "", f"must be {_KIND_WORDS.get(kinds[0], 'a value')} (got {_show(value)})", _expected(schema, key)
     if "enum" in schema and value not in schema["enum"]:
         return "", f"is not one of the allowed values (got {_show(value)})", _expected(schema, key)
