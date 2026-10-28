@@ -24,9 +24,49 @@ def parse_fps(fps_str: str) -> float:
         return 0.0
 
 
-def probe_video(file_path: str, cache: Optional[MediaCache] = None, use_cache: bool = True) -> VideoMetadata:
-    """Probe video file using ffprobe and return structured VideoMetadata.
-    
+def _video_fps(video_stream: Dict[str, Any]) -> float:
+    # Prefer avg_frame_rate if valid: r_frame_rate can report the timebase (e.g. 1000/1, 90000/1) for VFR.
+    avg_fps = parse_fps(video_stream.get("avg_frame_rate", "0/0"))
+    r_fps = parse_fps(video_stream.get("r_frame_rate", "0/0"))
+    for fps in (avg_fps, r_fps):
+        if 0.0 < fps <= 120.0:
+            return fps
+    for fps in (avg_fps, r_fps):
+        if fps > 0.0:
+            return fps
+    return 25.0
+
+
+def _duration_sec(stream: Optional[Dict[str, Any]], format_info: Dict[str, Any]) -> float:
+    """The stream's duration when it is positive, else the container's."""
+    for source in (stream or {}, format_info):
+        try:
+            value = float(source["duration"])
+        except (KeyError, ValueError, TypeError):
+            continue
+        if value > 0.0:
+            return value
+    return 0.0
+
+
+def _audio_only_error(file_path: str, path: Path) -> MediaCorruptError:
+    return MediaCorruptError(
+        f"{file_path} has audio only (no video stream). Visual tools need a video stream; "
+        "audio-only files work with probe_video, transcribe, search_transcript, audio_onsets, "
+        "loudness_timeline and spectrogram_window.",
+        {"file_path": str(path)}
+    )
+
+
+def probe_video(
+    file_path: str,
+    cache: Optional[MediaCache] = None,
+    use_cache: bool = True,
+    allow_audio_only: bool = False,
+) -> VideoMetadata:
+    """Probe a media file using ffprobe and return structured VideoMetadata.
+
+    A file with audio but no video raises MediaCorruptError unless allow_audio_only is set.
     Reads from local MediaCache if available.
     """
     path = Path(file_path).resolve()
@@ -49,6 +89,8 @@ def probe_video(file_path: str, cache: Optional[MediaCache] = None, use_cache: b
     if use_cache:
         cached_data = cache.load_json(fingerprint, "metadata")
         if cached_data:
+            if not cached_data.get("has_video", True) and not allow_audio_only:
+                raise _audio_only_error(file_path, path)
             return VideoMetadata(**cached_data)
 
     cmd = [
@@ -106,50 +148,29 @@ def probe_video(file_path: str, cache: Optional[MediaCache] = None, use_cache: b
         elif c_type == "audio" and audio_stream is None:
             audio_stream = s
 
-    if not video_stream:
+    if video_stream is None and audio_stream is None:
         raise MediaCorruptError(
-            f"No video streams found in {file_path}",
+            f"No video or audio streams found in {file_path}",
             {"file_path": str(path), "streams_count": len(streams)}
         )
+    has_video = video_stream is not None
+    if not has_video and not allow_audio_only:
+        raise _audio_only_error(file_path, path)
 
-    # Resolution
-    width = int(video_stream.get("width", 0))
-    height = int(video_stream.get("height", 0))
-
-    # FPS: prefer avg_frame_rate if valid, as r_frame_rate can report timebase (e.g. 1000/1, 90000/1) for VFR
-    avg_fps = parse_fps(video_stream.get("avg_frame_rate", "0/0"))
-    r_fps = parse_fps(video_stream.get("r_frame_rate", "0/0"))
-    if 0.0 < avg_fps <= 120.0:
-        fps = avg_fps
-    elif 0.0 < r_fps <= 120.0:
-        fps = r_fps
-    elif avg_fps > 0.0:
-        fps = avg_fps
-    elif r_fps > 0.0:
-        fps = r_fps
+    if video_stream is not None:
+        width = int(video_stream.get("width", 0))
+        height = int(video_stream.get("height", 0))
+        fps = _video_fps(video_stream)
+        video_codec = video_stream.get("codec_name")
     else:
-        fps = 25.0
-
-    # Duration
-    duration_sec = 0.0
-    if "duration" in video_stream:
-        try:
-            duration_sec = float(video_stream["duration"])
-        except (ValueError, TypeError):
-            pass
-
-    if duration_sec <= 0.0 and "duration" in format_info:
-        try:
-            duration_sec = float(format_info["duration"])
-        except (ValueError, TypeError):
-            pass
+        width, height, fps, video_codec = 0, 0, 0.0, None
+    duration_sec = _duration_sec(video_stream or audio_stream, format_info)
 
     format_name = format_info.get("format_name", "unknown")
     size_bytes = int(format_info.get("size", path.stat().st_size if path.exists() else 0))
 
     has_audio = audio_stream is not None
     audio_codec = audio_stream.get("codec_name") if audio_stream else None
-    video_codec = video_stream.get("codec_name")
 
     metadata = VideoMetadata(
         source_path=str(path),
@@ -162,7 +183,8 @@ def probe_video(file_path: str, cache: Optional[MediaCache] = None, use_cache: b
         has_audio=has_audio,
         audio_codec=audio_codec,
         video_codec=video_codec,
-        fingerprint=fingerprint
+        fingerprint=fingerprint,
+        has_video=has_video,
     )
 
     cache.save_json(fingerprint, "metadata", metadata.to_dict())

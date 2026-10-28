@@ -48,7 +48,7 @@ def _setup(monkeypatch, tmp_path) -> Path:
     monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
     source = tmp_path / "video.mp4"
     source.write_bytes(b"test media")
-    monkeypatch.setattr(asr, "probe_video", lambda path: _metadata(path))
+    monkeypatch.setattr(asr, "probe_video", lambda path, **kwargs: _metadata(path))
     return source
 
 

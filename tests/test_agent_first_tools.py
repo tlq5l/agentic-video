@@ -203,7 +203,7 @@ def test_sync_check_errors_keep_their_order_with_the_cut_scan_in_the_background(
 
     # Audio decodes fine; the cut scan, on a file with no video, fails.
     for _ in range(2):
-        with pytest.raises(MediaCorruptError, match="No video streams found"):
+        with pytest.raises(MediaCorruptError, match="has audio only"):
             handle_call("sync_check", {"source": str(wav), "cues": [{"time_sec": 1.0}]})
     # Both would fail on a missing file; the audio error is the one reported, as before.
     with pytest.raises(MediaNotFoundError, match="Audio source file not found"):

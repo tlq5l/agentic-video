@@ -885,7 +885,7 @@
     },
     "probe_video": {
       "name": "probe_video",
-      "description": "Read a video's duration, frame rate, resolution, codecs, and whether it has an audio track. Call this first: duration_sec bounds every start_sec/end_sec you pass to other tools, and has_audio tells you whether transcribe and the audio tools (audio_onsets, loudness_timeline, spectrogram_window, sync_check) can work. `source` is a local file path or a video URL and is the same in every tool: an x.com / Twitter post with a video, a YouTube link, another site yt-dlp supports, or a direct .mp4 link. A URL is downloaded once (up to 1080p) and cached; the result gives source_url and local_path, and while the download runs it is status=in_progress, so call again.",
+      "description": "Read a video's duration, frame rate, resolution, codecs, and whether it has an audio track and a video track. Call this first: duration_sec bounds every start_sec/end_sec you pass to other tools. Audio-only files (.m4a, .mp3, .wav) are accepted: has_video is false and width, height and fps are 0. has_audio tells you whether transcribe, search_transcript and the audio tools (audio_onsets, loudness_timeline, spectrogram_window) can work; the visual tools and sync_check need has_video true. `source` is a local file path or a video URL and is the same in every tool: an x.com / Twitter post with a video, a YouTube link, another site yt-dlp supports, or a direct .mp4 link. A URL is downloaded once (up to 1080p) and cached; the result gives source_url and local_path, and while the download runs it is status=in_progress, so call again.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -910,17 +910,18 @@
           "format_name": { "type": "string" },
           "size_bytes": { "type": "integer" },
           "has_audio": { "type": "boolean" },
+          "has_video": { "type": "boolean", "description": "False for audio-only files: width, height and fps are 0, and the visual tools refuse the file." },
           "audio_codec": { "type": ["string", "null"] },
           "video_codec": { "type": ["string", "null"] },
           "fingerprint": { "type": "string" }
         },
-        "anyOf": [{ "required": ["source_path", "duration_sec", "width", "height", "fps", "format_name", "size_bytes", "has_audio", "audio_codec", "video_codec", "fingerprint"] }, { "required": ["status", "source_url", "retry_after_seconds"], "not": { "required": ["local_path"] } }],
+        "anyOf": [{ "required": ["source_path", "duration_sec", "width", "height", "fps", "format_name", "size_bytes", "has_audio", "has_video", "audio_codec", "video_codec", "fingerprint"] }, { "required": ["status", "source_url", "retry_after_seconds"], "not": { "required": ["local_path"] } }],
         "additionalProperties": false
       }
     },
     "transcribe": {
       "name": "transcribe",
-      "description": "Get the full speech transcript as timestamped segments (cached after the first run). To find where a specific word or phrase is spoken, use search_transcript instead of reading it all. If the requested model is not cached, returns another cached transcript with cached_model_size and requested_model_cached=false while one background job runs; with no transcript cached, returns status=in_progress and retry_after_seconds, so repeat the same call after that delay. model_size: tiny, base or small (more accurate, slower on the CPU), or turbo (Whisper large-v3-turbo on the GPU via whisper.cpp: the most accurate and, where installed, the fastest, about 1 minute per hour of audio). Omit model_size to get turbo where it is installed, else tiny. Long audio is decoded in 60-second chunks. Lines repeated 3 or more times in a row carry `suspect` and `notice` names them: speech models often invent such lines over music or silence, though a real chant can repeat too. A line without `suspect` is not verified.",
+      "description": "Get the full speech transcript as timestamped segments (cached after the first run). Audio-only files (.m4a, .mp3, .wav) work too. To find where a specific word or phrase is spoken, use search_transcript instead of reading it all. If the requested model is not cached, returns another cached transcript with cached_model_size and requested_model_cached=false while one background job runs; with no transcript cached, returns status=in_progress and retry_after_seconds, so repeat the same call after that delay. model_size: tiny, base or small (more accurate, slower on the CPU), or turbo (Whisper large-v3-turbo on the GPU via whisper.cpp: the most accurate and, where installed, the fastest, about 1 minute per hour of audio). Omit model_size to get turbo where it is installed, else tiny. Long audio is decoded in 60-second chunks. Lines repeated 3 or more times in a row carry `suspect` and `notice` names them: speech models often invent such lines over music or silence, though a real chant can repeat too. A line without `suspect` is not verified.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -986,7 +987,7 @@
     },
     "search_transcript": {
       "name": "search_transcript",
-      "description": "Find when a word or phrase is SPOKEN. Default mode=hybrid lists exact keyword matches first (match=exact: the phrase; match=all_terms: every content word in one segment), then passages that match by meaning (match=semantic: a 20 s window, found on this Mac with EmbeddingGemma 2; nothing is sent to the cloud), so a reworded question still finds the moment. mode=lexical gives keyword matches only. When no hit is exact or all_terms, the words were not found in the speech: semantic hits are the closest passages, not proof, so read their text before answering. If semantic search is not set up or not ready, hits are keyword-only and `note` says why. Returns up to top_k timestamped hits (default 5, maximum 50; larger values are clamped and the result says so; `note` says when more keyword matches exist). For text shown on screen use count_occurrences, and for visible things use search_visual. If ASR is needed, starts or joins background transcription and returns status=in_progress with retry_after_seconds instead of waiting; repeat the same call after that delay. A hit on a flagged line carries `suspect` (see transcribe).",
+      "description": "Find when a word or phrase is SPOKEN. Audio-only files (.m4a, .mp3, .wav) work too. Default mode=hybrid lists exact keyword matches first (match=exact: the phrase; match=all_terms: every content word in one segment), then passages that match by meaning (match=semantic: a 20 s window, found on this Mac with EmbeddingGemma 2; nothing is sent to the cloud), so a reworded question still finds the moment. mode=lexical gives keyword matches only. When no hit is exact or all_terms, the words were not found in the speech: semantic hits are the closest passages, not proof, so read their text before answering. If semantic search is not set up or not ready, hits are keyword-only and `note` says why. Returns up to top_k timestamped hits (default 5, maximum 50; larger values are clamped and the result says so; `note` says when more keyword matches exist). For text shown on screen use count_occurrences, and for visible things use search_visual. If ASR is needed, starts or joins background transcription and returns status=in_progress with retry_after_seconds instead of waiting; repeat the same call after that delay. A hit on a flagged line carries `suspect` (see transcribe).",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1160,7 +1161,7 @@
           },
           "metadata": {
             "type": "object",
-            "description": "Same fields as probe_video: source_path, duration_sec, width, height, fps, format_name, size_bytes, has_audio, audio_codec, video_codec, fingerprint."
+            "description": "Same fields as probe_video: source_path, duration_sec, width, height, fps, format_name, size_bytes, has_audio, has_video, audio_codec, video_codec, fingerprint."
           },
           "contact_sheet": {
             "type": "object",
@@ -1929,7 +1930,7 @@
     },
     "audio_onsets": {
       "name": "audio_onsets",
-      "description": "List non-speech sound attacks (hits, claps, beats) with millisecond timestamps and five-band energy profiles, optionally restricted to a frequency band (band_hz: sub, low_mid, mid, high, air, or [low_hz, high_hz]) and compared with another source (compare_to). min_strength 0-1 (default 0.12): raise it for only strong onsets. At most 500 onsets are listed; `total` is the full count and the result says how to see the rest. Needs an audio track (probe_video has_audio). For level over time use loudness_timeline; for speech use transcribe. To name what a sound is, use label_sounds (cloud).",
+      "description": "List non-speech sound attacks (hits, claps, beats) with millisecond timestamps and five-band energy profiles, optionally restricted to a frequency band (band_hz: sub, low_mid, mid, high, air, or [low_hz, high_hz]) and compared with another source (compare_to). min_strength 0-1 (default 0.12): raise it for only strong onsets. At most 500 onsets are listed; `total` is the full count and the result says how to see the rest. Needs an audio track (probe_video has_audio); audio-only files (.m4a, .mp3, .wav) work. For level over time use loudness_timeline; for speech use transcribe. To name what a sound is, use label_sounds (cloud).",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -2128,7 +2129,7 @@
     },
     "loudness_timeline": {
       "name": "loudness_timeline",
-      "description": "Measure loudness over time: RMS, peak, band energies, spectral centroid, silence gaps, and band-energy outliers classified as steps, ramps or transients, in fixed windows (window_sec 0.01-600, default 0.25) or beat-length windows (bpm 20-300; give one or the other). At most 500 windows are listed in `windows` (`total` is the full count; `outliers` and `silence_gaps` always cover the whole range); use a larger window_sec or a start_sec/end_sec range for the rest. Ranges needing over 50,000 windows are rejected with the window_sec that fits. Needs an audio track. For discrete hits use audio_onsets. `peak_dbfs` (top level, with `peak_sec`, and per window) is the loudest sample on any channel, as ffmpeg reports sample peak; `rms_dbfs` and `band_db` are measured on the mono mix (L+R)/1.414, so on centred stereo they read up to 3 dB above a per-channel meter.",
+      "description": "Measure loudness over time: RMS, peak, band energies, spectral centroid, silence gaps, and band-energy outliers classified as steps, ramps or transients, in fixed windows (window_sec 0.01-600, default 0.25) or beat-length windows (bpm 20-300; give one or the other). At most 500 windows are listed in `windows` (`total` is the full count; `outliers` and `silence_gaps` always cover the whole range); use a larger window_sec or a start_sec/end_sec range for the rest. Ranges needing over 50,000 windows are rejected with the window_sec that fits. Needs an audio track (audio-only files work too). For discrete hits use audio_onsets. `peak_dbfs` (top level, with `peak_sec`, and per window) is the loudest sample on any channel, as ffmpeg reports sample peak; `rms_dbfs` and `band_db` are measured on the mono mix (L+R)/1.414, so on centred stereo they read up to 3 dB above a per-channel meter.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -2480,7 +2481,7 @@
     },
     "spectrogram_window": {
       "name": "spectrogram_window",
-      "description": "Render a log-frequency dB spectrogram PNG for [start_sec, end_sec] (both required, at most 600 s) with absolute timecode badges and optional event marks (time_sec + label). Use a short window (a few seconds) to look at one sound; find candidate times with audio_onsets or loudness_timeline first. Needs an audio track.",
+      "description": "Render a log-frequency dB spectrogram PNG for [start_sec, end_sec] (both required, at most 600 s) with absolute timecode badges and optional event marks (time_sec + label). Use a short window (a few seconds) to look at one sound; find candidate times with audio_onsets or loudness_timeline first. Needs an audio track (audio-only files work too).",
       "inputSchema": {
         "type": "object",
         "properties": {

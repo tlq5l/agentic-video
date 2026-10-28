@@ -104,8 +104,12 @@ export interface ProbeVideoOutput {
   size_bytes: number;
   /** Indicates whether an audio track is present in container */
   has_audio: boolean;
-  audio_codec?: string;
-  video_codec?: string;
+  /** False for audio-only files: width, height and fps are 0, and the visual tools refuse the file. */
+  has_video: boolean;
+  /** Null when the file has no audio track. */
+  audio_codec: string | null;
+  /** Null for audio-only files. */
+  video_codec: string | null;
   fingerprint: string;
   /** Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument. */
   note?: string;
@@ -1226,7 +1230,7 @@ export interface SyncCheckOutput {
 export interface AgenticVideoIntegration {
   /**
    * Read duration, resolution, fps, codecs, and audio presence. Call first: duration bounds every start_sec/end_sec
-   * and has_audio says whether transcribe and the audio tools can work.
+   * and has_audio says whether transcribe and the audio tools can work; has_video false marks an audio-only file.
    */
   probe_video(input: ProbeVideoInput): Promise<ToolResult<WithUrlSource<ProbeVideoOutput>>>;
 
