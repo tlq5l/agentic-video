@@ -487,16 +487,14 @@ def _schema_types(schema: Dict[str, Any]) -> List[str]:
     return kinds if isinstance(kinds, list) else [kinds]
 
 
-def _accepts(schema: Dict[str, Any], value: Any, key: str = "") -> bool:
-    """True if `value` has one of the schema's types. A string must match the schema's pattern, and a *_sec
-    string must also be a timecode the server can read (the pattern lets through e.g. "1:99", which is not)."""
+def _accepts(schema: Dict[str, Any], value: Any) -> bool:
+    """True if `value` has one of the schema's types, and a string matches the schema's pattern. The published
+    *_sec pattern accepts exactly the timecodes _parse_timecode reads (tests/test_schema_contract.py checks this)."""
     if not any(_is_kind(value, kind) for kind in _schema_types(schema)):
         return False
     if not isinstance(value, str) or schema.get("pattern") is None:
         return True
-    if re.fullmatch(schema["pattern"], value) is None:
-        return False
-    return not key.endswith("_sec") or _parse_timecode(value) is not None
+    return re.fullmatch(schema["pattern"], value) is not None
 
 
 def _is_kind(value: Any, kind: str) -> bool:
@@ -566,12 +564,12 @@ def _argument_problem(schema: Dict[str, Any], value: Any, key: str, check_range:
         problems = [_argument_problem(alt, value, key, check_range) for alt in alternatives]
         if all(problems):
             fitting = [problem for alt, problem in zip(alternatives, problems)
-                       if not _schema_types(alt) or _accepts(alt, value, key)]
+                       if not _schema_types(alt) or _accepts(alt, value)]
             if len(fitting) == 1:
                 return fitting[0]
             return "", "does not match any allowed form", "; or ".join(_describe_alternative(alt, key) for alt in alternatives)
     kinds = _schema_types(schema)
-    if kinds and not _accepts(schema, value, key):
+    if kinds and not _accepts(schema, value):
         return "", f"must be {_KIND_WORDS.get(kinds[0], 'a value')} (got {_show(value)})", _expected(schema, key)
     if "enum" in schema and value not in schema["enum"]:
         return "", f"is not one of the allowed values (got {_show(value)})", _expected(schema, key)

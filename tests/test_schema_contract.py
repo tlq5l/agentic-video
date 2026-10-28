@@ -1,5 +1,6 @@
 """Parity checks for the canonical MCP contract."""
 
+import itertools
 import json
 import math
 import re
@@ -14,7 +15,7 @@ import jsonschema
 import pytest
 
 from src.core.config import Config
-from src.executor.mcp_server import TOOLS_MANIFEST, handle_call
+from src.executor.mcp_server import TOOLS_MANIFEST, _parse_timecode, handle_call
 from src.transcript import asr
 
 
@@ -360,3 +361,96 @@ def test_timecode_strings_pass_the_published_input_schema_and_run(clips, tool, a
 
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate({**args, schema_key: "abc"}, schema)
+
+
+# ---- timecodes: one published pattern, the server parser, and the TypeScript declarations ----
+
+TIMECODE_EDGE_CASES = ["59", "60", "0:59", "0:60", "1:99", "1:59:59.5", "1:60:00", "100:00", "12.", ".5", "", "1::2", " 1"]
+
+
+def _all_patterns(node):
+    """Every "pattern" value in a JSON document, at any depth."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "pattern":
+                yield value
+            yield from _all_patterns(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from _all_patterns(item)
+
+
+def _sec_properties(node, path=""):
+    """(path, schema) for every property named *_sec in a JSON schema, at any depth."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "properties" and isinstance(value, dict):
+                for name, sub in value.items():
+                    if name.endswith("_sec"):
+                        yield f"{path}/{name}", sub
+                    yield from _sec_properties(sub, f"{path}/{name}")
+            else:
+                yield from _sec_properties(value, f"{path}/{key}")
+    elif isinstance(node, list):
+        for index, item in enumerate(node):
+            yield from _sec_properties(item, f"{path}/{index}")
+
+
+def _published_timecode_pattern():
+    """The one pattern every copy in mcp_schemas.json shares."""
+    copies = list(_all_patterns(json.loads(CANONICAL.read_text(encoding="utf-8"))))
+    assert copies and len(set(copies)) == 1, set(copies)
+    return copies[0]
+
+
+def test_timecode_pattern_accepts_exactly_what_the_server_parses():
+    pattern = _published_timecode_pattern()
+    assert pattern in ZOD_TS.read_text(encoding="utf-8")  # TIMECODE_PATTERN in mcp_definitions.ts
+
+    published = re.compile(pattern)
+    cases = list(TIMECODE_EDGE_CASES)
+    for length in range(7):
+        cases.extend("".join(chars) for chars in itertools.product("019:.5", repeat=length))
+    disagreements = [text for text in cases
+                     if bool(published.fullmatch(text)) != (_parse_timecode(text) is not None)]
+    assert disagreements == []
+
+
+def test_every_sec_input_takes_the_timecode_string_in_schema_and_declarations():
+    pattern = _published_timecode_pattern()
+    contract = json.loads(CANONICAL.read_text(encoding="utf-8"))
+
+    # Schema side: every *_sec input property, at any depth, takes a string that matches the shared pattern.
+    checked = []
+    problems = []
+    for section in ("tools", "legacy_tools"):
+        for name, tool in contract[section].items():
+            for path, sub in _sec_properties(tool["inputSchema"], f"{section}/{name}"):
+                checked.append(path)
+                kinds = sub.get("type") if isinstance(sub.get("type"), list) else [sub.get("type")]
+                if "string" not in kinds or sub.get("pattern") != pattern:
+                    problems.append(path)
+    assert checked and problems == []
+
+    # Declaration side: in each ...Input type, every *_sec field's type includes string.
+    # Scope: from `export interface|type ...Input` to its closing `}` (type aliases: their last `;`).
+    scope = None
+    kind = None
+    inputs = set()
+    declared = 0
+    for number, line in enumerate(PUBLIC_TS.read_text(encoding="utf-8").splitlines(), 1):
+        header = re.match(r"export (interface|type) (\w+)", line)
+        if header:
+            kind, name = header.groups()
+            scope = name if name.endswith("Input") else None
+            if scope:
+                inputs.add(scope)
+        if scope:
+            for match in re.finditer(r"_sec\??:\s*([^;}]*)", line):
+                declared += 1
+                if "string" not in match.group(1):
+                    problems.append(f"types.d.ts:{number} ({scope}): {line.strip()}")
+        if scope and (line == "}" or (kind == "type" and line.rstrip().endswith(";"))):
+            scope = None
+    assert len(inputs) > 20 and declared > 0
+    assert problems == []

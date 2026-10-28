@@ -606,7 +606,7 @@ export interface FrameAtOutput {
 
 export interface RefineTemporalBeamInput {
   source: string;
-  windows: Array<{ start_sec: number; end_sec: number }>;
+  windows: Array<{ start_sec: number | string; end_sec: number | string }>;
   /** Child ranges per window (default 4, maximum 8; larger values are clamped). */
   fanout?: number;
   /** Thumbnails per child (default 3, maximum 12; larger values are clamped). */
@@ -762,7 +762,7 @@ export interface TrackRegionEventsOutput {
 
 export interface InspectMomentsInput {
   source: string;
-  moments: Array<{ timestamp_sec: number; label?: string }>;
+  moments: Array<{ timestamp_sec: number | string; label?: string }>;
   /** Seconds of context before each moment (default 4). Also accepts a timecode string in MM:SS.mmm form. */
   before_sec?: number | string;
   /** Seconds of context after each moment (default 4). Also accepts a timecode string in MM:SS.mmm form. */
@@ -808,7 +808,7 @@ export interface InspectMomentsOutput {
 export interface InspectWindowsInput {
   source: string;
   /** Absolute half-open source windows to inspect. */
-  windows: Array<{ start_sec: number; end_sec: number }>;
+  windows: Array<{ start_sec: number | string; end_sec: number | string }>;
   /** Sampling rate (default 4, maximum 30; larger values are clamped). */
   fps?: number;
   context_sec?: number | string;
@@ -1029,7 +1029,7 @@ export interface LoudnessTimelineInput {
   bpm?: number;
   start_sec?: number | string;
   end_sec?: number | string;
-  ignore_ranges?: Array<{ start_sec: number; end_sec: number; reason: string }>;
+  ignore_ranges?: Array<{ start_sec: number | string; end_sec: number | string; reason: string }>;
 }
 
 export interface LoudnessWindow {
@@ -1113,7 +1113,7 @@ export interface SpectrogramWindowInput {
   source: string;
   start_sec: number | string;
   end_sec: number | string;
-  marks?: SpectrogramMark[];
+  marks?: Array<{ time_sec: number | string; label: string }>;
 }
 
 export interface SpectrogramWindowOutput {
@@ -1218,8 +1218,8 @@ export interface LabelSoundsOutput {
 }
 
 export type SyncCueInput =
-  | { time_sec: number; t?: number; label?: string; band_hz?: AudioBandSelection }
-  | { t: number; time_sec?: number; label?: string; band_hz?: AudioBandSelection };
+  | { time_sec: number | string; t?: number; label?: string; band_hz?: AudioBandSelection }
+  | { t: number; time_sec?: number | string; label?: string; band_hz?: AudioBandSelection };
 
 export interface SyncCheckInput {
   source: string;
