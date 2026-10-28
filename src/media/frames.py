@@ -27,9 +27,12 @@ LAST_FRAME_LOOKBACKS_SEC = (0.5, 5.0)
 # frame_at decodes from this many seconds before the request; a window with no frame
 # start in it (one frame lasting longer than the window) is widened, and the last try starts at zero.
 FRAME_SHOWN_LOOKBACKS_SEC = (1.0, 10.0)
+# frame_at compares each frame's presentation time with the request; this float rounding
+# allowance is far below any frame timestamp tick, so a frame after the request never passes.
+FRAME_TIME_GUARD_SEC = 1e-9
 END_TOLERANCE_SEC = 0.001
 # Bump when the frame_at decode or filter chain changes, so saved PNGs made by the old chain are not reused.
-FRAME_AT_CACHE_VERSION = 2
+FRAME_AT_CACHE_VERSION = 3
 
 
 def _fps_if_within_media(vpath: Path, timestamp_sec: float, cache: MediaCache) -> Optional[float]:
@@ -152,50 +155,77 @@ def _decode_one_frame(
     return proc, last_frame_fallback
 
 
-def _decode_frame_shown_at(vpath: Path, time_sec: float, tmp_file: Path, vf: str) -> "subprocess.CompletedProcess[str]":
-    """Write the frame on screen at time_sec to tmp_file, filtered by vf.
+def _container_start_sec(vpath: Path) -> float:
+    """The container's start time: the time zero that FFmpeg's default clock uses, which
+    inspect_window and the other sampling tools count from. 0 when the file gives none."""
+    proc = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=start_time",
+         "-of", "default=noprint_wrappers=1:nokey=1", str(vpath)],
+        capture_output=True, text=True, timeout=Config.SUBPROCESS_TIMEOUT_SEC, check=False,
+    )
+    raw = proc.stdout.strip()
+    if proc.returncode == 0 and raw == "N/A":
+        return 0.0
+    try:
+        value = float(raw)
+    except ValueError:
+        value = math.nan
+    if proc.returncode != 0 or not math.isfinite(value):
+        raise MediaCorruptError(
+            f"ffprobe could not read the start time of {vpath}: {proc.stderr.strip()}",
+            {"video": str(vpath), "stderr": proc.stderr},
+        )
+    return value
 
-    That is the last frame starting at or before time_sec, so a variable-rate
-    video whose next frame comes much later still gives the frame covering the
-    request, not the next one. Decoding starts before the request and is trimmed
-    just after it. A window holding no frame start is widened. Before the first
-    frame, the first frame is the one shown.
+
+def _decode_frame_shown_at(
+    vpath: Path, time_sec: float, tmp_file: Path, vf: str, origin_sec: float,
+) -> float:
+    """Write the frame on screen at time_sec to tmp_file, filtered by vf, and return
+    that frame's presentation time on the origin_sec clock (the stream-start clock that
+    inspect_window counts from).
+
+    That is the last frame whose presentation time is at or before time_sec: a frame
+    exactly at time_sec counts, and no later frame is ever written. The decode keeps the
+    source clock (-copyts), so each frame's time is exact; -ss counts from the same origin.
+    Decoding starts before the request; a window holding no frame is widened. If no
+    frame is at or before time_sec, nothing is on screen yet and the request is out of range.
     """
-    end = time_sec + END_TOLERANCE_SEC
+    last_source_sec = origin_sec + time_sec + FRAME_TIME_GUARD_SEC
     for lookback_sec in (*FRAME_SHOWN_LOOKBACKS_SEC, time_sec):
-        start = max(0.0, time_sec - lookback_sec)
+        start = round(max(0.0, time_sec - lookback_sec), 6)
         proc = _run_ffmpeg_command(
             [
                 "ffmpeg", "-y", "-copyts",
-                "-ss", f"{start:.6f}", "-t", f"{end - start:.6f}",
+                "-ss", f"{start:.6f}",
+                # Input-side -t only bounds how far ffmpeg reads; the select decides the frame.
+                "-t", f"{time_sec - start + 1.0:.6f}",
                 "-i", str(vpath),
-                "-vf", f"trim=end={end:.6f},{vf}",
+                "-vf", f"select='lte(t,{last_source_sec:.9f})',{vf}",
                 "-fps_mode", "passthrough", "-update", "1",
                 str(tmp_file),
             ],
             vpath, time_sec, tmp_file,
         )
         if proc.returncode != 0:
-            break
+            _discard_file(tmp_file)
+            raise MediaCorruptError(
+                f"FFmpeg failed extracting frame at {time_sec:.2f}s: {proc.stderr.strip()}",
+                {"video": str(vpath), "stderr": proc.stderr}
+            )
         if tmp_file.exists():
-            return proc
-    proc = _run_ffmpeg_command(
-        [
-            "ffmpeg", "-y", "-copyts",
-            "-i", str(vpath),
-            "-vf", vf,
-            "-frames:v", "1", "-update", "1",
-            str(tmp_file),
-        ],
-        vpath, time_sec, tmp_file,
+            shown = parse_selected_frame_timestamp(proc.stderr, last=True)
+            if shown is None:
+                _discard_file(tmp_file)
+                raise MediaCorruptError(
+                    f"FFmpeg did not report the time of the frame at {time_sec:.2f}s",
+                    {"video": str(vpath), "stderr": proc.stderr}
+                )
+            return round(shown - origin_sec, 6)
+    raise ExtractionBoundsError(
+        f"no frame is on screen at time_sec {time_sec:g}: the first frame of this video starts later",
+        {"video": str(vpath), "time_sec": time_sec},
     )
-    if proc.returncode != 0 or not tmp_file.exists():
-        _discard_file(tmp_file)
-        raise MediaCorruptError(
-            f"FFmpeg failed extracting frame at {time_sec:.2f}s: {proc.stderr.strip()}",
-            {"video": str(vpath), "stderr": proc.stderr}
-        )
-    return proc
 
 
 def extract_single_frame(
@@ -354,6 +384,20 @@ def _crop_box(crop: Any, frame_width: int, frame_height: int) -> Optional[Dict[s
     return box
 
 
+def _has_no_video_stream(vpath: Path) -> bool:
+    """True only when ffprobe runs and lists no video stream, so a failed probe of
+    some other kind is not blamed on the file type."""
+    try:
+        proc = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v", "-show_entries", "stream=index",
+             "-of", "csv=p=0", str(vpath)],
+            capture_output=True, text=True, timeout=Config.SUBPROCESS_TIMEOUT_SEC, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return proc.returncode == 0 and not proc.stdout.strip()
+
+
 def extract_frame_at(
     video_path: Union[str, Path],
     time_sec: float,
@@ -370,14 +414,22 @@ def extract_frame_at(
     if cache is None:
         cache = MediaCache()
     vpath = Path(video_path).resolve()
-    meta = probe_video(str(vpath), cache=cache)
+    try:
+        meta = probe_video(str(vpath), cache=cache)
+    except MediaCorruptError as exc:
+        if _has_no_video_stream(vpath):
+            raise MediaCorruptError(
+                f"frame_at needs a file with a video stream, but source {vpath} has none (it is audio only); "
+                "pass a video file as source",
+                {"source": str(vpath)},
+            ) from exc
+        raise
 
     if not _is_finite_number(time_sec) or time_sec < 0:
         raise ExtractionBoundsError(f"time_sec must be a number of seconds >= 0 (got {time_sec!r})", {"time_sec": time_sec})
-    if time_sec > meta.duration_sec + END_TOLERANCE_SEC:
+    if time_sec > meta.duration_sec:
         raise ExtractionBoundsError(
-            f"time_sec {time_sec:g} is beyond the media duration {meta.duration_sec:.3f} s; "
-            f"use 0 <= time_sec <= {meta.duration_sec:.3f}",
+            f"time_sec {time_sec:g} is outside the valid range [0, {meta.duration_sec:.3f}] s",
             {"time_sec": time_sec, "duration_sec": meta.duration_sec},
         )
     box = _crop_box(crop, meta.width, meta.height)
@@ -400,8 +452,10 @@ def extract_frame_at(
         filters.append(f"scale={out_w}:{out_h}:flags=lanczos")
 
     fingerprint = cache.compute_fingerprint(str(vpath))
+    # The exact requested time is the key: a rounded time would let two requests on
+    # either side of a frame boundary share one saved frame, so the result would depend on call order.
     key = hashlib.sha256(json.dumps(
-        {"version": FRAME_AT_CACHE_VERSION, "time_sec": round(float(time_sec), 3), "crop": box, "scale": factor},
+        {"version": FRAME_AT_CACHE_VERSION, "time_sec": float(time_sec), "crop": box, "scale": factor},
         sort_keys=True, separators=(",", ":"),
     ).encode("utf-8")).hexdigest()[:16]
     frames_dir = cache.get_frames_dir(fingerprint, tag="frame_at")
@@ -417,11 +471,12 @@ def extract_frame_at(
             pass
 
     tmp_file = frames_dir / f"frame_at_{key}.{os.getpid()}_{uuid.uuid4().hex[:8]}.tmp.png"
-    proc = _decode_frame_shown_at(vpath, float(time_sec), tmp_file, ",".join(filters))
+    decoded = _decode_frame_shown_at(
+        vpath, float(time_sec), tmp_file, ",".join(filters), _container_start_sec(vpath),
+    )
     from PIL import Image
     with Image.open(tmp_file) as im:
         width, height = im.size
-    decoded = parse_selected_frame_timestamp(proc.stderr, last=True)
     result = {
         "frame_time_sec": decoded,
         "width": width,

@@ -299,3 +299,149 @@ def test_frame_at_uses_displayed_size_for_rotated_video(tmp_path, monkeypatch):
     assert result["isError"] is True
     text = result["content"][0]["text"]
     assert "crop.x + crop.width = 800 exceeds the frame width 720" in text
+
+
+BURN_PTS_FILTER = "drawtext=fontsize=28:fontcolor=white:box=1:boxcolor=black@0.7:x=8:y=8:text='%{pts\\:flt}'"
+
+
+def _render_burned_clip(path, duration=2.0, retime=None):
+    """320x240 25 fps test pattern with each frame's presentation time (s) burned in.
+    `retime` is an optional setpts expression that gives the frames irregular times."""
+    chain = ",".join(part for part in (retime, BURN_PTS_FILTER) if part)
+    subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi",
+         "-i", f"testsrc2=size=320x240:rate=25:duration={duration}",
+         "-vf", chain, "-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "ultrafast",
+         "-fps_mode", "passthrough", str(path)],
+        check=True,
+    )
+    return str(path)
+
+
+def _frames_by_pts(path):
+    """Every frame of the clip as RGB bytes, keyed by its presentation time (s), from one full decode."""
+    pts = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "frame=pts_time",
+         "-of", "default=noprint_wrappers=1:nokey=1", path],
+        capture_output=True, text=True, check=True,
+    ).stdout.split()
+    raw = subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-i", path, "-fps_mode", "passthrough",
+         "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+        capture_output=True, check=True,
+    ).stdout
+    size = len(raw) // len(pts)
+    return {round(float(t), 6): raw[i * size:(i + 1) * size] for i, t in enumerate(pts)}
+
+
+def _png_rgb(path):
+    with Image.open(path) as im:
+        return im.convert("RGB").tobytes()
+
+
+def test_frame_at_never_returns_a_frame_after_the_request(tmp_path, monkeypatch):
+    import src.executor.mcp_server as mcp_server
+    from src.core.config import Config
+
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    clip = _render_burned_clip(tmp_path / "vfr.mp4", retime="setpts='if(lt(N,5),N,20+N)'")
+    frames = _frames_by_pts(clip)
+    assert 0.16 in frames and 1.0 in frames
+
+    # 0.9994 is before the 1.0 s frame, so the 0.16 s frame is still on screen.
+    # 0.16 and 1.0 are exact presentation times, which count as on screen.
+    for time_sec, shown in [(0.9994, 0.16), (0.16, 0.16), (1.0, 1.0), (0.5, 0.16)]:
+        outcome = mcp_server.handle_call("frame_at", {"source": clip, "time_sec": time_sec})
+        assert outcome["ok"] is True
+        assert outcome["data"]["frame_time_sec"] == pytest.approx(shown, abs=1e-6), time_sec
+        assert _png_rgb(outcome["data"]["file_path"]) == frames[shown], time_sec
+
+
+def test_frame_at_result_does_not_depend_on_earlier_calls(tmp_path, monkeypatch):
+    import src.executor.mcp_server as mcp_server
+    from src.core.config import Config
+
+    clip = _render_burned_clip(tmp_path / "constant.mp4")
+    frames = _frames_by_pts(clip)
+
+    def call(time_sec, cache_name):
+        monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / cache_name)
+        outcome = mcp_server.handle_call("frame_at", {"source": clip, "time_sec": time_sec})
+        assert outcome["ok"] is True
+        return outcome["data"]
+
+    # 0.0399 is on the 0.0 s frame and 0.0401 on the 0.04 s frame; both round to 0.040 s.
+    cold = call(0.0399, "cold")
+    assert call(0.0401, "warm")["frame_time_sec"] == pytest.approx(0.04, abs=1e-6)
+    warm = call(0.0399, "warm")
+    assert cold["frame_time_sec"] == pytest.approx(0.0, abs=1e-6)
+    assert warm["frame_time_sec"] == pytest.approx(0.0, abs=1e-6)
+    assert _png_rgb(warm["file_path"]) == _png_rgb(cold["file_path"]) == frames[0.0]
+
+
+def test_frame_at_uses_the_stream_start_as_time_zero(tmp_path, monkeypatch):
+    import src.executor.mcp_server as mcp_server
+    from src.core.config import Config
+
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    base = _render_burned_clip(tmp_path / "base.mp4")
+    frames = _frames_by_pts(base)
+    late = str(tmp_path / "late.ts")
+    subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-y", "-itsoffset", "0.48", "-i", base, "-c", "copy",
+         "-muxdelay", "0", "-muxpreload", "0", "-f", "mpegts", late],
+        check=True,
+    )
+    start = float(subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=start_time", "-of", "csv=p=0", late],
+        capture_output=True, text=True, check=True,
+    ).stdout)
+    assert start == pytest.approx(0.48, abs=0.001)  # fixture check: the stream really starts at 0.48 s
+
+    # The other tools (inspect_window, probe_video) count time from the stream start, so
+    # time_sec 1.0 is the frame whose time is 1.0 s in that clock, not the raw pts 1.0 s frame.
+    outcome = mcp_server.handle_call("frame_at", {"source": late, "time_sec": 1.0})
+    assert outcome["ok"] is True
+    assert outcome["data"]["frame_time_sec"] == pytest.approx(1.0, abs=1e-6)
+    assert _png_rgb(outcome["data"]["file_path"]) == frames[1.0]
+
+    outcome = mcp_server.handle_call("frame_at", {"source": late, "time_sec": 0.9994})
+    assert outcome["data"]["frame_time_sec"] == pytest.approx(0.96, abs=1e-6)
+    assert _png_rgb(outcome["data"]["file_path"]) == frames[0.96]
+
+
+def test_frame_at_bounds_time_sec_to_the_media_duration(tmp_path, monkeypatch):
+    import src.executor.mcp_server as mcp_server
+    from src.core.config import Config
+
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    clip = _render_burned_clip(tmp_path / "two.mp4", duration=2.0)
+    frames = _frames_by_pts(clip)
+
+    with pytest.raises(ExtractionBoundsError, match=r"time_sec 2\.0005 is outside the valid range \[0, 2\.000\] s"):
+        mcp_server.handle_call("frame_at", {"source": clip, "time_sec": 2.0005})
+
+    # time_sec equal to the duration may return the last frame (time 1.96 s).
+    outcome = mcp_server.handle_call("frame_at", {"source": clip, "time_sec": 2.0})
+    assert outcome["data"]["frame_time_sec"] == pytest.approx(1.96, abs=1e-6)
+    assert _png_rgb(outcome["data"]["file_path"]) == frames[1.96]
+
+
+def test_frame_at_names_the_source_when_it_has_no_video(tmp_path, monkeypatch):
+    import src.executor.mcp_server as mcp_server
+    from src.core.config import Config
+
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    tone = tmp_path / "tone.m4a"
+    subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+         "-c:a", "aac", str(tone)],
+        check=True,
+    )
+    line = mcp_server.tool_call_response(1, "frame_at", {"source": str(tone), "time_sec": 0.5})
+    result = json.loads(line)["result"]
+    assert result["isError"] is True
+    text = result["content"][0]["text"]
+    assert "frame_at needs a file with a video stream" in text
+    assert "source" in text and tone.name in text
+    assert "This is a bug in the tool" not in text
