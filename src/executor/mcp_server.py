@@ -468,9 +468,6 @@ def _fit_transcript(data: Dict[str, Any]) -> None:
 _TIMECODE = re.compile(r"(?:(?:(?P<hours>\d+):)?(?P<minutes>\d+):)?(?P<seconds>\d+(?:\.\d+)?)")
 _KIND_WORDS = {"number": "a number", "integer": "an integer", "string": "a string", "boolean": "true or false",
                "object": "an object", "array": "a list", "null": "null"}
-# count_repetitions reads region as w/h; the track tools read width/height.
-_SHORT_REGION_TOOLS = frozenset({"count_repetitions"})
-_REGION_KEY_PAIRS = (("w", "width"), ("h", "height"))
 
 
 def _parse_timecode(text: str) -> Optional[float]:
@@ -608,10 +605,10 @@ def _read_timecodes(schema: Dict[str, Any], value: Any, key: str = "") -> Any:
 
 
 def _region_in_tool_keys(name: str, region: Dict[str, Any]) -> Dict[str, Any]:
-    """Rename w/h to width/height, or back, so the region has the keys this tool's code reads."""
-    short = name in _SHORT_REGION_TOOLS
+    """Rename w/h to width/height, or back, so the region has the keys this tool's code reads (count_repetitions reads w/h)."""
+    short = name == "count_repetitions"
     out = dict(region)
-    for short_key, long_key in _REGION_KEY_PAIRS:
+    for short_key, long_key in (("w", "width"), ("h", "height")):
         wanted, other = (short_key, long_key) if short else (long_key, short_key)
         if other in out and wanted not in out:
             out[wanted] = out.pop(other)
@@ -622,10 +619,9 @@ def _checked_arguments(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
     """Read timecodes and region keys, and reject any value that breaks the tool's schema (nulls included)."""
     schema = _TOOL_SCHEMAS[name]
     properties = schema.get("properties", {})
-    kept = dict(args)
+    kept = _read_timecodes(schema, args)
     if isinstance(kept.get("region"), dict) and "region" in properties:
         kept["region"] = _region_in_tool_keys(name, kept["region"])
-    kept = _read_timecodes(schema, kept)
     clamped = CLAMPED_ARGS.get(name, {})
     for key, value in kept.items():
         if key not in properties:
