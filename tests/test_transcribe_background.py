@@ -71,7 +71,7 @@ def _setup(monkeypatch, tmp_path):
     monkeypatch.setattr(asr, "_installed_whisper_models", lambda: [])
     source = tmp_path / "video.mp4"
     source.write_bytes(b"test media")
-    monkeypatch.setattr(asr, "probe_video", lambda path: _metadata(path))
+    monkeypatch.setattr(asr, "probe_video", lambda path, **kwargs: _metadata(path))
     return source
 
 
@@ -325,7 +325,7 @@ source = str(Path(sys.argv[2]).resolve())
 def unexpected_worker(*args, **kwargs):
     raise RuntimeError("the second process started an ASR worker")
 asr.transcribe_video = unexpected_worker
-asr.probe_video = lambda path: VideoMetadata(
+asr.probe_video = lambda path, **kwargs: VideoMetadata(
     source_path=path, duration_sec=120.0, width=640, height=360, fps=30.0,
     format_name="mp4", size_bytes=123, has_audio=True, audio_codec="aac",
     video_codec="h264", fingerprint="cached-transcript-media")
@@ -844,7 +844,7 @@ def test_request_transcription_substitutes_only_missing_models(monkeypatch, tmp_
         ggml.write_bytes(b"")
     monkeypatch.setattr(asr, "WHISPER_CPP_MODEL", ggml)
     monkeypatch.setattr("shutil.which", lambda name: "/bin/" + name)
-    monkeypatch.setattr(asr, "probe_video", lambda path: _metadata(path))
+    monkeypatch.setattr(asr, "probe_video", lambda path, **kwargs: _metadata(path))
     seen = []
 
     def stop(source_path, model_size, media_metadata=None):

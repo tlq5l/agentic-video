@@ -169,8 +169,8 @@ def test_slow_cloud_returns_finished_samples_within_about_50_s(red_box_video, sl
 @pytest.mark.parametrize("arguments, expected", [
     ({"conditions": []}, "conditions"),
     ({"conditions": ["a", "a"]}, "distinct"),
-    ({"conditions": ["a"], "interval_sec": 0.2}, "interval_sec must be from 1 to 600"),
-    ({"conditions": ["a"], "cooldown_sec": -1}, "cooldown_sec must be from 0 to 3600"),
+    ({"conditions": ["a"], "interval_sec": 0.2}, "'interval_sec' is below the minimum 1"),
+    ({"conditions": ["a"], "cooldown_sec": -1}, "'cooldown_sec' is below the minimum 0"),
     ({"conditions": ["a"], "start_sec": 50}, "start_sec must be from 0 up to before end_sec"),
     ({"conditions": ["a"], "start_sec": 0, "end_sec": 3}, "fewer than consecutive=2"),
 ])

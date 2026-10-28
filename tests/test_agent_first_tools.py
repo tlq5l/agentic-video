@@ -2,16 +2,18 @@
 
 import json
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
 
+from src.core.config import Config
 from src.core.errors import ExtractionBoundsError, MediaNotFoundError
 from src.core.types import VideoMetadata
 from src.executor import mcp_server
 from src.executor.mcp_server import (
     CLAMPED_ARGS, MAX_CUTS, MAX_LOUDNESS_WINDOWS, MAX_ONSETS, MAX_SYNC_ITEMS,
-    TOOLS_MANIFEST, format_tool_error, handle_call,
+    TOOLS_MANIFEST, format_tool_error, handle_call, tool_call_response,
 )
 from src.retrieval.engine import AgenticVideoEngine
 
@@ -201,7 +203,7 @@ def test_sync_check_errors_keep_their_order_with_the_cut_scan_in_the_background(
 
     # Audio decodes fine; the cut scan, on a file with no video, fails.
     for _ in range(2):
-        with pytest.raises(MediaCorruptError, match="No video streams found"):
+        with pytest.raises(MediaCorruptError, match="has audio only"):
             handle_call("sync_check", {"source": str(wav), "cues": [{"time_sec": 1.0}]})
     # Both would fail on a missing file; the audio error is the one reported, as before.
     with pytest.raises(MediaNotFoundError, match="Audio source file not found"):
@@ -255,6 +257,89 @@ def test_format_tool_error_includes_structured_details_and_source_hint():
     assert "media_duration_sec" in text and "ExtractionBoundsError" in text
     assert "existing local video file" in format_tool_error(MediaNotFoundError("Video file does not exist: x"))
     assert format_tool_error(ValueError("bad")) == "Error: bad"
+
+
+# ---- argument checks on a real clip ---------------------------------------
+# These run the real engine on a generated 3 s clip, so each wrong argument is
+# caught by the same path an agent's call takes.
+
+@pytest.fixture
+def real_clip(tmp_path, monkeypatch):
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    clip = tmp_path / "clip.mp4"
+    subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=10:duration=3",
+                    "-pix_fmt", "yuv420p", str(clip)], check=True)
+    return str(clip)
+
+
+@pytest.mark.parametrize("start,end", [("00:00.500", "00:01.500"), ("0:00:00.500", "0:00:01.500"), ("0.500", "1.500")])
+def test_timecode_strings_match_the_numeric_seconds(real_clip, start, end):
+    numeric = handle_call("inspect_window", {"source": real_clip, "start_sec": 0.5, "end_sec": 1.5})
+    timecode = handle_call("inspect_window", {"source": real_clip, "start_sec": start, "end_sec": end})
+    assert timecode["ok"] is True
+    assert timecode["data"] == numeric["data"]
+
+
+def test_timecode_strings_convert_inside_nested_window_items(real_clip):
+    numeric = handle_call("inspect_windows", {"source": real_clip, "windows": [{"start_sec": 0.5, "end_sec": 1.5}]})
+    timecode = handle_call("inspect_windows", {"source": real_clip, "windows": [{"start_sec": "00:00.500", "end_sec": "00:01.500"}]})
+    assert timecode["ok"] is True
+    assert timecode["data"] == numeric["data"]
+
+
+@pytest.mark.parametrize("tool,args,expected", [
+    ("detect_cuts", {"threshold": None}, "detect_cuts: argument 'threshold' must be a number (got None)"),
+    ("count_repetitions", {"fps": None}, "count_repetitions: argument 'fps' must be a number (got None)"),
+])
+def test_null_is_rejected_for_an_argument_whose_schema_has_no_null(real_clip, tool, args, expected):
+    with pytest.raises(ValueError, match=re.escape(expected)):
+        handle_call(tool, {"source": real_clip, **args})
+
+
+def test_null_end_sec_means_the_end_of_the_clip(real_clip):
+    result = handle_call("count_repetitions", {"source": real_clip, "start_sec": 0, "end_sec": None, "method": "motion"})
+    assert result["ok"] is True, result
+
+
+@pytest.mark.parametrize("tool,region", [
+    ("count_repetitions", {"x": 0, "y": 0, "width": 1, "height": 1}),
+    ("track_region_changes", {"x": 0, "y": 0, "w": 1, "h": 1}),
+    ("track_region_events", {"x": 0, "y": 0, "w": 1, "h": 1}),
+])
+def test_region_accepts_either_key_spelling(real_clip, tool, region):
+    args = {"source": real_clip, "region": region, "start_sec": 0, "end_sec": 2}
+    if tool == "count_repetitions":
+        args.update(method="motion")
+    else:
+        args.update(sample_fps=2)
+    result = handle_call(tool, args)
+    assert result["ok"] is True, result
+
+
+def test_bad_enum_value_names_the_allowed_values(real_clip):
+    with pytest.raises(ValueError, match=r"count_repetitions: argument 'method' is not one of the allowed values "
+                                         r"\(got 'fast'\); expected one of: auto, motion, embedding\."):
+        handle_call("count_repetitions", {"source": real_clip, "method": "fast"})
+
+
+BAD_ARGUMENT_CALLS = [
+    ("detect_cuts", {"threshold": "high"}, "detect_cuts: argument 'threshold' must be a number (got 'high')"),
+    ("detect_cuts", {"threshold": True}, "argument 'threshold' must be a number (got True)"),
+    ("inspect_window", {"start_sec": "soon", "end_sec": 1}, "argument 'start_sec' must be a number (got 'soon'); expected seconds as a number or a MM:SS.mmm timecode"),
+    ("inspect_window", {"start_sec": -1, "end_sec": 1}, "argument 'start_sec' is below the minimum 0 (got -1)"),
+    ("count_repetitions", {"method": "fast"}, "argument 'method' is not one of the allowed values"),
+    ("count_repetitions", {"region": {"x": 0, "y": 0, "w": 1}}, "argument 'region' does not match any allowed form; expected an object with key(s) x, y, w, h; or an object with key(s) x, y, width, height."),
+    ("inspect_windows", {"windows": [{"start_sec": 0}]}, "argument 'windows[0]' is missing required key(s): end_sec"),
+]
+
+
+@pytest.mark.parametrize("tool,args,expected", BAD_ARGUMENT_CALLS)
+def test_bad_argument_error_names_the_argument_and_is_not_a_tool_bug(real_clip, tool, args, expected):
+    result = json.loads(tool_call_response(1, tool, {"source": real_clip, **args}))["result"]
+    text = result["content"][0]["text"]
+    assert result["isError"] is True
+    assert expected in text
+    assert "bug in the tool" not in text
 
 
 # ---- actionable engine errors --------------------------------------------
