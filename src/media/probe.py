@@ -28,14 +28,12 @@ def _video_fps(video_stream: Dict[str, Any]) -> float:
     # Prefer avg_frame_rate if valid: r_frame_rate can report the timebase (e.g. 1000/1, 90000/1) for VFR.
     avg_fps = parse_fps(video_stream.get("avg_frame_rate", "0/0"))
     r_fps = parse_fps(video_stream.get("r_frame_rate", "0/0"))
-    if 0.0 < avg_fps <= 120.0:
-        return avg_fps
-    if 0.0 < r_fps <= 120.0:
-        return r_fps
-    if avg_fps > 0.0:
-        return avg_fps
-    if r_fps > 0.0:
-        return r_fps
+    for fps in (avg_fps, r_fps):
+        if 0.0 < fps <= 120.0:
+            return fps
+    for fps in (avg_fps, r_fps):
+        if fps > 0.0:
+            return fps
     return 25.0
 
 
@@ -68,8 +66,8 @@ def probe_video(
 ) -> VideoMetadata:
     """Probe a media file using ffprobe and return structured VideoMetadata.
 
-    A file with audio but no video raises MediaCorruptError unless allow_audio_only is set;
-    only the audio tools pass it. Reads from local MediaCache if available.
+    A file with audio but no video raises MediaCorruptError unless allow_audio_only is set.
+    Reads from local MediaCache if available.
     """
     path = Path(file_path).resolve()
     if not path.exists():
@@ -166,7 +164,7 @@ def probe_video(
         video_codec = video_stream.get("codec_name")
     else:
         width, height, fps, video_codec = 0, 0, 0.0, None
-    duration_sec = _duration_sec(video_stream if has_video else audio_stream, format_info)
+    duration_sec = _duration_sec(video_stream or audio_stream, format_info)
 
     format_name = format_info.get("format_name", "unknown")
     size_bytes = int(format_info.get("size", path.stat().st_size if path.exists() else 0))
