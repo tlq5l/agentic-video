@@ -12,4 +12,4 @@ Gotchas:
 - The frame is the one on screen at `time_sec`: the last frame starting at or before it. On variable-frame-rate video that can be much earlier than the request (a 0.2 s request after a gap can return the frame at 0.16 s), so read `frame_time_sec`.
 - Rotated video: `source_width`/`source_height`, the crop and the PNG are all in the displayed (rotated) frame, the same coordinates ffmpeg decodes.
 - The frame is converted to RGB before the crop, so a crop at an odd x or y has the same pixels as that region of the full frame.
-- Results are cached per source fingerprint, time (to 1 ms), crop and scale; a sidecar `.json` next to each PNG keeps `frame_time_sec`.
+- Results are cached per source fingerprint, exact requested time, crop and scale; a sidecar `.json` next to each PNG keeps `frame_time_sec`.

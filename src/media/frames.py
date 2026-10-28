@@ -192,8 +192,8 @@ def _decode_frame_shown_at(
     frame is at or before time_sec, nothing is on screen yet and the request is out of range.
     """
     last_source_sec = origin_sec + time_sec + FRAME_TIME_GUARD_SEC
-    for lookback_sec in (*FRAME_SHOWN_LOOKBACKS_SEC, time_sec):
-        start = round(max(0.0, time_sec - lookback_sec), 6)
+    starts = (round(max(0.0, time_sec - lookback_sec), 6) for lookback_sec in (*FRAME_SHOWN_LOOKBACKS_SEC, time_sec))
+    for start in dict.fromkeys(starts):
         proc = _run_ffmpeg_command(
             [
                 "ffmpeg", "-y", "-copyts",
@@ -353,15 +353,15 @@ def _whole_number(value: Any) -> Optional[int]:
 def _crop_box(crop: Any, frame_width: int, frame_height: int) -> Optional[Dict[str, int]]:
     if crop is None:
         return None
-    keys = ("x", "y", "width", "height")
-    if not isinstance(crop, dict) or set(crop) != set(keys):
+    minima = {"x": 0, "y": 0, "width": 1, "height": 1}
+    if not isinstance(crop, dict) or set(crop) != minima.keys():
         raise ExtractionBoundsError(
             'crop must be an object with exactly x, y, width and height in source pixels, '
             'e.g. {"x": 100, "y": 50, "width": 200, "height": 100}',
             {"crop": crop},
         )
     box: Dict[str, int] = {}
-    for key, minimum in (("x", 0), ("y", 0), ("width", 1), ("height", 1)):
+    for key, minimum in minima.items():
         value = _whole_number(crop[key])
         if value is None or value < minimum:
             raise ExtractionBoundsError(
@@ -451,16 +451,15 @@ def extract_frame_at(
     if factor != 1.0:
         filters.append(f"scale={out_w}:{out_h}:flags=lanczos")
 
-    fingerprint = cache.compute_fingerprint(str(vpath))
     # The exact requested time is the key: a rounded time would let two requests on
     # either side of a frame boundary share one saved frame, so the result would depend on call order.
     key = hashlib.sha256(json.dumps(
         {"version": FRAME_AT_CACHE_VERSION, "time_sec": float(time_sec), "crop": box, "scale": factor},
         sort_keys=True, separators=(",", ":"),
     ).encode("utf-8")).hexdigest()[:16]
-    frames_dir = cache.get_frames_dir(fingerprint, tag="frame_at")
+    frames_dir = cache.get_frames_dir(meta.fingerprint, tag="frame_at")
     out_file = frames_dir / f"frame_at_{key}.png"
-    sidecar = frames_dir / f"frame_at_{key}.json"
+    sidecar = out_file.with_suffix(".json")
 
     if out_file.exists() and sidecar.exists():
         try:
