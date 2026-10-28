@@ -798,6 +798,11 @@ def _dispatch(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
             d["tool_file"] = make_tool_file(res.contact_sheet_path)
         return {"ok": True, "data": d}
         
+    elif name == "frame_at":
+        data = engine.frame_at(time_sec=args.get("time_sec"), crop=args.get("crop"), scale=args.get("scale"))
+        data["tool_file"] = make_tool_file(data["file_path"])
+        return {"ok": True, "data": data}
+
     elif name == "detect_cuts":
         th = float(args.get("threshold", 0.25))
         start_sec = float(args.get("start_sec", 0.0))

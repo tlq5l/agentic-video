@@ -1,10 +1,13 @@
 """High-level frame extraction interface using two-stage seeking and caching."""
+import json
+import math
+import hashlib
 import os
 import time
 import uuid
 import subprocess
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from src.core.config import Config
 from src.core.errors import SubprocessTimeoutError, MediaCorruptError, DependencyNotFoundError, ExtractionBoundsError
@@ -22,6 +25,8 @@ from src.media.timing import parse_last_frame_duration, parse_selected_frame_tim
 # a longer audio track can't pass off an earlier frame as the requested moment.
 LAST_FRAME_LOOKBACKS_SEC = (0.5, 5.0)
 END_TOLERANCE_SEC = 0.001
+# Bump when the frame_at filter chain changes, so saved PNGs made by the old chain are not reused.
+FRAME_AT_CACHE_VERSION = 1
 
 
 def _fps_if_within_media(vpath: Path, timestamp_sec: float, cache: MediaCache) -> Optional[float]:
@@ -41,6 +46,97 @@ def _shows_at(stderr: str, timestamp_sec: float, fps: float) -> bool:
         return False
     duration = parse_last_frame_duration(stderr) or (1.0 / fps if fps > 0 else 0.0)
     return start + duration >= timestamp_sec - END_TOLERANCE_SEC
+
+
+def _decode_one_frame(
+    vpath: Path,
+    timestamp_sec: float,
+    tmp_file: Path,
+    vf: str,
+    output_args: List[str],
+    cache: MediaCache,
+    threads: Optional[int] = None,
+) -> Tuple["subprocess.CompletedProcess[str]", bool]:
+    """Write the frame shown at timestamp_sec to tmp_file, filtered by vf.
+
+    The output format follows tmp_file's extension. Returns the ffmpeg run and
+    whether the seek landed after the last frame, in which case the frame written
+    is that last frame (its time is read from the run's showinfo output).
+    """
+    pre_args, post_args = build_seek_arguments(timestamp_sec, margin_sec=5.0, strategy="two-stage")
+
+    def _discard_tmp() -> None:
+        if tmp_file.exists():
+            try:
+                tmp_file.unlink()
+            except Exception:
+                pass
+
+    def _run_ffmpeg(seek_args: List[str], one_frame: bool) -> "subprocess.CompletedProcess[str]":
+        cmd = ["ffmpeg", "-y", "-copyts"]
+        if threads is not None:
+            cmd.extend(["-threads", str(threads), "-filter_threads", str(threads)])
+        cmd.extend(seek_args)
+        cmd.extend(["-i", str(vpath)])
+        cmd.extend(post_args)
+        if one_frame:
+            cmd.extend(["-frames:v", "1"])
+        cmd.extend(["-vf", vf, *output_args, "-update", "1"])
+        if threads is not None:
+            # Input-side -threads bounds decoding; this bounds the encoder.
+            cmd.extend(["-threads", str(threads)])
+        cmd.append(str(tmp_file))
+        try:
+            return subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=Config.SUBPROCESS_TIMEOUT_SEC,
+                check=False
+            )
+        except FileNotFoundError as exc:
+            raise DependencyNotFoundError(
+                f"ffmpeg binary not found on system PATH: {exc}",
+                {"dependency": "ffmpeg"}
+            ) from exc
+        except subprocess.TimeoutExpired as exc:
+            _discard_tmp()
+            raise SubprocessTimeoutError(
+                f"FFmpeg timed out extracting frame at {timestamp_sec:.2f}s",
+                {"video": str(vpath), "timestamp": timestamp_sec}
+            ) from exc
+
+    proc = _run_ffmpeg(pre_args, one_frame=True)
+    last_frame_fallback = False
+    fps = None
+    if proc.returncode != 0 or not tmp_file.exists():
+        fps = _fps_if_within_media(vpath, timestamp_sec, cache)
+    if fps is not None:
+        # The seek landed after the last frame's start time (a video ends at its
+        # duration, but its last frame starts a frame earlier), so no frame was
+        # decoded. Show that last frame; decoded_timestamp/timestamp_delta below
+        # report which frame it really is.
+        _discard_tmp()
+        for lookback_sec in LAST_FRAME_LOOKBACKS_SEC:
+            window_start = max(0.0, timestamp_sec - lookback_sec)
+            window = ["-ss", f"{window_start:.3f}", "-t", f"{timestamp_sec - window_start:.3f}"]
+            retry = _run_ffmpeg(window, one_frame=False)
+            if retry.returncode == 0 and tmp_file.exists():
+                if _shows_at(retry.stderr, timestamp_sec, fps):
+                    proc = retry
+                    last_frame_fallback = True
+                # A frame that ended before the requested time means frames are missing
+                # (e.g. a truncated file): fail below rather than relabel it.
+                break
+            _discard_tmp()
+
+    if proc.returncode != 0 or not tmp_file.exists():
+        _discard_tmp()
+        raise MediaCorruptError(
+            f"FFmpeg failed extracting frame at {timestamp_sec:.2f}s: {proc.stderr.strip()}",
+            {"video": str(vpath), "stderr": proc.stderr}
+        )
+    return proc, last_frame_fallback
 
 
 def extract_single_frame(
@@ -100,85 +196,12 @@ def extract_single_frame(
             except Exception:
                 if attempt < 3:
                     time.sleep(0.015 * (attempt + 1))
-        
-    pre_args, post_args = build_seek_arguments(timestamp_sec, margin_sec=5.0, strategy="two-stage")
-    
+
     unique_suffix = f"{os.getpid()}_{uuid.uuid4().hex[:8]}"
     tmp_file = out_file.parent / f"{out_file.stem}.{unique_suffix}.tmp.jpg"
-    
-    vf = f"showinfo,scale={width}:-2"
-
-    def _discard_tmp() -> None:
-        if tmp_file.exists():
-            try:
-                tmp_file.unlink()
-            except Exception:
-                pass
-
-    def _run_ffmpeg(seek_args: List[str], one_frame: bool) -> "subprocess.CompletedProcess[str]":
-        cmd = ["ffmpeg", "-y", "-copyts"]
-        if threads is not None:
-            cmd.extend(["-threads", str(threads), "-filter_threads", str(threads)])
-        cmd.extend(seek_args)
-        cmd.extend(["-i", str(vpath)])
-        cmd.extend(post_args)
-        if one_frame:
-            cmd.extend(["-frames:v", "1"])
-        cmd.extend(["-vf", vf, "-q:v", "2", "-update", "1"])
-        if threads is not None:
-            # Input-side -threads bounds decoding; this bounds the JPEG encoder.
-            cmd.extend(["-threads", str(threads)])
-        cmd.append(str(tmp_file))
-        try:
-            return subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=Config.SUBPROCESS_TIMEOUT_SEC,
-                check=False
-            )
-        except FileNotFoundError as exc:
-            raise DependencyNotFoundError(
-                f"ffmpeg binary not found on system PATH: {exc}",
-                {"dependency": "ffmpeg"}
-            ) from exc
-        except subprocess.TimeoutExpired as exc:
-            _discard_tmp()
-            raise SubprocessTimeoutError(
-                f"FFmpeg timed out extracting frame at {timestamp_sec:.2f}s",
-                {"video": str(vpath), "timestamp": timestamp_sec}
-            ) from exc
-
-    proc = _run_ffmpeg(pre_args, one_frame=True)
-    last_frame_fallback = False
-    fps = None
-    if proc.returncode != 0 or not tmp_file.exists():
-        fps = _fps_if_within_media(vpath, timestamp_sec, cache)
-    if fps is not None:
-        # The seek landed after the last frame's start time (a video ends at its
-        # duration, but its last frame starts a frame earlier), so no frame was
-        # decoded. Show that last frame; decoded_timestamp/timestamp_delta below
-        # report which frame it really is.
-        _discard_tmp()
-        for lookback_sec in LAST_FRAME_LOOKBACKS_SEC:
-            window_start = max(0.0, timestamp_sec - lookback_sec)
-            window = ["-ss", f"{window_start:.3f}", "-t", f"{timestamp_sec - window_start:.3f}"]
-            retry = _run_ffmpeg(window, one_frame=False)
-            if retry.returncode == 0 and tmp_file.exists():
-                if _shows_at(retry.stderr, timestamp_sec, fps):
-                    proc = retry
-                    last_frame_fallback = True
-                # A frame that ended before the requested time means frames are missing
-                # (e.g. a truncated file): fail below rather than relabel it.
-                break
-            _discard_tmp()
-
-    if proc.returncode != 0 or not tmp_file.exists():
-        _discard_tmp()
-        raise MediaCorruptError(
-            f"FFmpeg failed extracting frame at {timestamp_sec:.2f}s: {proc.stderr.strip()}",
-            {"video": str(vpath), "stderr": proc.stderr}
-        )
+    proc, last_frame_fallback = _decode_one_frame(
+        vpath, timestamp_sec, tmp_file, f"showinfo,scale={width}:-2", ["-q:v", "2"], cache, threads
+    )
 
     if overlay_timestamp:
         apply_overlay_to_file(tmp_file, timestamp_sec=timestamp_sec)
@@ -223,6 +246,139 @@ def extract_single_frame(
         decoded_timestamp=decoded_timestamp,
         timestamp_delta=timestamp_delta,
     )
+
+
+def _is_finite_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def _whole_number(value: Any) -> Optional[int]:
+    """The value as an int when it is a whole number (2 or 2.0), else None."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return value if isinstance(value, int) else None
+
+
+def _crop_box(crop: Any, frame_width: int, frame_height: int) -> Optional[Dict[str, int]]:
+    if crop is None:
+        return None
+    keys = ("x", "y", "width", "height")
+    if not isinstance(crop, dict) or set(crop) != set(keys):
+        raise ExtractionBoundsError(
+            'crop must be an object with exactly x, y, width and height in source pixels, '
+            'e.g. {"x": 100, "y": 50, "width": 200, "height": 100}',
+            {"crop": crop},
+        )
+    box: Dict[str, int] = {}
+    for key, minimum in (("x", 0), ("y", 0), ("width", 1), ("height", 1)):
+        value = _whole_number(crop[key])
+        if value is None or value < minimum:
+            raise ExtractionBoundsError(
+                f"crop.{key} must be a whole number >= {minimum} in source pixels (got {crop[key]!r})",
+                {"crop": crop},
+            )
+        box[key] = value
+    if box["x"] + box["width"] > frame_width:
+        raise ExtractionBoundsError(
+            f"crop.x + crop.width = {box['x'] + box['width']} exceeds the frame width {frame_width}; "
+            f"use crop.x + crop.width <= {frame_width}",
+            {"crop": box, "frame_width": frame_width},
+        )
+    if box["y"] + box["height"] > frame_height:
+        raise ExtractionBoundsError(
+            f"crop.y + crop.height = {box['y'] + box['height']} exceeds the frame height {frame_height}; "
+            f"use crop.y + crop.height <= {frame_height}",
+            {"crop": box, "frame_height": frame_height},
+        )
+    return box
+
+
+def extract_frame_at(
+    video_path: Union[str, Path],
+    time_sec: float,
+    crop: Optional[Dict[str, Any]] = None,
+    scale: Optional[float] = None,
+    cache: Optional[MediaCache] = None,
+) -> Dict[str, Any]:
+    """One frame at its native resolution, optionally cropped (source pixels) and
+    upscaled with Lanczos, saved as a PNG under the cache's `frame_at` folder.
+
+    The same source, time, crop and scale reuse the saved file. Returns the
+    decoded frame's own time (frame_time_sec) and the size of the saved image.
+    """
+    if cache is None:
+        cache = MediaCache()
+    vpath = Path(video_path).resolve()
+    meta = probe_video(str(vpath), cache=cache)
+
+    if not _is_finite_number(time_sec) or time_sec < 0:
+        raise ExtractionBoundsError(f"time_sec must be a number of seconds >= 0 (got {time_sec!r})", {"time_sec": time_sec})
+    if time_sec > meta.duration_sec + END_TOLERANCE_SEC:
+        raise ExtractionBoundsError(
+            f"time_sec {time_sec:g} is beyond the media duration {meta.duration_sec:.3f} s; "
+            f"use 0 <= time_sec <= {meta.duration_sec:.3f}",
+            {"time_sec": time_sec, "duration_sec": meta.duration_sec},
+        )
+    box = _crop_box(crop, meta.width, meta.height)
+    factor = 1.0 if scale is None else scale
+    if not _is_finite_number(factor) or not 1.0 <= factor <= 4.0:
+        raise ExtractionBoundsError(
+            f"scale must be a number from 1 to 4 (got {scale!r}); omit it for the frame as it is",
+            {"scale": scale},
+        )
+    factor = float(factor)
+
+    source_w, source_h = (box["width"], box["height"]) if box else (meta.width, meta.height)
+    out_w, out_h = round(source_w * factor), round(source_h * factor)
+    # Convert to RGB before cropping: on the subsampled YUV frame an odd x or y shifts
+    # the chroma grid and changes the colours of the crop.
+    filters = ["showinfo", "format=rgb24"]
+    if box:
+        filters.append(f"crop={box['width']}:{box['height']}:{box['x']}:{box['y']}")
+    if factor != 1.0:
+        filters.append(f"scale={out_w}:{out_h}:flags=lanczos")
+
+    fingerprint = cache.compute_fingerprint(str(vpath))
+    key = hashlib.sha256(json.dumps(
+        {"version": FRAME_AT_CACHE_VERSION, "time_sec": round(float(time_sec), 3), "crop": box, "scale": factor},
+        sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()[:16]
+    frames_dir = cache.get_frames_dir(fingerprint, tag="frame_at")
+    out_file = frames_dir / f"frame_at_{key}.png"
+    sidecar = frames_dir / f"frame_at_{key}.json"
+
+    if out_file.exists() and sidecar.exists():
+        try:
+            cached = json.loads(sidecar.read_text(encoding="utf-8"))
+            if isinstance(cached, dict):
+                return {**cached, "file_path": str(out_file)}
+        except (OSError, ValueError):
+            pass
+
+    tmp_file = frames_dir / f"frame_at_{key}.{os.getpid()}_{uuid.uuid4().hex[:8]}.tmp.png"
+    proc, last_frame_fallback = _decode_one_frame(
+        vpath, float(time_sec), tmp_file, ",".join(filters), [], cache
+    )
+    from PIL import Image
+    with Image.open(tmp_file) as im:
+        width, height = im.size
+    decoded = parse_selected_frame_timestamp(proc.stderr, last=last_frame_fallback)
+    result = {
+        "frame_time_sec": decoded,
+        "width": width,
+        "height": height,
+        "source_width": meta.width,
+        "source_height": meta.height,
+        "crop": box,
+        "scale": factor,
+    }
+    os.replace(str(tmp_file), str(out_file))
+    sidecar_tmp = sidecar.with_suffix(f".{os.getpid()}_{uuid.uuid4().hex[:8]}.tmp")
+    sidecar_tmp.write_text(json.dumps(result), encoding="utf-8")
+    os.replace(str(sidecar_tmp), str(sidecar))
+    return {**result, "file_path": str(out_file)}
 
 
 def extract_window_frames(

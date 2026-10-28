@@ -1,8 +1,12 @@
 """Focused tests for the bounded multi-window inspection primitive."""
 
+import json
 import math
+import subprocess
+from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from src.core.errors import ExtractionBoundsError
 from src.core.types import FrameInfo, InspectionWindowResult, VideoMetadata
@@ -188,3 +192,51 @@ def test_executor_dispatch_for_inspect_windows(monkeypatch):
     )
     assert outcome["ok"] is True
     assert outcome["data"]["windows"][0]["input_indices"] == [0]
+
+
+def _write_testsrc_clip(path, duration=2.0):
+    subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi",
+         "-i", f"testsrc2=size=1280x720:rate=25:duration={duration}",
+         "-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "ultrafast", str(path)],
+        check=True,
+    )
+    return str(path)
+
+
+def test_frame_at_native_frame_crop_and_scale_end_to_end(tmp_path, monkeypatch):
+    import src.executor.mcp_server as mcp_server
+    from src.core.config import Config
+
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    clip = _write_testsrc_clip(tmp_path / "clip.mp4")
+
+    full = mcp_server.handle_call("frame_at", {"source": clip, "time_sec": 1.0})
+    assert full["ok"] is True
+    data = full["data"]
+    assert (data["source_width"], data["source_height"]) == (1280, 720)
+    assert (data["width"], data["height"]) == (1280, 720)
+    assert Path(data["file_path"]).suffix == ".png" and Path(data["file_path"]).exists()
+    assert abs(data["frame_time_sec"] - 1.0) <= 1 / 25
+    assert data["tool_file"]["mimeType"] == "image/png"
+
+    crop = {"x": 100, "y": 50, "width": 200, "height": 100}
+    cropped = mcp_server.handle_call("frame_at", {"source": clip, "time_sec": 1.0, "crop": crop, "scale": 2})
+    assert cropped["ok"] is True
+    cdata = cropped["data"]
+    assert (cdata["width"], cdata["height"]) == (400, 200)
+    assert cdata["crop"] == crop and cdata["scale"] == 2
+    with Image.open(cdata["file_path"]) as im:
+        assert im.format == "PNG" and im.size == (400, 200)
+    assert abs(cdata["frame_time_sec"] - 1.0) <= 1 / 25
+
+    near_end = mcp_server.handle_call("frame_at", {"source": clip, "time_sec": 1.99})
+    assert near_end["ok"] is True and abs(near_end["data"]["frame_time_sec"] - 1.99) <= 1 / 25
+
+    out_of_frame = {"x": 1200, "y": 0, "width": 200, "height": 100}
+    line = mcp_server.tool_call_response(1, "frame_at", {"source": clip, "time_sec": 1.0, "crop": out_of_frame})
+    result = json.loads(line)["result"]
+    assert result["isError"] is True
+    text = result["content"][0]["text"]
+    assert "crop" in text and "1280" in text
+    assert "This is a bug in the tool" not in text

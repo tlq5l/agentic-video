@@ -15,7 +15,7 @@ from src.core.config import Config
 from src.core.errors import ExtractionBoundsError, SubprocessTimeoutError
 from src.core.cache import MediaCache
 from src.media.probe import probe_video
-from src.media.frames import extract_window_frames
+from src.media.frames import extract_frame_at, extract_window_frames
 from src.media.sampling import sample_sparse_frames
 from src.media.contact_sheet import (
     generate_video_overview,
@@ -1100,6 +1100,15 @@ class AgenticVideoEngine:
             contact_sheet_path=sheet_path,
             estimated_vision_tokens=estimated_tokens
         )
+
+    def frame_at(
+        self,
+        time_sec: float,
+        crop: Optional[Dict[str, Any]] = None,
+        scale: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """One frame at native resolution, optionally cropped and upscaled, as a PNG."""
+        return extract_frame_at(self.source_path, time_sec, crop=crop, scale=scale, cache=self._cache)
 
     def detect_cuts(
         self,
