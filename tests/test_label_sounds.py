@@ -133,7 +133,7 @@ def test_refuses_without_credentials_before_sending_anything(siren_video):
 
 @pytest.mark.parametrize("arguments, expected", [
     ({"start_sec": 0, "end_sec": 0.5}, "at least 1 s after start_sec"),
-    ({"start_sec": 0, "end_sec": 6, "window_sec": 0.2}, "window_sec must be from 1 to 30"),
+    ({"start_sec": 0, "end_sec": 6, "window_sec": 0.2}, "'window_sec' is below the minimum 1"),
     ({"start_sec": 0, "end_sec": 6, "labels": ["siren", "siren"]}, "distinct"),
     ({"start_sec": 0, "end_sec": 6, "labels": []}, "non-empty"),
     ({"start_sec": 0, "end_sec": 400}, "windows requested; at most 60"),
