@@ -476,10 +476,11 @@ def _parse_timecode(text: str) -> Optional[float]:
     if match is None:
         return None
     hours, minutes = match["hours"], match["minutes"]
-    seconds = float(match["seconds"])
-    if (minutes is not None and seconds >= 60) or (hours is not None and int(minutes) >= 60):
+    # Range-check the whole-number digits: a fraction like .99999999999999999 rounds to 60.0 in float.
+    whole_seconds = int(match["seconds"].split(".")[0])
+    if (minutes is not None and whole_seconds >= 60) or (hours is not None and int(minutes) >= 60):
         return None
-    return int(hours or 0) * 3600 + int(minutes or 0) * 60 + seconds
+    return int(hours or 0) * 3600 + int(minutes or 0) * 60 + float(match["seconds"])
 
 
 def _schema_types(schema: Dict[str, Any]) -> List[str]:

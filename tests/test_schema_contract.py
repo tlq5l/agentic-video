@@ -4,6 +4,7 @@ import itertools
 import json
 import math
 import re
+import shutil
 import struct
 import subprocess
 import time
@@ -366,6 +367,9 @@ def test_timecode_strings_pass_the_published_input_schema_and_run(clips, tool, a
 # ---- timecodes: one published pattern, the server parser, and the TypeScript declarations ----
 
 TIMECODE_EDGE_CASES = ["59", "60", "0:59", "0:60", "1:99", "1:59:59.5", "1:60:00", "100:00", "12.", ".5", "", "1::2", " 1"]
+# Fractions that round up to 60.0 in float; the server must still accept them (seconds under 60).
+LONG_FRACTION_CASES = ["00:59.99999999999999999", "0:59.9999999999999999999", "1:59:59.99999999999999999",
+                       "59.99999999999999999", "12\n"]
 
 
 def _all_patterns(node):
@@ -403,17 +407,37 @@ def _published_timecode_pattern():
     return copies[0]
 
 
+def _node_timecode_matches(regex_source, texts):
+    """Run the TypeScript TIMECODE_PATTERN (its source text) in Node on each text; True/False per text."""
+    script = (
+        "const re = new RegExp(process.argv[1]);"
+        "const texts = JSON.parse(require('fs').readFileSync(0, 'utf8'));"
+        "process.stdout.write(JSON.stringify(texts.map((text) => re.test(text))));"
+    )
+    done = subprocess.run(["node", "-e", script, regex_source], input=json.dumps(list(texts)),
+                          capture_output=True, text=True, check=True)
+    return json.loads(done.stdout)
+
+
 def test_timecode_pattern_accepts_exactly_what_the_server_parses():
     pattern = _published_timecode_pattern()
-    assert pattern in ZOD_TS.read_text(encoding="utf-8")  # TIMECODE_PATTERN in mcp_definitions.ts
+    ts_source = ZOD_TS.read_text(encoding="utf-8")
+    assert pattern in ts_source  # TIMECODE_PATTERN in mcp_definitions.ts
 
     published = re.compile(pattern)
-    cases = list(TIMECODE_EDGE_CASES)
+    cases = list(TIMECODE_EDGE_CASES) + LONG_FRACTION_CASES
     for length in range(7):
         cases.extend("".join(chars) for chars in itertools.product("019:.5", repeat=length))
-    disagreements = [text for text in cases
-                     if bool(published.fullmatch(text)) != (_parse_timecode(text) is not None)]
-    assert disagreements == []
+
+    json_ok = {text: bool(published.fullmatch(text)) for text in cases}
+    parse_ok = {text: _parse_timecode(text) is not None for text in cases}
+    assert [text for text in cases if json_ok[text] != parse_ok[text]] == []
+
+    if shutil.which("node") is None:
+        pytest.skip("node is not installed, so the TypeScript regex was not run")
+    literal = re.search(r"const TIMECODE_PATTERN = /(.*)/;", ts_source).group(1)
+    node_ok = dict(zip(cases, _node_timecode_matches(literal, cases)))
+    assert [text for text in cases if node_ok[text] != json_ok[text]] == []
 
 
 def test_every_sec_input_takes_the_timecode_string_in_schema_and_declarations():
