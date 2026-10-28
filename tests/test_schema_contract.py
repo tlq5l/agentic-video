@@ -246,7 +246,6 @@ def test_detect_cuts_contract_tells_cuts_and_transitions_apart(monkeypatch):
 
 
 # ---- end-to-end checks: real results against the published schemas --------
-# Each test runs the real tools on small generated clips. Nothing is mocked.
 
 TOOL_SPECS = {tool["name"]: tool for tool in TOOLS_MANIFEST}
 
@@ -265,7 +264,7 @@ def _tone_with_bursts_wav(path, seconds=8, rate=44100):
         wav.setnchannels(1)
         wav.setsampwidth(2)
         wav.setframerate(rate)
-        wav.writeframes(bytes(samples))
+        wav.writeframes(samples)
 
 
 @pytest.fixture
@@ -310,7 +309,8 @@ LOCAL_CALLS = [
 
 
 def _output_problems(tool, data):
-    validator = jsonschema.validators.validator_for(TOOL_SPECS[tool]["outputSchema"])(TOOL_SPECS[tool]["outputSchema"])
+    schema = TOOL_SPECS[tool]["outputSchema"]
+    validator = jsonschema.validators.validator_for(schema)(schema)
     return [f"{'/'.join(map(str, error.path)) or '(root)'}: {error.message}" for error in validator.iter_errors(data)][:5]
 
 
