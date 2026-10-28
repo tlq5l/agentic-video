@@ -106,8 +106,10 @@ export interface ProbeVideoOutput {
   has_audio: boolean;
   /** False for audio-only files: width, height and fps are 0, and the visual tools refuse the file. */
   has_video: boolean;
-  audio_codec?: string;
-  video_codec?: string;
+  /** Null when the file has no audio track. */
+  audio_codec: string | null;
+  /** Null for audio-only files. */
+  video_codec: string | null;
   fingerprint: string;
   /** Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument. */
   note?: string;
