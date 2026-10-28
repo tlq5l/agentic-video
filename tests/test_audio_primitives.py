@@ -306,6 +306,7 @@ def test_visual_tools_refuse_audio_only_m4a_with_audio_only_message(monkeypatch,
     source = _audio_only_m4a(tmp_path)
 
     for name, args in [("contact_sheet", {"source": source}),
+                       ("check_frame_cadence", {"source": source}),
                        ("sync_check", {"source": source, "cues": [{"time_sec": 1.0}]})]:
         response = json.loads(tool_call_response(1, name, args))
         assert response["result"]["isError"] is True, name
