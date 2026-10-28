@@ -240,3 +240,62 @@ def test_frame_at_native_frame_crop_and_scale_end_to_end(tmp_path, monkeypatch):
     text = result["content"][0]["text"]
     assert "crop" in text and "1280" in text
     assert "This is a bug in the tool" not in text
+
+
+def _write_variable_rate_clip(path):
+    """1280x720 clip with frames at 0, 0.04, ..., 0.16 s, then the next frame at 1.0 s."""
+    subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi",
+         "-i", "testsrc2=size=1280x720:rate=25:duration=2",
+         "-vf", "setpts='if(lt(N,5),N,20+N)'",
+         "-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "ultrafast",
+         "-fps_mode", "passthrough", str(path)],
+        check=True,
+    )
+    return str(path)
+
+
+def test_frame_at_picks_frame_covering_request_on_variable_rate_video(tmp_path, monkeypatch):
+    import src.executor.mcp_server as mcp_server
+    from src.core.config import Config
+
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    clip = _write_variable_rate_clip(tmp_path / "vfr.mp4")
+
+    outcome = mcp_server.handle_call("frame_at", {"source": clip, "time_sec": 0.2})
+    assert outcome["ok"] is True
+    assert outcome["data"]["frame_time_sec"] == pytest.approx(0.16, abs=0.001)
+
+
+def test_frame_at_uses_displayed_size_for_rotated_video(tmp_path, monkeypatch):
+    import src.executor.mcp_server as mcp_server
+    from src.core.config import Config
+
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    source = _write_testsrc_clip(tmp_path / "clip.mp4")
+    rotated = str(tmp_path / "rotated.mp4")
+    subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-y", "-display_rotation:v:0", "90",
+         "-i", source, "-c", "copy", rotated],
+        check=True,
+    )
+
+    full = mcp_server.handle_call("frame_at", {"source": rotated, "time_sec": 1.0})
+    assert full["ok"] is True
+    data = full["data"]
+    assert (data["source_width"], data["source_height"]) == (720, 1280)
+    with Image.open(data["file_path"]) as im:
+        assert im.size == (720, 1280)
+
+    crop = {"x": 600, "y": 100, "width": 120, "height": 200}
+    cropped = mcp_server.handle_call("frame_at", {"source": rotated, "time_sec": 1.0, "crop": crop, "scale": 2})
+    assert cropped["ok"] is True
+    with Image.open(cropped["data"]["file_path"]) as im:
+        assert im.size == (240, 400)
+
+    too_wide = {"x": 700, "y": 0, "width": 100, "height": 100}
+    line = mcp_server.tool_call_response(1, "frame_at", {"source": rotated, "time_sec": 1.0, "crop": too_wide})
+    result = json.loads(line)["result"]
+    assert result["isError"] is True
+    text = result["content"][0]["text"]
+    assert "crop.x + crop.width = 800 exceeds the frame width 720" in text

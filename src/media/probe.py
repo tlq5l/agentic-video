@@ -24,9 +24,29 @@ def parse_fps(fps_str: str) -> float:
         return 0.0
 
 
+METADATA_CACHE_NAME = "metadata_display_size"
+
+
+def _is_quarter_turn(video_stream: Dict[str, Any]) -> bool:
+    """True when the stream is rotated 90 or 270 degrees, so its width and height swap on screen."""
+    angle = None
+    for side_data in video_stream.get("side_data_list") or []:
+        if isinstance(side_data, dict) and "rotation" in side_data:
+            angle = side_data["rotation"]
+            break
+    if angle is None:
+        angle = (video_stream.get("tags") or {}).get("rotate")
+    try:
+        return abs(float(angle or 0)) % 180 == 90
+    except (TypeError, ValueError):
+        return False
+
+
 def probe_video(file_path: str, cache: Optional[MediaCache] = None, use_cache: bool = True) -> VideoMetadata:
     """Probe video file using ffprobe and return structured VideoMetadata.
-    
+
+    width and height are the displayed size: FFmpeg applies the rotation when it
+    decodes, so frames come out in that size.
     Reads from local MediaCache if available.
     """
     path = Path(file_path).resolve()
@@ -47,7 +67,7 @@ def probe_video(file_path: str, cache: Optional[MediaCache] = None, use_cache: b
 
     fingerprint = cache.compute_fingerprint(str(path))
     if use_cache:
-        cached_data = cache.load_json(fingerprint, "metadata")
+        cached_data = cache.load_json(fingerprint, METADATA_CACHE_NAME)
         if cached_data:
             return VideoMetadata(**cached_data)
 
@@ -115,6 +135,8 @@ def probe_video(file_path: str, cache: Optional[MediaCache] = None, use_cache: b
     # Resolution
     width = int(video_stream.get("width", 0))
     height = int(video_stream.get("height", 0))
+    if _is_quarter_turn(video_stream):
+        width, height = height, width
 
     # FPS: prefer avg_frame_rate if valid, as r_frame_rate can report timebase (e.g. 1000/1, 90000/1) for VFR
     avg_fps = parse_fps(video_stream.get("avg_frame_rate", "0/0"))
@@ -165,5 +187,5 @@ def probe_video(file_path: str, cache: Optional[MediaCache] = None, use_cache: b
         fingerprint=fingerprint
     )
 
-    cache.save_json(fingerprint, "metadata", metadata.to_dict())
+    cache.save_json(fingerprint, METADATA_CACHE_NAME, metadata.to_dict())
     return metadata

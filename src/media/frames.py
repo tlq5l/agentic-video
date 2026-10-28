@@ -24,9 +24,12 @@ from src.media.timing import parse_last_frame_duration, parse_selected_frame_tim
 # requested time (its start plus its duration reaches it), so a truncated file or
 # a longer audio track can't pass off an earlier frame as the requested moment.
 LAST_FRAME_LOOKBACKS_SEC = (0.5, 5.0)
+# frame_at decodes from this many seconds before the request; a window with no frame
+# start in it (one frame lasting longer than the window) is widened, and the last try starts at zero.
+FRAME_SHOWN_LOOKBACKS_SEC = (1.0, 10.0)
 END_TOLERANCE_SEC = 0.001
-# Bump when the frame_at filter chain changes, so saved PNGs made by the old chain are not reused.
-FRAME_AT_CACHE_VERSION = 1
+# Bump when the frame_at decode or filter chain changes, so saved PNGs made by the old chain are not reused.
+FRAME_AT_CACHE_VERSION = 2
 
 
 def _fps_if_within_media(vpath: Path, timestamp_sec: float, cache: MediaCache) -> Optional[float]:
@@ -48,6 +51,41 @@ def _shows_at(stderr: str, timestamp_sec: float, fps: float) -> bool:
     return start + duration >= timestamp_sec - END_TOLERANCE_SEC
 
 
+def _discard_file(path: Path) -> None:
+    if path.exists():
+        try:
+            path.unlink()
+        except Exception:
+            pass
+
+
+def _run_ffmpeg_command(
+    cmd: List[str],
+    vpath: Path,
+    timestamp_sec: float,
+    tmp_file: Path,
+) -> "subprocess.CompletedProcess[str]":
+    try:
+        return subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=Config.SUBPROCESS_TIMEOUT_SEC,
+            check=False
+        )
+    except FileNotFoundError as exc:
+        raise DependencyNotFoundError(
+            f"ffmpeg binary not found on system PATH: {exc}",
+            {"dependency": "ffmpeg"}
+        ) from exc
+    except subprocess.TimeoutExpired as exc:
+        _discard_file(tmp_file)
+        raise SubprocessTimeoutError(
+            f"FFmpeg timed out extracting frame at {timestamp_sec:.2f}s",
+            {"video": str(vpath), "timestamp": timestamp_sec}
+        ) from exc
+
+
 def _decode_one_frame(
     vpath: Path,
     timestamp_sec: float,
@@ -65,13 +103,6 @@ def _decode_one_frame(
     """
     pre_args, post_args = build_seek_arguments(timestamp_sec, margin_sec=5.0, strategy="two-stage")
 
-    def _discard_tmp() -> None:
-        if tmp_file.exists():
-            try:
-                tmp_file.unlink()
-            except Exception:
-                pass
-
     def _run_ffmpeg(seek_args: List[str], one_frame: bool) -> "subprocess.CompletedProcess[str]":
         cmd = ["ffmpeg", "-y", "-copyts"]
         if threads is not None:
@@ -86,25 +117,7 @@ def _decode_one_frame(
             # Input-side -threads bounds decoding; this bounds the encoder.
             cmd.extend(["-threads", str(threads)])
         cmd.append(str(tmp_file))
-        try:
-            return subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=Config.SUBPROCESS_TIMEOUT_SEC,
-                check=False
-            )
-        except FileNotFoundError as exc:
-            raise DependencyNotFoundError(
-                f"ffmpeg binary not found on system PATH: {exc}",
-                {"dependency": "ffmpeg"}
-            ) from exc
-        except subprocess.TimeoutExpired as exc:
-            _discard_tmp()
-            raise SubprocessTimeoutError(
-                f"FFmpeg timed out extracting frame at {timestamp_sec:.2f}s",
-                {"video": str(vpath), "timestamp": timestamp_sec}
-            ) from exc
+        return _run_ffmpeg_command(cmd, vpath, timestamp_sec, tmp_file)
 
     proc = _run_ffmpeg(pre_args, one_frame=True)
     last_frame_fallback = False
@@ -116,7 +129,7 @@ def _decode_one_frame(
         # duration, but its last frame starts a frame earlier), so no frame was
         # decoded. Show that last frame; decoded_timestamp/timestamp_delta below
         # report which frame it really is.
-        _discard_tmp()
+        _discard_file(tmp_file)
         for lookback_sec in LAST_FRAME_LOOKBACKS_SEC:
             window_start = max(0.0, timestamp_sec - lookback_sec)
             window = ["-ss", f"{window_start:.3f}", "-t", f"{timestamp_sec - window_start:.3f}"]
@@ -128,15 +141,61 @@ def _decode_one_frame(
                 # A frame that ended before the requested time means frames are missing
                 # (e.g. a truncated file): fail below rather than relabel it.
                 break
-            _discard_tmp()
+            _discard_file(tmp_file)
 
     if proc.returncode != 0 or not tmp_file.exists():
-        _discard_tmp()
+        _discard_file(tmp_file)
         raise MediaCorruptError(
             f"FFmpeg failed extracting frame at {timestamp_sec:.2f}s: {proc.stderr.strip()}",
             {"video": str(vpath), "stderr": proc.stderr}
         )
     return proc, last_frame_fallback
+
+
+def _decode_frame_shown_at(vpath: Path, time_sec: float, tmp_file: Path, vf: str) -> "subprocess.CompletedProcess[str]":
+    """Write the frame on screen at time_sec to tmp_file, filtered by vf.
+
+    That is the last frame starting at or before time_sec, so a variable-rate
+    video whose next frame comes much later still gives the frame covering the
+    request, not the next one. Decoding starts before the request and is trimmed
+    just after it. A window holding no frame start is widened. Before the first
+    frame, the first frame is the one shown.
+    """
+    end = time_sec + END_TOLERANCE_SEC
+    for lookback_sec in (*FRAME_SHOWN_LOOKBACKS_SEC, time_sec):
+        start = max(0.0, time_sec - lookback_sec)
+        proc = _run_ffmpeg_command(
+            [
+                "ffmpeg", "-y", "-copyts",
+                "-ss", f"{start:.6f}", "-t", f"{end - start:.6f}",
+                "-i", str(vpath),
+                "-vf", f"trim=end={end:.6f},{vf}",
+                "-fps_mode", "passthrough", "-update", "1",
+                str(tmp_file),
+            ],
+            vpath, time_sec, tmp_file,
+        )
+        if proc.returncode != 0:
+            break
+        if tmp_file.exists():
+            return proc
+    proc = _run_ffmpeg_command(
+        [
+            "ffmpeg", "-y", "-copyts",
+            "-i", str(vpath),
+            "-vf", vf,
+            "-frames:v", "1", "-update", "1",
+            str(tmp_file),
+        ],
+        vpath, time_sec, tmp_file,
+    )
+    if proc.returncode != 0 or not tmp_file.exists():
+        _discard_file(tmp_file)
+        raise MediaCorruptError(
+            f"FFmpeg failed extracting frame at {time_sec:.2f}s: {proc.stderr.strip()}",
+            {"video": str(vpath), "stderr": proc.stderr}
+        )
+    return proc
 
 
 def extract_single_frame(
@@ -358,13 +417,11 @@ def extract_frame_at(
             pass
 
     tmp_file = frames_dir / f"frame_at_{key}.{os.getpid()}_{uuid.uuid4().hex[:8]}.tmp.png"
-    proc, last_frame_fallback = _decode_one_frame(
-        vpath, float(time_sec), tmp_file, ",".join(filters), [], cache
-    )
+    proc = _decode_frame_shown_at(vpath, float(time_sec), tmp_file, ",".join(filters))
     from PIL import Image
     with Image.open(tmp_file) as im:
         width, height = im.size
-    decoded = parse_selected_frame_timestamp(proc.stderr, last=last_frame_fallback)
+    decoded = parse_selected_frame_timestamp(proc.stderr, last=True)
     result = {
         "frame_time_sec": decoded,
         "width": width,

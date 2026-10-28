@@ -1671,7 +1671,7 @@
     },
     "frame_at": {
       "name": "frame_at",
-      "description": "Use this when you need one exact frame at full size, or a crop to read small text; for many frames use inspect_window or contact_sheet. Returns one PNG of the frame shown at time_sec, at the source's native resolution, with no timestamp drawn on it. An optional crop (x, y, width, height in source pixels) cuts a rectangle out of that frame, and scale (1 to 4, default 1) enlarges the crop with Lanczos so small text is easier to read. frame_time_sec is the time of the frame actually decoded, which can differ slightly from time_sec. A repeat call with the same source, time_sec, crop and scale returns the saved file.",
+      "description": "Use this when you need one exact frame at full size, or a crop to read small text; for many frames use inspect_window or contact_sheet. Returns one PNG of the frame shown at time_sec, at the source's native resolution, with no timestamp drawn on it. An optional crop (x, y, width, height in source pixels) cuts a rectangle out of that frame, and scale (1 to 4, default 1) enlarges the crop with Lanczos so small text is easier to read. frame_time_sec is the start time of the frame actually decoded: the last frame starting at or before time_sec, so on variable-frame-rate video it can be well before time_sec. A repeat call with the same source, time_sec, crop and scale returns the saved file.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1687,7 +1687,7 @@
           },
           "crop": {
             "type": "object",
-            "description": "Optional rectangle in source pixels: x and y (top-left corner, >= 0) and width and height (>= 1). It must lie inside the frame: x + width <= source width and y + height <= source height. Omit to get the whole frame.",
+            "description": "Optional rectangle in source pixels: x and y (top-left corner, >= 0) and width and height (>= 1). It must lie inside the frame as displayed (rotation applied): x + width <= source width and y + height <= source height. Omit to get the whole frame.",
             "properties": {
               "x": { "type": "integer", "minimum": 0 },
               "y": { "type": "integer", "minimum": 0 },
@@ -1738,12 +1738,12 @@
           "tool_file": { "type": "object" },
           "frame_time_sec": {
             "type": ["number", "null"],
-            "description": "Presentation time of the decoded frame, from the decoder. Null when the decoder reports no time."
+            "description": "Start time of the frame shown at time_sec, from the decoder; it can be earlier than time_sec. Null when the decoder reports no time."
           },
           "width": { "type": "integer", "description": "Width of the saved PNG in pixels (the crop width times scale)." },
           "height": { "type": "integer", "description": "Height of the saved PNG in pixels (the crop height times scale)." },
-          "source_width": { "type": "integer", "description": "Native width of the source video in pixels." },
-          "source_height": { "type": "integer", "description": "Native height of the source video in pixels." },
+          "source_width": { "type": "integer", "description": "Width of the source video as displayed (rotation applied), in pixels." },
+          "source_height": { "type": "integer", "description": "Height of the source video as displayed (rotation applied), in pixels." },
           "crop": {
             "type": ["object", "null"],
             "description": "The crop applied, in source pixels; null when no crop was given.",

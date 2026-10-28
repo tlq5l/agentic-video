@@ -566,7 +566,7 @@ export interface FrameAtInput {
   source: string;
   /** Moment in seconds, from 0 to the media duration; the frame shown at that moment is returned. */
   time_sec: number;
-  /** Optional rectangle in source pixels; must lie inside the frame. Omit for the whole frame. */
+  /** Optional rectangle in source pixels, inside the frame as displayed (rotation applied). Omit for the whole frame. */
   crop?: { x: number; y: number; width: number; height: number };
   /** Enlargement of the (cropped) frame, 1 to 4 (default 1). Lanczos. */
   scale?: number;
@@ -584,7 +584,7 @@ export interface FrameAtOutput {
   /** The saved PNG on disk. */
   file_path: string;
   tool_file?: ToolFile;
-  /** Presentation time of the decoded frame; null when the decoder reports none. */
+  /** Start time of the frame shown at time_sec, from the decoder (can be earlier); null when the decoder reports none. */
   frame_time_sec: number | null;
   /** Saved PNG width in pixels (crop width x scale). */
   width: number;
