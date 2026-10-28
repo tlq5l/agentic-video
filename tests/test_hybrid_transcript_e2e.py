@@ -64,7 +64,7 @@ def test_hybrid_with_a_missing_interpreter_still_answers_with_keywords_every_tim
 
 
 def test_an_unknown_mode_is_rejected_with_a_clear_error(video):
-    with pytest.raises(ValueError, match=r"mode must be 'hybrid'.*'lexical'.*'semantic'"):
+    with pytest.raises(ValueError, match=r"search_transcript: argument 'mode' is not one of the allowed values \(got 'semantic'\); expected one of: hybrid, lexical"):
         handle_call("search_transcript", {"source": str(video), "query": "Supernova", "mode": "semantic"})
 
 

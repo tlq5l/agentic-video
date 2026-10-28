@@ -2,12 +2,13 @@
 import io
 import json
 import math
+import re
 import sys
 import base64
 import hashlib
 import os
 from pathlib import Path
-from typing import Dict, Any, Iterator, List, Optional
+from typing import Dict, Any, Iterator, List, Optional, Tuple
 
 from src.retrieval.engine import AgenticVideoEngine
 from src.core.config import Config
@@ -464,6 +465,178 @@ def _fit_transcript(data: Dict[str, Any]) -> None:
                 f"The listed segments cover 0 to {segments[keep - 1]['end_sec']:g} s.")
 
 
+_TIMECODE = re.compile(r"(?:(?:(?P<hours>\d+):)?(?P<minutes>\d+):)?(?P<seconds>\d+(?:\.\d+)?)")
+_KIND_WORDS = {"number": "a number", "integer": "an integer", "string": "a string", "boolean": "true or false",
+               "object": "an object", "array": "a list", "null": "null"}
+# count_repetitions reads region as w/h; the track tools read width/height.
+_SHORT_REGION_TOOLS = frozenset({"count_repetitions"})
+_REGION_KEY_PAIRS = (("w", "width"), ("h", "height"))
+
+
+def _parse_timecode(text: str) -> Optional[float]:
+    """Seconds from "SS.mmm", "MM:SS(.mmm)" or "HH:MM:SS(.mmm)", the format search_transcript shows; None otherwise."""
+    match = _TIMECODE.fullmatch(text.strip())
+    if match is None:
+        return None
+    hours, minutes = match["hours"], match["minutes"]
+    seconds = float(match["seconds"])
+    if (minutes is not None and seconds >= 60) or (hours is not None and int(minutes) >= 60):
+        return None
+    return int(hours or 0) * 3600 + int(minutes or 0) * 60 + seconds
+
+
+def _schema_types(schema: Dict[str, Any]) -> List[str]:
+    kinds = schema.get("type", [])
+    return kinds if isinstance(kinds, list) else [kinds]
+
+
+def _is_kind(value: Any, kind: str) -> bool:
+    if kind == "null":
+        return value is None
+    if kind == "boolean":
+        return isinstance(value, bool)
+    if isinstance(value, bool):
+        return False
+    if kind == "number":
+        return isinstance(value, (int, float))
+    if kind == "integer":
+        return isinstance(value, int) or (isinstance(value, float) and value.is_integer())
+    if kind == "string":
+        return isinstance(value, str)
+    if kind == "object":
+        return isinstance(value, dict)
+    if kind == "array":
+        return isinstance(value, list)
+    return True
+
+
+def _show(value: Any) -> str:
+    text = repr(value)
+    return text if len(text) <= 60 else text[:57] + "..."
+
+
+def _expected(schema: Dict[str, Any], key: str = "") -> str:
+    """Plain words for what a value must be, e.g. 'a number, at least 0 and at most 1'."""
+    if "enum" in schema:
+        return "one of: " + ", ".join(str(item) for item in schema["enum"])
+    kinds = _schema_types(schema)
+    words = _KIND_WORDS.get(kinds[0], "a value") if kinds else "a value"
+    if "object" in kinds and schema.get("required"):
+        words = f"an object with key(s) {', '.join(schema['required'])}"
+    if key.endswith("_sec") and "number" in kinds:
+        words = "seconds as a number or a MM:SS.mmm timecode"
+    bounds = []
+    if "minimum" in schema:
+        bounds.append(f"at least {schema['minimum']:g}")
+    if "exclusiveMinimum" in schema:
+        bounds.append(f"greater than {schema['exclusiveMinimum']:g}")
+    if "maximum" in schema:
+        bounds.append(f"at most {schema['maximum']:g}")
+    if "minLength" in schema:
+        bounds.append(f"at least {schema['minLength']} character(s)")
+    return f"{words}, {' and '.join(bounds)}" if bounds else words
+
+
+def _describe_alternative(schema: Dict[str, Any], key: str) -> str:
+    if "enum" in schema or _schema_types(schema):
+        return _expected(schema, key)
+    if "required" in schema:
+        return "an object with key(s) " + ", ".join(schema["required"])
+    return "a value"
+
+
+def _argument_problem(schema: Dict[str, Any], value: Any, key: str, check_range: bool = True) -> Optional[Tuple[str, str, str]]:
+    """Return (path, problem, expected) for the first way `value` breaks `schema`, or None.
+
+    `path` is "" for the value itself, or ".field" / "[index]" steps down to the part that is wrong.
+    """
+    for combinator in ("anyOf", "oneOf"):
+        alternatives = schema.get(combinator)
+        if not alternatives:
+            continue
+        problems = [_argument_problem(alt, value, key, check_range) for alt in alternatives]
+        if all(problems):
+            fitting = [problem for alt, problem in zip(alternatives, problems)
+                       if not _schema_types(alt) or any(_is_kind(value, kind) for kind in _schema_types(alt))]
+            if len(fitting) == 1:
+                return fitting[0]
+            return "", "does not match any allowed form", "; or ".join(_describe_alternative(alt, key) for alt in alternatives)
+    kinds = _schema_types(schema)
+    if kinds and not any(_is_kind(value, kind) for kind in kinds):
+        return "", f"must be {_KIND_WORDS.get(kinds[0], 'a value')} (got {_show(value)})", _expected(schema, key)
+    if "enum" in schema and value not in schema["enum"]:
+        return "", f"is not one of the allowed values (got {_show(value)})", _expected(schema, key)
+    if check_range and _is_kind(value, "number"):
+        if "minimum" in schema and value < schema["minimum"]:
+            return "", f"is below the minimum {schema['minimum']:g} (got {_show(value)})", _expected(schema, key)
+        if "exclusiveMinimum" in schema and value <= schema["exclusiveMinimum"]:
+            return "", f"must be greater than {schema['exclusiveMinimum']:g} (got {_show(value)})", _expected(schema, key)
+        if "maximum" in schema and value > schema["maximum"]:
+            return "", f"is above the maximum {schema['maximum']:g} (got {_show(value)})", _expected(schema, key)
+    if isinstance(value, str):
+        if "minLength" in schema and len(value) < schema["minLength"]:
+            return "", f"is shorter than {schema['minLength']} character(s)", _expected(schema, key)
+    if isinstance(value, dict):
+        missing = [item for item in schema.get("required", []) if item not in value]
+        if missing:
+            return "", f"is missing required key(s): {', '.join(missing)}", _expected(schema, key)
+        for field, sub in schema.get("properties", {}).items():
+            if field in value:
+                problem = _argument_problem(sub, value[field], field, check_range)
+                if problem:
+                    return (f".{field}{problem[0]}",) + problem[1:]
+    if isinstance(value, list) and isinstance(schema.get("items"), dict):
+        for index, item in enumerate(value):
+            problem = _argument_problem(schema["items"], item, key, check_range)
+            if problem:
+                return (f"[{index}]{problem[0]}",) + problem[1:]
+    return None
+
+
+def _read_timecodes(schema: Dict[str, Any], value: Any, key: str = "") -> Any:
+    """Turn timecode strings in *_sec number fields into seconds, at any depth the schema describes."""
+    if isinstance(value, dict) and isinstance(schema.get("properties"), dict):
+        return {field: _read_timecodes(schema["properties"][field], item, field) if field in schema["properties"] else item
+                for field, item in value.items()}
+    if isinstance(value, list) and isinstance(schema.get("items"), dict):
+        return [_read_timecodes(schema["items"], item) for item in value]
+    if isinstance(value, str) and key.endswith("_sec") and "number" in _schema_types(schema):
+        seconds = _parse_timecode(value)
+        if seconds is not None:
+            return seconds
+    return value
+
+
+def _region_in_tool_keys(name: str, region: Dict[str, Any]) -> Dict[str, Any]:
+    """Rename w/h to width/height, or back, so the region has the keys this tool's code reads."""
+    short = name in _SHORT_REGION_TOOLS
+    out = dict(region)
+    for short_key, long_key in _REGION_KEY_PAIRS:
+        wanted, other = (short_key, long_key) if short else (long_key, short_key)
+        if other in out and wanted not in out:
+            out[wanted] = out.pop(other)
+    return out
+
+
+def _checked_arguments(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+    """Drop null arguments, read timecodes and region keys, and reject any value that breaks the tool's schema."""
+    schema = _TOOL_SCHEMAS[name]
+    properties = schema.get("properties", {})
+    kept = {key: value for key, value in args.items() if value is not None}
+    if isinstance(kept.get("region"), dict) and "region" in properties:
+        kept["region"] = _region_in_tool_keys(name, kept["region"])
+    kept = _read_timecodes(schema, kept)
+    clamped = CLAMPED_ARGS.get(name, {})
+    for key, value in kept.items():
+        if key not in properties:
+            continue
+        problem = _argument_problem(properties[key], value, key, check_range=key not in clamped)
+        if problem:
+            path, reason, expected = problem
+            raise ValueError(f"{name}: argument '{key}{path}' {reason}; expected {expected}.")
+    return kept
+
+
 def handle_call(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
     """Validate the call, download URL sources, clamp over-cap arguments, and dispatch to AgenticVideoEngine."""
     if name not in _TOOL_SCHEMAS:
@@ -478,6 +651,7 @@ def handle_call(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
                 if "source" in missing else "")
         raise ValueError(f"{name} is missing required argument(s): {', '.join(missing)}. Required: {', '.join(required)}.{hint}")
     unknown = sorted(set(args) - set(schema.get("properties", {})))
+    args = _checked_arguments(name, args)
     url_args = {key: args[key] for key in ("source", "compare_to")
                 if isinstance(args.get(key), str) and fetch.is_url(args[key])}
     if url_args:

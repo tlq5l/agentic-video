@@ -588,37 +588,73 @@
             "minimum": 0
           },
           "region": {
-            "description": "Rectangle that contains the repeating motion, as fractions of the frame: x, y (top-left) and w, h (size), with x+w <= 1 and y+h <= 1. Uses w/h, not width/height. Omit for the whole frame.",
-            "type": "object",
-            "properties": {
-              "x": {
-                "type": "number",
-                "minimum": 0,
-                "maximum": 1
+            "description": "Rectangle that contains the repeating motion, as fractions of the frame: x, y (top-left) and w, h (size), with x+w <= 1 and y+h <= 1. Uses w/h; width/height with the same meaning is also accepted. Omit for the whole frame.",
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "y": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "w": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "h": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                },
+                "required": [
+                  "x",
+                  "y",
+                  "w",
+                  "h"
+                ],
+                "additionalProperties": false
               },
-              "y": {
-                "type": "number",
-                "minimum": 0,
-                "maximum": 1
-              },
-              "w": {
-                "type": "number",
-                "minimum": 0,
-                "maximum": 1
-              },
-              "h": {
-                "type": "number",
-                "minimum": 0,
-                "maximum": 1
+              {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "y": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "width": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "height": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                },
+                "required": [
+                  "x",
+                  "y",
+                  "width",
+                  "height"
+                ],
+                "additionalProperties": false
               }
-            },
-            "required": [
-              "x",
-              "y",
-              "w",
-              "h"
-            ],
-            "additionalProperties": false
+            ]
           },
           "fps": {
             "description": "Sampling rate, default 10. Larger values than 15 are clamped to 15 and the result says so.",
@@ -1384,7 +1420,75 @@
           "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
           "start_sec": { "type": "number", "minimum": 0, "description": "Start of the range in seconds." },
           "end_sec": { "type": "number", "minimum": 0, "description": "End of the range in seconds; must be within the video." },
-          "region": { "type": "object", "properties": { "x": { "type": "number", "minimum": 0, "maximum": 1 }, "y": { "type": "number", "minimum": 0, "maximum": 1 }, "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }, "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 } }, "required": ["x", "y", "width", "height"], "additionalProperties": false, "description": "Rectangle to watch, as fractions of the frame: x, y (top-left) and width, height, with x+width <= 1 and y+height <= 1. Uses width/height, not w/h." },
+          "region": {
+            "description": "Rectangle to watch, as fractions of the frame: x, y (top-left) and width, height, with x+width <= 1 and y+height <= 1. Uses width/height, not w/h; w/h with the same meaning is also accepted.",
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "y": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "width": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 1
+                  },
+                  "height": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 1
+                  }
+                },
+                "required": [
+                  "x",
+                  "y",
+                  "width",
+                  "height"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "y": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "w": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 1
+                  },
+                  "h": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 1
+                  }
+                },
+                "required": [
+                  "x",
+                  "y",
+                  "w",
+                  "h"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
           "sample_fps": { "type": "number", "exclusiveMinimum": 0, "maximum": 10, "default": 0.25, "description": "Sampling rate (default 0.25, maximum 10; larger values are clamped and the result says so). Changes shorter than 1/sample_fps can be missed." },
           "frame_width": { "type": "integer", "minimum": 64, "maximum": 1920, "default": 640, "description": "Decoded frame width in pixels (default 640, maximum 1920; larger values are clamped)." },
           "min_change_score": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.02 },
@@ -1435,7 +1539,75 @@
           "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
           "start_sec": { "type": "number", "minimum": 0, "description": "Start of the range in seconds." },
           "end_sec": { "type": "number", "minimum": 0, "description": "End of the range in seconds; must be within the video." },
-          "region": { "type": "object", "properties": { "x": { "type": "number", "minimum": 0, "maximum": 1 }, "y": { "type": "number", "minimum": 0, "maximum": 1 }, "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }, "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 } }, "required": ["x", "y", "width", "height"], "additionalProperties": false, "description": "Rectangle to watch, as fractions of the frame: x, y (top-left) and width, height, with x+width <= 1 and y+height <= 1. Uses width/height, not w/h." },
+          "region": {
+            "description": "Rectangle to watch, as fractions of the frame: x, y (top-left) and width, height, with x+width <= 1 and y+height <= 1. Uses width/height, not w/h; w/h with the same meaning is also accepted.",
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "y": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "width": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 1
+                  },
+                  "height": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 1
+                  }
+                },
+                "required": [
+                  "x",
+                  "y",
+                  "width",
+                  "height"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "y": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "w": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 1
+                  },
+                  "h": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 1
+                  }
+                },
+                "required": [
+                  "x",
+                  "y",
+                  "w",
+                  "h"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
           "sample_fps": { "type": "number", "exclusiveMinimum": 0, "maximum": 10, "default": 0.25, "description": "Sampling rate (default 0.25, maximum 10; larger values are clamped and the result says so). Transitions shorter than 1/sample_fps can be missed." },
           "frame_width": { "type": "integer", "minimum": 64, "maximum": 1920, "default": 640, "description": "Decoded frame width in pixels (default 640, maximum 1920; larger values are clamped)." },
           "change_threshold": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.02 },
