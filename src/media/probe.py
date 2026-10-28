@@ -24,6 +24,24 @@ def parse_fps(fps_str: str) -> float:
         return 0.0
 
 
+METADATA_CACHE_NAME = "metadata_display_size"
+
+
+def _is_quarter_turn(video_stream: Dict[str, Any]) -> bool:
+    """True when the stream is rotated 90 or 270 degrees, so its width and height swap on screen."""
+    angle = None
+    for side_data in video_stream.get("side_data_list") or []:
+        if isinstance(side_data, dict) and "rotation" in side_data:
+            angle = side_data["rotation"]
+            break
+    if angle is None:
+        angle = (video_stream.get("tags") or {}).get("rotate")
+    try:
+        return abs(float(angle or 0)) % 180 == 90
+    except (TypeError, ValueError):
+        return False
+
+
 def _video_fps(video_stream: Dict[str, Any]) -> float:
     # Prefer avg_frame_rate if valid: r_frame_rate can report the timebase (e.g. 1000/1, 90000/1) for VFR.
     avg_fps = parse_fps(video_stream.get("avg_frame_rate", "0/0"))
@@ -66,7 +84,9 @@ def probe_video(
 ) -> VideoMetadata:
     """Probe a media file using ffprobe and return structured VideoMetadata.
 
-    A file with audio but no video raises MediaCorruptError unless allow_audio_only is set.
+    width and height are the displayed size: FFmpeg applies the rotation when it
+    decodes, so frames come out in that size. A file with audio but no video raises
+    MediaCorruptError unless allow_audio_only is set.
     Reads from local MediaCache if available.
     """
     path = Path(file_path).resolve()
@@ -87,7 +107,7 @@ def probe_video(
 
     fingerprint = cache.compute_fingerprint(str(path))
     if use_cache:
-        cached_data = cache.load_json(fingerprint, "metadata")
+        cached_data = cache.load_json(fingerprint, METADATA_CACHE_NAME)
         if cached_data:
             if not cached_data.get("has_video", True) and not allow_audio_only:
                 raise _audio_only_error(file_path, path)
@@ -160,6 +180,8 @@ def probe_video(
     if video_stream is not None:
         width = int(video_stream.get("width", 0))
         height = int(video_stream.get("height", 0))
+        if _is_quarter_turn(video_stream):
+            width, height = height, width
         fps = _video_fps(video_stream)
         video_codec = video_stream.get("codec_name")
     else:
@@ -187,5 +209,5 @@ def probe_video(
         has_video=has_video,
     )
 
-    cache.save_json(fingerprint, "metadata", metadata.to_dict())
+    cache.save_json(fingerprint, METADATA_CACHE_NAME, metadata.to_dict())
     return metadata

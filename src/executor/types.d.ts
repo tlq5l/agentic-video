@@ -562,6 +562,45 @@ export interface InspectWindowOutput {
 }
 
 // ============================================================================
+// frame_at
+// ============================================================================
+
+export interface FrameAtInput {
+  /** Video source path or URL */
+  source: string;
+  /** Moment in seconds, from 0 to the media duration; the frame shown at that moment is returned. */
+  time_sec: number;
+  /** Optional rectangle in source pixels, inside the frame as displayed (rotation applied). Omit for the whole frame. */
+  crop?: { x: number; y: number; width: number; height: number };
+  /** Enlargement of the (cropped) frame, 1 to 4 (default 1). Lanczos. */
+  scale?: number;
+}
+
+export interface FrameAtOutput {
+  /** The video URL you passed as `source`; only present when `source` was a URL. */
+  source_url?: string;
+  /** Cached local copy of `source_url`. */
+  local_path?: string;
+  status?: "in_progress";
+  retry_after_seconds?: number;
+  /** Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument. */
+  note?: string;
+  /** The saved PNG on disk. */
+  file_path: string;
+  tool_file?: ToolFile;
+  /** Start time of the frame shown at time_sec, from the decoder (can be earlier); null when the decoder reports none. */
+  frame_time_sec: number | null;
+  /** Saved PNG width in pixels (crop width x scale). */
+  width: number;
+  /** Saved PNG height in pixels (crop height x scale). */
+  height: number;
+  source_width: number;
+  source_height: number;
+  crop: { x: number; y: number; width: number; height: number } | null;
+  scale: number;
+}
+
+// ============================================================================
 // Tool 6: contact_sheet
 // ============================================================================
 
@@ -1286,6 +1325,9 @@ export interface AgenticVideoIntegration {
 
   /** Dense consecutive frames of one short window (about 150 frames per call). */
   inspect_window(input: InspectWindowInput): Promise<ToolResult<WithUrlSource<InspectWindowOutput>>>;
+
+  /** One frame at native resolution as a PNG, optionally cropped (source pixels) and upscaled 1-4x for small text. */
+  frame_at(input: FrameAtInput): Promise<ToolResult<WithUrlSource<FrameAtOutput>>>;
 
   /**
    * One grid image of evenly spaced frames with timestamps: the cheapest way to survey a video (samples up to 150).

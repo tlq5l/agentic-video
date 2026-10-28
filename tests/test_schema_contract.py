@@ -29,6 +29,7 @@ EXPECTED_TOOLS = {
     "inspect_moments",
     "inspect_windows",
     "inspect_window",
+    "frame_at",
     "detect_cuts",
     "check_frame_cadence",
     "audio_onsets",
