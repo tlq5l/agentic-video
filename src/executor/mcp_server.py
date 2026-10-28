@@ -538,7 +538,7 @@ def _dispatch(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
     engine = AgenticVideoEngine(source)
     
     if name == "probe_video":
-        meta = engine.probe()
+        meta = engine.probe(allow_audio_only=True)
         return {"ok": True, "data": meta.to_dict()}
         
     elif name == "transcribe":

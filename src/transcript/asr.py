@@ -183,7 +183,7 @@ def find_cached_transcript(
     if not p.exists():
         raise MediaNotFoundError(f"Source media not found: {source_path}")
 
-    meta = media_metadata or probe_video(str(p))
+    meta = media_metadata or probe_video(str(p), allow_audio_only=True)
     subtitle_path = _find_sidecar(p, subtitle_override)
     subtitle_fp = _subtitle_fingerprint(subtitle_path)
     cache = MediaCache()
@@ -1020,7 +1020,7 @@ def request_transcription(source_path: str, model_size: str) -> Dict[str, Any]:
         )
         return data
     p = Path(source_path).resolve()
-    meta = probe_video(str(p))
+    meta = probe_video(str(p), allow_audio_only=True)
     cached = find_cached_transcript(source_path, model_size, media_metadata=meta)
     if cached is not None:
         result, cached_model = cached
@@ -1154,7 +1154,7 @@ def transcribe_video(
     if not p.exists():
         raise MediaNotFoundError(f"Source media not found: {source_path}")
 
-    meta = probe_video(str(p))
+    meta = probe_video(str(p), allow_audio_only=True)
     sub_path = _find_sidecar(p, subtitle_override)
     subtitle_fp = _subtitle_fingerprint(sub_path)
     cache = MediaCache()

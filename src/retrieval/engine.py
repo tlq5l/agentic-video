@@ -71,12 +71,13 @@ class AgenticVideoEngine:
 
     @property
     def metadata(self) -> VideoMetadata:
-        if self._meta is None:
-            self._meta = probe_video(self.source_path, cache=self._cache)
-        return self._meta
+        return self.probe()
 
-    def probe(self) -> VideoMetadata:
-        return self.metadata
+    def probe(self, allow_audio_only: bool = False) -> VideoMetadata:
+        """Metadata for the source; audio-only files raise unless allow_audio_only is set."""
+        if self._meta is None or not (allow_audio_only or self._meta.has_video):
+            self._meta = probe_video(self.source_path, cache=self._cache, allow_audio_only=allow_audio_only)
+        return self._meta
 
     def transcribe(
         self,
