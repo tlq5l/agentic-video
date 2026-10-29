@@ -573,6 +573,12 @@ def _argument_problem(schema: Dict[str, Any], value: Any, key: str, check_range:
             if len(fitting) == 1:
                 return fitting[0]
             return "", "does not match any allowed form", "; or ".join(_describe_alternative(alt, key) for alt in alternatives)
+    # Length first, so an oversized string never reaches the pattern match or int().
+    if isinstance(value, str):
+        if "minLength" in schema and len(value) < schema["minLength"]:
+            return "", f"is shorter than {schema['minLength']} character(s)", _expected(schema, key)
+        if "maxLength" in schema and len(value) > schema["maxLength"]:
+            return "", f"is longer than {schema['maxLength']} character(s)", _expected(schema, key)
     kinds = _schema_types(schema)
     if kinds and not _accepts(schema, value):
         return "", f"must be {_KIND_WORDS.get(kinds[0], 'a value')} (got {_show(value)})", _expected(schema, key)
@@ -585,11 +591,6 @@ def _argument_problem(schema: Dict[str, Any], value: Any, key: str, check_range:
             return "", f"must be greater than {schema['exclusiveMinimum']:g} (got {_show(value)})", _expected(schema, key)
         if "maximum" in schema and value > schema["maximum"]:
             return "", f"is above the maximum {schema['maximum']:g} (got {_show(value)})", _expected(schema, key)
-    if isinstance(value, str):
-        if "minLength" in schema and len(value) < schema["minLength"]:
-            return "", f"is shorter than {schema['minLength']} character(s)", _expected(schema, key)
-        if "maxLength" in schema and len(value) > schema["maxLength"]:
-            return "", f"is longer than {schema['maxLength']} character(s)", _expected(schema, key)
     if isinstance(value, dict):
         missing = [item for item in schema.get("required", []) if item not in value]
         if missing:
