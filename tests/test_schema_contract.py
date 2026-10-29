@@ -368,6 +368,7 @@ def test_timecode_strings_pass_the_published_input_schema_and_run(clips, tool, a
 
 TIMECODE_EDGE_CASES = ["59", "60", "0:59", "0:60", "1:99", "1:59:59.5", "1:60:00", "100:00", "12.", ".5", "", "1::2", " 1"]
 # Fractions that round up to 60.0 in float; the server must still accept them (seconds under 60).
+LONG_TIMECODE_CASES = ["0" * 31 + "2", "0" * 32 + "2", "0" * 4300 + "2", "1:" + "0" * 40 + "5"]
 LONG_FRACTION_CASES = ["00:59.99999999999999999", "0:59.9999999999999999999", "1:59:59.99999999999999999",
                        "59.99999999999999999", "12\n"]
 
@@ -407,41 +408,59 @@ def _published_timecode_pattern():
     return copies[0]
 
 
-def _node_timecode_matches(regex_source, texts):
-    """Run the TypeScript TIMECODE_PATTERN (its source text) in Node on each text; True/False per text."""
+def _published_timecode_max_length():
+    """The one maxLength every *_sec property shares."""
+    contract = json.loads(CANONICAL.read_text(encoding="utf-8"))
+    lengths = {sub.get("maxLength")
+               for section in ("tools", "legacy_tools")
+               for tool in contract[section].values()
+               for _, sub in _sec_properties(tool["inputSchema"])}
+    assert lengths == {32}, lengths
+    return 32
+
+
+def _node_timecode_matches(regex_source, max_length, texts):
+    """Run the TypeScript TIMECODE_PATTERN (its source text) and length cap in Node on each text; True/False per text."""
     script = (
-        "const re = new RegExp(process.argv[1]);"
+        "const re = new RegExp(process.argv[1]); const max = Number(process.argv[2]);"
         "const texts = JSON.parse(require('fs').readFileSync(0, 'utf8'));"
-        "process.stdout.write(JSON.stringify(texts.map((text) => re.test(text))));"
+        "process.stdout.write(JSON.stringify(texts.map((text) => re.test(text) && text.length <= max)));"
     )
-    done = subprocess.run(["node", "-e", script, regex_source], input=json.dumps(list(texts)),
+    done = subprocess.run(["node", "-e", script, regex_source, str(max_length)], input=json.dumps(list(texts)),
                           capture_output=True, text=True, check=True)
     return json.loads(done.stdout)
 
 
 def test_timecode_pattern_accepts_exactly_what_the_server_parses():
     pattern = _published_timecode_pattern()
+    max_length = _published_timecode_max_length()
     ts_source = ZOD_TS.read_text(encoding="utf-8")
     assert pattern in ts_source  # TIMECODE_PATTERN in mcp_definitions.ts
 
     published = re.compile(pattern)
-    cases = list(TIMECODE_EDGE_CASES) + LONG_FRACTION_CASES
+    cases = list(TIMECODE_EDGE_CASES) + LONG_FRACTION_CASES + LONG_TIMECODE_CASES
     for length in range(7):
         cases.extend("".join(chars) for chars in itertools.product("019:.5", repeat=length))
 
-    json_ok = {text: bool(published.fullmatch(text)) for text in cases}
+    json_ok = {text: bool(published.fullmatch(text)) and len(text) <= max_length for text in cases}
     parse_ok = {text: _parse_timecode(text) is not None for text in cases}
     assert [text for text in cases if json_ok[text] != parse_ok[text]] == []
 
     if shutil.which("node") is None:
         pytest.skip("node is not installed, so the TypeScript regex was not run")
     literal = re.search(r"const TIMECODE_PATTERN = /(.*)/;", ts_source).group(1)
-    node_ok = dict(zip(cases, _node_timecode_matches(literal, cases)))
+    node_ok = dict(zip(cases, _node_timecode_matches(literal, max_length, cases)))
     assert [text for text in cases if node_ok[text] != json_ok[text]] == []
+
+
+def test_overlong_timecode_is_refused_and_the_error_names_the_parameter(clips):
+    with pytest.raises(ValueError, match="argument 'time_sec' is longer than 32"):
+        handle_call("frame_at", {"source": clips.video, "time_sec": "0" * 4300 + "2"})
 
 
 def test_every_sec_input_takes_the_timecode_string_in_schema_and_declarations():
     pattern = _published_timecode_pattern()
+    max_length = _published_timecode_max_length()
     contract = json.loads(CANONICAL.read_text(encoding="utf-8"))
 
     # Schema side: every *_sec input property, at any depth, takes a string that matches the shared pattern.
@@ -452,7 +471,7 @@ def test_every_sec_input_takes_the_timecode_string_in_schema_and_declarations():
             for path, sub in _sec_properties(tool["inputSchema"], f"{section}/{name}"):
                 checked.append(path)
                 kinds = sub.get("type") if isinstance(sub.get("type"), list) else [sub.get("type")]
-                if "string" not in kinds or sub.get("pattern") != pattern:
+                if "string" not in kinds or sub.get("pattern") != pattern or sub.get("maxLength") != max_length:
                     problems.append(path)
     assert checked and problems == []
 

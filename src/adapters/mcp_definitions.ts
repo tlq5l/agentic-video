@@ -8,9 +8,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-/** Seconds as a number, or a timecode string: "SS.mmm", "MM:SS.mmm" or "HH:MM:SS.mmm" (the form the tools print); minutes and seconds after a colon are 0-59. */
+/** Seconds as a number, or a timecode string of at most 32 characters: "SS.mmm", "MM:SS.mmm" or "HH:MM:SS.mmm" (the form the tools print); minutes and seconds after a colon are 0-59. */
 const TIMECODE_PATTERN = /^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\.[0-9]+)?|[0-9]+(?:\.[0-9]+)?)$/;
-const seconds = (number: z.ZodNumber) => z.union([number, z.string().regex(TIMECODE_PATTERN)]);
+const seconds = (number: z.ZodNumber) => z.union([number, z.string().regex(TIMECODE_PATTERN).max(32)]);
 
 /** Every tool's `source`: a local path, or a URL that the server downloads once and caches. */
 const SourceSchema = z.string().trim().min(1).describe(

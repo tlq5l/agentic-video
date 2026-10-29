@@ -466,12 +466,16 @@ def _fit_transcript(data: Dict[str, Any]) -> None:
 
 
 _TIMECODE = re.compile(r"(?:(?:(?P<hours>[0-9]+):)?(?P<minutes>[0-9]+):)?(?P<seconds>[0-9]+(?:\.[0-9]+)?)")
+# Longer timecode strings are refused (the published maxLength); this also keeps int() under Python's digit limit.
+_TIMECODE_MAX_LENGTH = 32
 _KIND_WORDS = {"number": "a number", "integer": "an integer", "string": "a string", "boolean": "true or false",
                "object": "an object", "array": "a list", "null": "null"}
 
 
 def _parse_timecode(text: str) -> Optional[float]:
     """Seconds from "SS.mmm", "MM:SS(.mmm)" or "HH:MM:SS(.mmm)", the format search_transcript shows; None otherwise."""
+    if len(text) > _TIMECODE_MAX_LENGTH:
+        return None
     match = _TIMECODE.fullmatch(text)
     if match is None:
         return None
@@ -584,6 +588,8 @@ def _argument_problem(schema: Dict[str, Any], value: Any, key: str, check_range:
     if isinstance(value, str):
         if "minLength" in schema and len(value) < schema["minLength"]:
             return "", f"is shorter than {schema['minLength']} character(s)", _expected(schema, key)
+        if "maxLength" in schema and len(value) > schema["maxLength"]:
+            return "", f"is longer than {schema['maxLength']} character(s)", _expected(schema, key)
     if isinstance(value, dict):
         missing = [item for item in schema.get("required", []) if item not in value]
         if missing:
