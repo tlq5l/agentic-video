@@ -21,6 +21,7 @@ import numpy as np
 from PIL import Image
 
 from src.core.config import Config
+from src.core.errors import as_dependency_error
 from src.core.types import FrameInfo, format_timestamp
 from src.media.contact_sheet import compose_contact_sheet
 from src.retrieval import periodicity
@@ -581,7 +582,7 @@ def submit(engine, **args):
             try:
                 result = count_video(engine, **args)
             except Exception as exc:
-                result = {"status": "error", "message": str(exc)}
+                result = {"status": "error", "message": str(as_dependency_error(exc))}
             with _jobs_lock:
                 _jobs[key] = result
         _worker = threading.Thread(target=work, name="repetition-count", daemon=True)

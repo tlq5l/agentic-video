@@ -6,9 +6,11 @@ started with the command the manifest says and driven over stdio.
 
 import json
 import os
+import queue
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import zipfile
 from pathlib import Path
@@ -86,36 +88,33 @@ def _talk_to_server(command: list, env: dict) -> dict:
     return replies
 
 
-def _talk_to_server_with_pause(command: list, env: dict) -> dict:
-    """One server session: probe_video, then count_repetitions twice, with a pause between the two.
+def _open_session(command: list, env: dict, stderr_log: Path):
+    """Start the server with stdin kept open. A reader thread queues each reply as it arrives."""
+    with stderr_log.open("w", encoding="utf-8") as err:
+        proc = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=err,
+                                text=True, env=env)
+    replies: queue.Queue = queue.Queue()
 
-    The first count_repetitions starts a background job and answers in_progress; the second, sent after the
-    pause, gets that job's final result. Both calls share one server process, so the job state is shared.
-    """
-    def line(message: dict) -> str:
-        return json.dumps(message) + "\n"
+    def read_replies():
+        for out_line in proc.stdout:
+            if out_line.strip():
+                replies.put(json.loads(out_line))
 
-    count_args = {"name": "count_repetitions", "arguments": {"source": str(SAMPLE_VIDEO)}}
-    proc = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                            text=True, env=env)
-    proc.stdin.write(line({"jsonrpc": "2.0", "id": 1, "method": "initialize",
-                           "params": {"protocolVersion": "2024-11-05", "capabilities": {},
-                                      "clientInfo": {"name": "test", "version": "0"}}}))
-    proc.stdin.write(line({"jsonrpc": "2.0", "method": "notifications/initialized"}))
-    proc.stdin.write(line({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
-                           "params": {"name": "probe_video", "arguments": {"source": str(SAMPLE_VIDEO)}}}))
-    proc.stdin.write(line({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": count_args}))
+    threading.Thread(target=read_replies, daemon=True).start()
+    return proc, replies
+
+
+def _send(proc, message: dict) -> None:
+    proc.stdin.write(json.dumps(message) + "\n")
     proc.stdin.flush()
-    time.sleep(3)  # the background job fails in well under a second; the pause lets it finish first
-    proc.stdin.write(line({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": count_args}))
-    stdout, stderr = proc.communicate(timeout=900)  # closes stdin, so the server sees end of input and exits
-    replies = {}
-    for out_line in stdout.splitlines():
-        if out_line.strip():
-            message = json.loads(out_line)
-            replies[message.get("id")] = message
-    assert {2, 3, 4} <= set(replies), f"server did not answer every request (exit {proc.returncode}):\n{stderr[-3000:]}"
-    return replies
+
+
+def _reply_to(replies: queue.Queue, request_id: int, timeout: float = 120) -> dict:
+    """Return the reply with this id. Raises queue.Empty if the server stays silent for `timeout` seconds."""
+    while True:
+        reply = replies.get(timeout=timeout)
+        if reply.get("id") == request_id:
+            return reply
 
 
 def test_manifest_fields_and_archive_contents(bundle):
@@ -155,7 +154,17 @@ def test_server_starts_from_the_manifest_and_lists_contract_tools(bundle):
     assert json.loads(probe["content"][0]["text"])["duration_sec"] == pytest.approx(10.0, abs=0.1)
 
 
-def test_missing_ffmpeg_error_tells_the_user_the_fix(bundle, tmp_path):
+@pytest.mark.parametrize("missing, path_extra", [
+    ("ffprobe", None),
+    pytest.param("ffmpeg", "ffprobe-only",
+                 marks=pytest.mark.skipif(shutil.which("ffprobe") is None, reason="no real ffprobe on this host to link to")),
+])
+def test_missing_ffmpeg_error_tells_the_user_the_fix(bundle, tmp_path, missing, path_extra):
+    """Missing ffprobe (no ffmpeg or ffprobe on PATH), and missing ffmpeg alone (ffprobe linked, ffmpeg absent).
+
+    Each case runs one server session: probe_video, then count_repetitions polled until it is no longer in_progress.
+    The final error from the background job must carry the install fix once.
+    """
     uv = shutil.which("uv")
     if uv is None:
         pytest.skip("uv is missing; the manifest runs the server with uv")
@@ -166,23 +175,58 @@ def test_missing_ffmpeg_error_tells_the_user_the_fix(bundle, tmp_path):
     empty_home.mkdir()
     cache = os.environ.get("UV_CACHE_DIR") or str(Path.home() / ".cache" / "uv")
     # PATH holds only uv's folder: no ffmpeg there, and /usr/bin (which holds ffmpeg on some hosts) is left out.
+    path_folders = [Path(uv).parent]
+    if path_extra == "ffprobe-only":
+        if shutil.which("ffmpeg", path=str(path_folders[0])) is not None:
+            pytest.skip("ffmpeg is in uv's folder, so it cannot go missing here")
+        only_ffprobe = tmp_path / "only-ffprobe"
+        only_ffprobe.mkdir()
+        (only_ffprobe / "ffprobe").symlink_to(shutil.which("ffprobe"))
+        path_folders.append(only_ffprobe)
     env = {
-        "PATH": str(Path(uv).parent),
+        "PATH": os.pathsep.join(str(folder) for folder in path_folders),
         "HOME": str(empty_home),
         "UV_CACHE_DIR": cache,
         "UV_PYTHON": sys.executable,
     }
-    replies = _talk_to_server_with_pause(_manifest_server_command(extracted), env)
+    proc, replies = _open_session(_manifest_server_command(extracted), env, tmp_path / "server-stderr.log")
+    try:
+        _send(proc, {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                     "params": {"protocolVersion": "2024-11-05", "capabilities": {},
+                                "clientInfo": {"name": "test", "version": "0"}}})
+        _reply_to(replies, 1)
+        _send(proc, {"jsonrpc": "2.0", "method": "notifications/initialized"})
+        _send(proc, {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                     "params": {"name": "probe_video", "arguments": {"source": str(SAMPLE_VIDEO)}}})
+        probe = _reply_to(replies, 2)["result"]
+        if missing == "ffprobe":
+            text = probe["content"][0]["text"]
+            assert probe.get("isError") is True
+            assert "ffprobe binary not found" in text
+            assert "brew install ffmpeg" in text
+            assert "restart Claude Desktop" in text
+        else:
+            assert not probe.get("isError"), probe  # ffprobe is linked here, so probe_video works
 
-    result = replies[2]["result"]
-    text = result["content"][0]["text"]
-    assert result.get("isError") is True
-    assert "ffprobe binary not found" in text
-    assert "brew install ffmpeg" in text
-    assert "restart Claude Desktop" in text
+        count_params = {"name": "count_repetitions", "arguments": {"source": str(SAMPLE_VIDEO)}}
+        deadline = time.monotonic() + 120
+        request_id = 3
+        while True:
+            _send(proc, {"jsonrpc": "2.0", "id": request_id, "method": "tools/call", "params": count_params})
+            reply_text = _reply_to(replies, request_id)["result"]["content"][0]["text"]
+            if json.loads(reply_text)["status"] != "in_progress":
+                break
+            assert time.monotonic() < deadline, f"count_repetitions still in_progress after 120 s: {reply_text}"
+            time.sleep(1)  # the job runs in a background thread; re-send the same call until it finishes
+            request_id += 1
+    finally:
+        proc.stdin.close()
+        try:
+            proc.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            proc.kill()
 
-    # Background tools (count_repetitions) run in a thread; their final error must carry the same fix.
-    polled = replies[4]["result"]["content"][0]["text"]
-    assert "ffprobe binary not found" in polled, polled
-    assert "brew install ffmpeg" in polled, polled
-    assert "restart Claude Desktop" in polled, polled
+    assert json.loads(reply_text)["status"] == "error", reply_text
+    assert f"{missing} binary not found" in reply_text, reply_text
+    assert reply_text.count("brew install ffmpeg") == 1, reply_text
+    assert reply_text.count("restart Claude Desktop") == 1, reply_text

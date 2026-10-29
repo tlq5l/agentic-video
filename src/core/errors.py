@@ -47,6 +47,17 @@ class DependencyNotFoundError(AgenticVideoError):
             message += self.FFMPEG_FIX
         super().__init__(message, details)
 
+def as_dependency_error(exc: BaseException) -> BaseException:
+    """Turn a plain 'ffmpeg not found' OSError from a subprocess call into DependencyNotFoundError.
+
+    Some call sites let Popen's FileNotFoundError escape unchanged. Translating it here means the
+    install fix comes from DependencyNotFoundError, once, for every caller. Other errors pass through.
+    """
+    if isinstance(exc, FileNotFoundError) and exc.filename in ("ffmpeg", "ffprobe"):
+        name = exc.filename
+        return DependencyNotFoundError(f"{name} binary not found on system PATH: {exc}", {"dependency": name})
+    return exc
+
 class CacheWriteError(AgenticVideoError):
     """Raised when the media cache directory cannot be created or written (e.g. ACL/permission failure)."""
     pass

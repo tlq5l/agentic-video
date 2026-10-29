@@ -12,7 +12,7 @@ from typing import Dict, Any, Iterator, List, Optional, Tuple
 
 from src.retrieval.engine import AgenticVideoEngine
 from src.core.config import Config
-from src.core.errors import AgenticVideoError, MediaNotFoundError
+from src.core.errors import AgenticVideoError, MediaNotFoundError, as_dependency_error
 from src.media import fetch, visual_timing
 from src.transcript import asr
 
@@ -270,6 +270,7 @@ MAX_CADENCE_RANGES = 500
 
 def format_tool_error(exc: Exception, tool: Optional[str] = None) -> str:
     """Render an exception so the caller sees the message and any structured details."""
+    exc = as_dependency_error(exc)
     if isinstance(exc, AgenticVideoError):
         text = f"{type(exc).__name__}: {exc.message}"
         if isinstance(exc, MediaNotFoundError):
