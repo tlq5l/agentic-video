@@ -1,0 +1,31 @@
+{
+  "manifest_version": "0.4",
+  "name": "agentic-video",
+  "display_name": "agentic-video",
+  "version": "0.3.0",
+  "description": "Local video tools for AI agents that read text and images but not video: contact sheets, transcripts, cut, loudness and sync checks, served over MCP.",
+  "author": {
+    "name": "tlq5l"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/tlq5l/agentic-video",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tlq5l/agentic-video"
+  },
+  "keywords": ["mcp", "video", "agents", "ffmpeg", "whisper", "contact-sheet"],
+  "server": {
+    "type": "uv",
+    "entry_point": "src/executor/mcp_server.py",
+    "mcp_config": {
+      "command": "uv",
+      "args": ["run", "--directory", "${__dirname}", "agentic-video"]
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin"],
+    "runtimes": {
+      "python": ">=3.10"
+    }
+  }
+}
