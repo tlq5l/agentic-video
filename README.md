@@ -4,6 +4,8 @@ agentic-video lets an AI agent that reads text and images, but not video, work w
 
 **Install:** `brew install ffmpeg`, then add it to Claude Code with `claude mcp add -s user agentic-video -- uvx agentic-video` (or `pipx install agentic-video`). Other clients: [Run the MCP server](#run-the-mcp-server).
 
+**Claude Desktop (one click):** download `agentic-video-<version>.mcpb` from the latest [GitHub release](https://github.com/tlq5l/agentic-video/releases/latest) and double-click it. It still needs `brew install ffmpeg`. The first start takes about a minute while Claude Desktop installs the Python packages. macOS only. The bundle does not include local visual search or on-screen text counting; for those, use the git install in the "Optional: visual search (CLIP) and on-screen text" section below. Details: [docs/features/desktop-bundle.md](docs/features/desktop-bundle.md).
+
 ![A contact sheet made by agentic-video from a 5-second clip: six frames, each with its timestamp burned in](https://raw.githubusercontent.com/tlq5l/agentic-video/main/docs/images/contact-sheet.jpg)
 
 *One `contact_sheet` call on a 5-second clip: six frames, each stamped with its time, as a single image the agent can read.*

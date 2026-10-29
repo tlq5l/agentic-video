@@ -20,6 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
+from src.core.errors import as_dependency_error
 from src.core.types import FrameInfo, format_timestamp
 from src.media.contact_sheet import compose_contact_sheet
 from src.media.frames import extract_single_frame
@@ -485,7 +486,7 @@ def submit(engine, operation, **args):
             try:
                 result = build_index(engine, report) if operation == "build" else search_index(engine, **args)
             except Exception as exc:
-                result = {"status": "error", "message": str(exc), "retryable": True}
+                result = {"status": "error", "message": str(as_dependency_error(exc)), "retryable": True}
             with _jobs_lock:
                 _jobs[key] = result
 

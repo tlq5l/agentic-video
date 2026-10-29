@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 from typing import Optional, List, Tuple, Dict, Any
 from src.core.config import Config
-from src.core.errors import ASRModelError, MediaNotFoundError, SubprocessTimeoutError
+from src.core.errors import ASRModelError, MediaNotFoundError, SubprocessTimeoutError, as_dependency_error
 from src.core.types import TranscriptSegment, TranscriptResult, VideoMetadata
 from src.core.cache import MediaCache
 from src.media.probe import probe_video
@@ -245,7 +245,8 @@ class _BackgroundTranscriptionSlot:
                     )
             except Exception as exc:
                 with self._lock:
-                    self._failures[key] = f"{type(exc).__name__}: {exc}"
+                    failure = as_dependency_error(exc)
+                    self._failures[key] = f"{type(failure).__name__}: {failure}"
                     while len(self._failures) > 16:
                         del self._failures[next(iter(self._failures))]
             finally:

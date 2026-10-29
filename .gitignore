@@ -13,6 +13,9 @@ __pycache__/
 .tmp/
 .tmp-*/
 
+# Claude Desktop bundle built by scripts/build_mcpb.py.
+dist/
+
 # Default output of `python -m src.loop check`.
 .agentic-video-check/
 

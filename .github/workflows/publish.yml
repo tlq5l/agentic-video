@@ -1,4 +1,5 @@
-# Publishes to PyPI through a trusted publisher (no stored token).
+# Publishes to PyPI through a trusted publisher (no stored token), and attaches the
+# Claude Desktop bundle to each release (job mcpb).
 # PyPI side: project agentic-video, owner tlq5l, repo agentic-video,
 # workflow publish.yml, environment pypi.
 name: publish
@@ -20,3 +21,20 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - run: uv build
       - uses: pypa/gh-action-pypi-publish@release/v1
+
+  # Attaches the Claude Desktop bundle (dist/agentic-video-<version>.mcpb) to the GitHub release.
+  mcpb:
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: python3 scripts/build_mcpb.py
+      - run: gh release upload "$RELEASE_TAG" dist/*.mcpb --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}

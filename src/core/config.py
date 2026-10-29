@@ -1,12 +1,24 @@
 import shutil
 import glob
+import sys
 from dataclasses import dataclass
 import os
 from pathlib import Path
 
 def ensure_ffmpeg_on_path():
-    """Ensure ffmpeg and ffprobe are discoverable on Windows even if daemon PATH is minimal."""
+    """Make ffmpeg and ffprobe discoverable when the host starts the server with a minimal PATH.
+
+    macOS (Claude Desktop does not inherit the shell PATH): prepend the first of Homebrew's
+    and ~/.local/bin that holds both binaries. Windows: search the WinGet, Scoop and
+    Chocolatey install folders.
+    """
     if shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None:
+        return
+    if sys.platform == "darwin":
+        for folder in (Path("/opt/homebrew/bin"), Path("/usr/local/bin"), Path.home() / ".local/bin"):
+            if all((folder / name).is_file() and os.access(folder / name, os.X_OK) for name in ("ffmpeg", "ffprobe")):
+                os.environ["PATH"] = str(folder) + os.pathsep + os.environ.get("PATH", "")
+                return
         return
     # Check WinGet Gyan.FFmpeg packages
     winget_pattern = str(Path.home() / "AppData/Local/Microsoft/WinGet/Packages/Gyan.FFmpeg*/**/bin")

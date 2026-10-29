@@ -29,6 +29,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from src.core.config import Config
+from src.core.errors import as_dependency_error
 from src.retrieval import ocr
 
 ALGORITHM_VERSION = "occurrences-v5"
@@ -826,7 +827,7 @@ def submit(engine, **args):
             try:
                 result = count_video(engine, progress=report, **args)
             except Exception as exc:
-                result = {"status": "error", "message": str(exc)}
+                result = {"status": "error", "message": str(as_dependency_error(exc))}
             with _jobs_lock:
                 _jobs[key] = result
         _worker = threading.Thread(target=work, name="occurrence-count", daemon=True)
