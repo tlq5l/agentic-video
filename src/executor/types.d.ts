@@ -285,10 +285,10 @@ export interface SearchVisualInput {
   query: string;
   /** Maximum frame matches (default 5, maximum 20; larger values are clamped and the result says so). This ranks frames and cannot count: use count_occurrences for counts. */
   top_k?: number;
-  /** Inclusive start of the range to search, in seconds. */
-  start_sec?: number;
-  /** Exclusive end of the range to search, in seconds; defaults to the end of the video. */
-  end_sec?: number | null;
+  /** Inclusive start of the range to search, in seconds. Also accepts a timecode string in MM:SS.mmm form. */
+  start_sec?: number | string;
+  /** Exclusive end of the range to search, in seconds; defaults to the end of the video. Also accepts a timecode string in MM:SS.mmm form. */
+  end_sec?: number | string | null;
 }
 
 export interface VisualSearchHit {
@@ -329,20 +329,20 @@ export interface SearchVisualOutput extends VisualIndexProgress {
 
 export interface CountRepetitionsInput {
   source: string;
-  /** Start of the window in seconds (default 0). The window may be at most 180 s long. */
-  start_sec?: number;
-  /** End of the window in seconds; defaults to the end of the video. */
-  end_sec?: number | null;
+  /** Start of the window in seconds (default 0). The window may be at most 180 s long. Also accepts a timecode string in MM:SS.mmm form. */
+  start_sec?: number | string;
+  /** End of the window in seconds; defaults to the end of the video. Also accepts a timecode string in MM:SS.mmm form. */
+  end_sec?: number | string | null;
   /** Fractions of the frame; uses w/h (width/height with the same meaning is also accepted). Omit for the whole frame. */
   region?: { x: number; y: number; w: number; h: number } | { x: number; y: number; width: number; height: number };
   /** Sampling rate (default 10, maximum 15; larger values are clamped and the result says so). */
   fps?: number;
   /** auto (default) picks between motion, embedding and a periodicity check; motion or embedding forces that amplitude counter alone. */
   method?: "auto" | "motion" | "embedding";
-  /** Shortest expected cycle in seconds (default 0.4). Bounds the amplitude counter only; the periodicity check ignores it and searches from 0.25 s. */
-  min_period_sec?: number;
-  /** Longest expected cycle in seconds (default 3); must exceed min_period_sec. Bounds the amplitude counter only; the periodicity check ignores it. */
-  max_period_sec?: number;
+  /** Shortest expected cycle in seconds (default 0.4). Bounds the amplitude counter only; the periodicity check ignores it and searches from 0.25 s. Also accepts a timecode string in MM:SS.mmm form. */
+  min_period_sec?: number | string;
+  /** Longest expected cycle in seconds (default 3); must exceed min_period_sec. Bounds the amplitude counter only; the periodicity check ignores it. Also accepts a timecode string in MM:SS.mmm form. */
+  max_period_sec?: number | string;
   /** Short phrase naming the action being counted. */
   action_hint?: string;
 }
@@ -385,12 +385,12 @@ export interface CountOccurrencesInput {
   /** Exact on-screen phrase, matched as whole words by offline OCR (RELEASE does not match RELEASED). */
   text?: string;
   case_sensitive?: boolean;
-  start_sec?: number;
-  end_sec?: number | null;
+  start_sec?: number | string;
+  end_sec?: number | string | null;
   /** Sampling rate (default 5, maximum 15; larger values are clamped and the result says so); lowered automatically on long windows. */
   fps?: number;
-  /** Absence of at least this long starts a new span (default 0.3). A larger value JOINS separate appearances whose gap is shorter than it; the result then sets gaps_merged and count_without_merges. */
-  min_gap_sec?: number;
+  /** Absence of at least this long starts a new span (default 0.3). A larger value JOINS separate appearances whose gap is shorter than it; the result then sets gaps_merged and count_without_merges. Also accepts a timecode string in MM:SS.mmm form. */
+  min_gap_sec?: number | string;
   /** Maximum spans listed (default 20, maximum 100; larger values are clamped and the result says so); count always includes omitted spans. */
   max_spans?: number;
 }
@@ -459,10 +459,10 @@ export interface DetectCutsInput {
   source: string;
   /** Cut strength cutoff 0-1 (default 0.25); raise it to keep only stronger cuts. */
   threshold?: number;
-  /** Optional inclusive range start in absolute video seconds */
-  start_sec?: number;
-  /** Optional exclusive range end in absolute video seconds */
-  end_sec?: number;
+  /** Optional inclusive range start in absolute video seconds. Also accepts a timecode string in MM:SS.mmm form. */
+  start_sec?: number | string;
+  /** Optional exclusive range end in absolute video seconds. Also accepts a timecode string in MM:SS.mmm form. */
+  end_sec?: number | string;
 }
 
 export interface SceneCut {
@@ -527,10 +527,10 @@ export interface CheckFrameCadenceOutput {
 export interface InspectWindowInput {
   /** Video source path */
   source: string;
-  /** Window start timestamp in seconds */
-  start_sec: number;
-  /** Window end timestamp in seconds; must be within the video. */
-  end_sec: number;
+  /** Window start timestamp in seconds. Also accepts a timecode string in MM:SS.mmm form. */
+  start_sec: number | string;
+  /** Window end timestamp in seconds; must be within the video. Also accepts a timecode string in MM:SS.mmm form. */
+  end_sec: number | string;
   /** Sampling rate (default 4, maximum 30; larger values are clamped). Frames = fps x duration and must stay within about 150 (at most 600 s per call). */
   fps?: number;
 }
@@ -568,8 +568,8 @@ export interface InspectWindowOutput {
 export interface FrameAtInput {
   /** Video source path or URL */
   source: string;
-  /** Moment in seconds, from 0 to the media duration; the frame shown at that moment is returned. */
-  time_sec: number;
+  /** Moment in seconds, from 0 to the media duration; the frame shown at that moment is returned. Also accepts a timecode string in MM:SS.mmm form. */
+  time_sec: number | string;
   /** Optional rectangle in source pixels, inside the frame as displayed (rotation applied). Omit for the whole frame. */
   crop?: { x: number; y: number; width: number; height: number };
   /** Enlargement of the (cropped) frame, 1 to 4 (default 1). Lanczos. */
@@ -606,13 +606,13 @@ export interface FrameAtOutput {
 
 export interface RefineTemporalBeamInput {
   source: string;
-  windows: Array<{ start_sec: number; end_sec: number }>;
+  windows: Array<{ start_sec: number | string; end_sec: number | string }>;
   /** Child ranges per window (default 4, maximum 8; larger values are clamped). */
   fanout?: number;
   /** Thumbnails per child (default 3, maximum 12; larger values are clamped). */
   samples_per_child?: number;
   cols?: number;
-  context_sec?: number;
+  context_sec?: number | string;
   /** Budget: windows x fanout x samples_per_child must not exceed it (default 96, maximum 300; larger values are clamped). */
   max_total_samples?: number;
   align_to_cuts?: boolean;
@@ -641,8 +641,8 @@ export interface RefineTemporalBeamOutput {
 }
 export interface TrackRegionChangesInput {
   source: string;
-  start_sec: number;
-  end_sec: number;
+  start_sec: number | string;
+  end_sec: number | string;
   /** Fractions of the frame; uses width/height, not w/h (w/h with the same meaning is also accepted). */
   region: { x: number; y: number; width: number; height: number } | { x: number; y: number; w: number; h: number };
   /** Sampling rate (default 0.25, maximum 10; larger values are clamped and the result says so). */
@@ -651,7 +651,7 @@ export interface TrackRegionChangesInput {
   frame_width?: number;
   min_change_score?: number;
   robust_sigma?: number;
-  min_separation_sec?: number;
+  min_separation_sec?: number | string;
   /** Most candidates returned (default 32, maximum 128; larger values are clamped). */
   max_candidates?: number;
   /** Frame budget: (end_sec - start_sec) x sample_fps must not exceed it (default 600, maximum 2000; larger values are clamped). */
@@ -703,8 +703,8 @@ export interface TrackRegionChangesOutput {
 
 export interface TrackRegionEventsInput {
   source: string;
-  start_sec: number;
-  end_sec: number;
+  start_sec: number | string;
+  end_sec: number | string;
   /** Fractions of the frame; uses width/height, not w/h (w/h with the same meaning is also accepted). */
   region: { x: number; y: number; width: number; height: number } | { x: number; y: number; w: number; h: number };
   /** Sampling rate (default 0.25, maximum 10; larger values are clamped and the result says so). */
@@ -713,7 +713,7 @@ export interface TrackRegionEventsInput {
   frame_width?: number;
   change_threshold?: number;
   ambiguity_margin?: number;
-  min_separation_sec?: number;
+  min_separation_sec?: number | string;
   /** Most events returned (default 32, maximum 128; larger values are clamped). */
   max_events?: number;
   /** Frame budget: (end_sec - start_sec) x sample_fps must not exceed it (default 600, maximum 2000; larger values are clamped). */
@@ -762,11 +762,11 @@ export interface TrackRegionEventsOutput {
 
 export interface InspectMomentsInput {
   source: string;
-  moments: Array<{ timestamp_sec: number; label?: string }>;
-  /** Seconds of context before each moment (default 4). */
-  before_sec?: number;
-  /** Seconds of context after each moment (default 4). */
-  after_sec?: number;
+  moments: Array<{ timestamp_sec: number | string; label?: string }>;
+  /** Seconds of context before each moment (default 4). Also accepts a timecode string in MM:SS.mmm form. */
+  before_sec?: number | string;
+  /** Seconds of context after each moment (default 4). Also accepts a timecode string in MM:SS.mmm form. */
+  after_sec?: number | string;
   /** Frames per moment, an odd number 3-25 (default 9; larger values are clamped to 25). */
   samples_per_moment?: number;
   cols?: number;
@@ -808,10 +808,10 @@ export interface InspectMomentsOutput {
 export interface InspectWindowsInput {
   source: string;
   /** Absolute half-open source windows to inspect. */
-  windows: Array<{ start_sec: number; end_sec: number }>;
+  windows: Array<{ start_sec: number | string; end_sec: number | string }>;
   /** Sampling rate (default 4, maximum 30; larger values are clamped). */
   fps?: number;
-  context_sec?: number;
+  context_sec?: number | string;
   merge_overlaps?: boolean;
   /** Most windows accepted (default and maximum 16; larger values are clamped). */
   max_windows?: number;
@@ -854,10 +854,10 @@ export interface ContactSheetInput {
   samples?: number;
   /** Number of grid columns (default: 4) */
   cols?: number;
-  /** Optional inclusive range start in absolute video seconds */
-  start_sec?: number;
-  /** Optional exclusive range end in absolute video seconds */
-  end_sec?: number;
+  /** Optional inclusive range start in absolute video seconds. Also accepts a timecode string in MM:SS.mmm form. */
+  start_sec?: number | string;
+  /** Optional exclusive range end in absolute video seconds. Also accepts a timecode string in MM:SS.mmm form. */
+  end_sec?: number | string;
 }
 
 export interface ContactSheetOutput {
@@ -927,15 +927,15 @@ export interface ReviewVideoOutput {
 
 export interface OverviewChunksInput {
   source: string;
-  /** Target duration of each contiguous coarse chunk, in seconds (default 60, maximum 600). */
-  chunk_sec?: number;
+  /** Target duration of each contiguous coarse chunk, in seconds (default 60, maximum 600). Also accepts a timecode string in MM:SS.mmm form. */
+  chunk_sec?: number | string;
   /** Uniform samples placed inside each chunk (default 8; values above 150 are clamped to 150 and the result says so). */
   samples_per_chunk?: number;
   cols?: number;
-  /** Optional inclusive absolute-video range start. */
-  start_sec?: number;
-  /** Optional exclusive absolute-video range end. */
-  end_sec?: number;
+  /** Optional inclusive absolute-video range start. Also accepts a timecode string in MM:SS.mmm form. */
+  start_sec?: number | string;
+  /** Optional exclusive absolute-video range end. Also accepts a timecode string in MM:SS.mmm form. */
+  end_sec?: number | string;
   /** Most sheets in one call (default and maximum 32; larger values are clamped). Raise chunk_sec or narrow the range for a longer video. */
   max_chunks?: number;
 }
@@ -983,8 +983,8 @@ export interface AudioBandProfile {
 
 export interface AudioOnsetsInput {
   source: string;
-  start_sec?: number;
-  end_sec?: number;
+  start_sec?: number | string;
+  end_sec?: number | string;
   /** Minimum normalized spectral-flux strength, from 0 to 1 (default 0.12); raise it to keep only stronger onsets. */
   min_strength?: number;
   /** Restrict onset detection to a named band or [low_hz, high_hz]. */
@@ -1023,13 +1023,13 @@ export interface AudioOnsetsOutput {
 
 export interface LoudnessTimelineInput {
   source: string;
-  /** Fixed analysis window, 0.01-600 seconds (default 0.25; larger values are clamped to 600). Give this or bpm, not both. */
-  window_sec?: number;
+  /** Fixed analysis window, 0.01-600 seconds (default 0.25; larger values are clamped to 600). Give this or bpm, not both. Also accepts a timecode string in MM:SS.mmm form. */
+  window_sec?: number | string;
   /** Analyze one beat per window; overrides the default fixed window. */
   bpm?: number;
-  start_sec?: number;
-  end_sec?: number;
-  ignore_ranges?: Array<{ start_sec: number; end_sec: number; reason: string }>;
+  start_sec?: number | string;
+  end_sec?: number | string;
+  ignore_ranges?: Array<{ start_sec: number | string; end_sec: number | string; reason: string }>;
 }
 
 export interface LoudnessWindow {
@@ -1111,9 +1111,9 @@ export interface SpectrogramFrequencyTick {
 
 export interface SpectrogramWindowInput {
   source: string;
-  start_sec: number;
-  end_sec: number;
-  marks?: SpectrogramMark[];
+  start_sec: number | string;
+  end_sec: number | string;
+  marks?: Array<{ time_sec: number | string; label: string }>;
 }
 
 export interface SpectrogramWindowOutput {
@@ -1136,12 +1136,12 @@ export interface SpectrogramWindowOutput {
 export interface WatchForInput {
   source: string;
   conditions: string[];
-  start_sec?: number;
-  end_sec?: number;
-  interval_sec?: number;
+  start_sec?: number | string;
+  end_sec?: number | string;
+  interval_sec?: number | string;
   cut?: number;
   consecutive?: number;
-  cooldown_sec?: number;
+  cooldown_sec?: number | string;
 }
 
 export interface WatchCondition {
@@ -1186,10 +1186,10 @@ export interface WatchForOutput {
 
 export interface LabelSoundsInput {
   source: string;
-  start_sec: number;
-  end_sec: number;
+  start_sec: number | string;
+  end_sec: number | string;
   labels?: string[];
-  window_sec?: number;
+  window_sec?: number | string;
 }
 
 export interface SoundLabelWindow {
@@ -1218,8 +1218,8 @@ export interface LabelSoundsOutput {
 }
 
 export type SyncCueInput =
-  | { time_sec: number; t?: number; label?: string; band_hz?: AudioBandSelection }
-  | { t: number; time_sec?: number; label?: string; band_hz?: AudioBandSelection };
+  | { time_sec: number | string; t?: number; label?: string; band_hz?: AudioBandSelection }
+  | { t: number; time_sec?: number | string; label?: string; band_hz?: AudioBandSelection };
 
 export interface SyncCheckInput {
   source: string;
@@ -1237,19 +1237,104 @@ export interface SyncCutMatch {
   offset_ms: number | null;
 }
 
+export type SyncStatus = "ok" | "early" | "late" | "missing" | "ambiguous";
+
+export interface SyncSoftAttackBuild {
+  conclusive: boolean;
+  measured: boolean;
+  /** "broadband" or a "low-high Hz" range. */
+  band: string;
+  window_sec: number;
+  comparison_count: number;
+  relative_rise_db: number | null;
+  prior_relative_rise_db: number | null;
+  end_excess_db: number | null;
+  steady_steps: number;
+}
+
 export interface SyncCueResult {
   time_sec: number;
   label: string;
-  status: "ok" | "early" | "late" | "missing";
+  status: SyncStatus;
   matched_onset_time_sec: number | null;
   offset_ms: number | null;
+  nearest_onset_time_sec: number | null;
+  nearest_onset_offset_ms: number | null;
+  cue_group: string;
+  dominant_band: string;
+  simple_check_on_time: boolean;
+  simple_check_onset_offset_ms: number | null;
+  simple_check_level_db: number;
+  simple_check_reference_db: number;
+  simple_check_reference: string;
+  group_typical_level_db: number | null;
+  template_status: SyncStatus;
+  evidence: string;
+  audible_in_any_band: boolean;
+  signature_bands: string[];
+  signature_sample_count: number;
+  signature_score: number | null;
+  group_median_score: number | null;
+  group_typical_attack_lag_ms: number | null;
+  on_cue_score: number | null;
+  companion_gain: number | null;
+  displaced_time_sec: number | null;
+  shifted_null_floor: number | null;
+  credible_score_floor: number | null;
+  slot_before_ms: number | null;
+  slot_after_ms: number | null;
+  signature_excess_ratio: number | null;
+  search_window_ms: number;
+  match_method: string;
+  ambiguous_reason: string | null;
+  candidate_onsets: { time_sec: number; offset_ms: number; strength: number }[];
+  /** Only for a cue with a gradual build (a swell, not a hit). */
+  soft_attack_build?: SyncSoftAttackBuild;
   band_hz?: AudioBandSelection;
+}
+
+export interface SyncUncuedSound {
+  time_sec: number;
+  group: string;
+  score: number;
+  group_median_score: number;
+  threshold: number;
+  dominant_band: string;
+  simple_check_level_db: number;
+  group_typical_level_db: number;
+  confirmed_by: "group_band" | "own_attack_band";
+  attack_rise_db?: number;
+  group_cue_rise_db?: number;
+  group_cue_count: number;
+  /** Other cue groups that sound at this same moment. */
+  also_matches: string[];
+}
+
+export interface SyncCueSignature {
+  bands: string[];
+  sample_count: number;
+  method: string;
+  control_count: number;
+  /** Mean level per third-octave band name. */
+  profile: Record<string, number>;
+  example_times_sec: number[];
 }
 
 export interface SyncCheckOutput {
   source_path: string;
   tolerance_ms: number;
   cue_recovery_window_ms: number;
+  /** The window used to pair cues with onsets, in ms. */
+  search_window_ms: number;
+  /** The tempo passed in, or null. */
+  bpm: number | null;
+  /** Beats per bar used with bpm; null without bpm. */
+  beats_per_bar: number | null;
+  /** Learned sound signature for each cue group, keyed by group name. */
+  cue_signatures: Record<string, SyncCueSignature>;
+  systematic_lags: { group: string; lag_ms: number; method: string; classification: string }[];
+  /** Strong sounds with no cue, found from a cue group's repeated sound. */
+  uncued_sounds: SyncUncuedSound[];
   cuts: SyncCutMatch[];
   cues: SyncCueResult[];
   unmatched_strong_onsets: AudioOnset[];

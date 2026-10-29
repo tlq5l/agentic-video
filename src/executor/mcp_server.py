@@ -465,26 +465,41 @@ def _fit_transcript(data: Dict[str, Any]) -> None:
                 f"The listed segments cover 0 to {segments[keep - 1]['end_sec']:g} s.")
 
 
-_TIMECODE = re.compile(r"(?:(?:(?P<hours>\d+):)?(?P<minutes>\d+):)?(?P<seconds>\d+(?:\.\d+)?)")
+_TIMECODE = re.compile(r"(?:(?:(?P<hours>[0-9]+):)?(?P<minutes>[0-9]+):)?(?P<seconds>[0-9]+(?:\.[0-9]+)?)")
+# Longer timecode strings are refused (the published maxLength); this also keeps int() under Python's digit limit.
+_TIMECODE_MAX_LENGTH = 32
 _KIND_WORDS = {"number": "a number", "integer": "an integer", "string": "a string", "boolean": "true or false",
                "object": "an object", "array": "a list", "null": "null"}
 
 
 def _parse_timecode(text: str) -> Optional[float]:
     """Seconds from "SS.mmm", "MM:SS(.mmm)" or "HH:MM:SS(.mmm)", the format search_transcript shows; None otherwise."""
-    match = _TIMECODE.fullmatch(text.strip())
+    if len(text) > _TIMECODE_MAX_LENGTH:
+        return None
+    match = _TIMECODE.fullmatch(text)
     if match is None:
         return None
     hours, minutes = match["hours"], match["minutes"]
-    seconds = float(match["seconds"])
-    if (minutes is not None and seconds >= 60) or (hours is not None and int(minutes) >= 60):
+    # Range-check the whole-number digits: a fraction like .99999999999999999 rounds to 60.0 in float.
+    whole_seconds = int(match["seconds"].split(".")[0])
+    if (minutes is not None and whole_seconds >= 60) or (hours is not None and int(minutes) >= 60):
         return None
-    return int(hours or 0) * 3600 + int(minutes or 0) * 60 + seconds
+    return int(hours or 0) * 3600 + int(minutes or 0) * 60 + float(match["seconds"])
 
 
 def _schema_types(schema: Dict[str, Any]) -> List[str]:
     kinds = schema.get("type", [])
     return kinds if isinstance(kinds, list) else [kinds]
+
+
+def _accepts(schema: Dict[str, Any], value: Any) -> bool:
+    """True if `value` has one of the schema's types, and a string matches the schema's pattern. The published
+    *_sec pattern accepts exactly the timecodes _parse_timecode reads (tests/test_schema_contract.py checks this)."""
+    if not any(_is_kind(value, kind) for kind in _schema_types(schema)):
+        return False
+    if not isinstance(value, str) or schema.get("pattern") is None:
+        return True
+    return re.fullmatch(schema["pattern"], value) is not None
 
 
 def _is_kind(value: Any, kind: str) -> bool:
@@ -554,12 +569,18 @@ def _argument_problem(schema: Dict[str, Any], value: Any, key: str, check_range:
         problems = [_argument_problem(alt, value, key, check_range) for alt in alternatives]
         if all(problems):
             fitting = [problem for alt, problem in zip(alternatives, problems)
-                       if not _schema_types(alt) or any(_is_kind(value, kind) for kind in _schema_types(alt))]
+                       if not _schema_types(alt) or _accepts(alt, value)]
             if len(fitting) == 1:
                 return fitting[0]
             return "", "does not match any allowed form", "; or ".join(_describe_alternative(alt, key) for alt in alternatives)
+    # Length first, so an oversized string never reaches the pattern match or int().
+    if isinstance(value, str):
+        if "minLength" in schema and len(value) < schema["minLength"]:
+            return "", f"is shorter than {schema['minLength']} character(s)", _expected(schema, key)
+        if "maxLength" in schema and len(value) > schema["maxLength"]:
+            return "", f"is longer than {schema['maxLength']} character(s)", _expected(schema, key)
     kinds = _schema_types(schema)
-    if kinds and not any(_is_kind(value, kind) for kind in kinds):
+    if kinds and not _accepts(schema, value):
         return "", f"must be {_KIND_WORDS.get(kinds[0], 'a value')} (got {_show(value)})", _expected(schema, key)
     if "enum" in schema and value not in schema["enum"]:
         return "", f"is not one of the allowed values (got {_show(value)})", _expected(schema, key)
@@ -570,9 +591,6 @@ def _argument_problem(schema: Dict[str, Any], value: Any, key: str, check_range:
             return "", f"must be greater than {schema['exclusiveMinimum']:g} (got {_show(value)})", _expected(schema, key)
         if "maximum" in schema and value > schema["maximum"]:
             return "", f"is above the maximum {schema['maximum']:g} (got {_show(value)})", _expected(schema, key)
-    if isinstance(value, str):
-        if "minLength" in schema and len(value) < schema["minLength"]:
-            return "", f"is shorter than {schema['minLength']} character(s)", _expected(schema, key)
     if isinstance(value, dict):
         missing = [item for item in schema.get("required", []) if item not in value]
         if missing:

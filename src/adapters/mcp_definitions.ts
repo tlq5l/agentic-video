@@ -8,6 +8,10 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
+/** Seconds as a number, or a timecode string of at most 32 characters: "SS.mmm", "MM:SS.mmm" or "HH:MM:SS.mmm" (the form the tools print); minutes and seconds after a colon are 0-59. */
+const TIMECODE_PATTERN = /^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\.[0-9]+)?|[0-9]+(?:\.[0-9]+)?)$/;
+const seconds = (number: z.ZodNumber) => z.union([number, z.string().regex(TIMECODE_PATTERN).max(32)]);
+
 /** Every tool's `source`: a local path, or a URL that the server downloads once and caches. */
 const SourceSchema = z.string().trim().min(1).describe(
   "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). " +
@@ -38,22 +42,22 @@ export const SearchVisualInputSchema = {
   source: SourceSchema,
   query: z.string().trim().min(1).max(2000).describe("Natural-language description of visible content."),
   top_k: z.number().int().min(1).max(20).describe("Maximum frame hits (default 5, maximum 20; larger values are clamped to 20 and the result says so). This ranks frames and cannot count: use count_occurrences for counts.").optional(),
-  start_sec: z.number().min(0).describe("Inclusive start of the range to search, in seconds.").optional(),
-  end_sec: z.number().min(0).nullable().describe("Exclusive end of the range to search, in seconds; defaults to the end of the video.").optional(),
+  start_sec: seconds(z.number().min(0)).describe("Inclusive start of the range to search, in seconds. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.").optional(),
+  end_sec: seconds(z.number().min(0)).nullable().describe("Exclusive end of the range to search, in seconds; defaults to the end of the video. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.").optional(),
 };
 
 export const CountRepetitionsInputSchema = {
   source: SourceSchema,
-  start_sec: z.number().min(0).describe("Start of the window in seconds (default 0). The window may be at most 180 s long.").optional(),
-  end_sec: z.number().min(0).nullable().describe("End of the window in seconds; defaults to the end of the video. Give both bounds for a video longer than 180 s.").optional(),
+  start_sec: seconds(z.number().min(0)).describe("Start of the window in seconds (default 0). The window may be at most 180 s long. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.").optional(),
+  end_sec: seconds(z.number().min(0)).nullable().describe("End of the window in seconds; defaults to the end of the video. Give both bounds for a video longer than 180 s. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.").optional(),
   region: z.union([
     z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1), w: z.number().min(0).max(1), h: z.number().min(0).max(1) }),
     z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1), width: z.number().min(0).max(1), height: z.number().min(0).max(1) }),
   ]).describe("Rectangle that contains the repeating motion, as fractions of the frame: x, y (top-left) and w, h (size), with x+w <= 1 and y+h <= 1. Uses w/h; width/height with the same meaning is also accepted. Omit for the whole frame.").optional(),
   fps: z.number().positive().max(15).describe("Sampling rate, default 10. Larger values than 15 are clamped to 15 and the result says so.").optional(),
   method: z.enum(["auto", "motion", "embedding"]).describe("auto (default) picks between motion, embedding and a periodicity check; motion or embedding forces that amplitude counter alone.").optional(),
-  min_period_sec: z.number().positive().describe("Shortest expected cycle in seconds (default 0.4). Bounds the amplitude counter only; the periodicity check ignores it and searches from 0.25 s.").optional(),
-  max_period_sec: z.number().positive().describe("Longest expected cycle in seconds (default 3); must exceed min_period_sec. Bounds the amplitude counter only; the periodicity check ignores it.").optional(),
+  min_period_sec: seconds(z.number().positive()).describe("Shortest expected cycle in seconds (default 0.4). Bounds the amplitude counter only; the periodicity check ignores it and searches from 0.25 s. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.").optional(),
+  max_period_sec: seconds(z.number().positive()).describe("Longest expected cycle in seconds (default 3); must exceed min_period_sec. Bounds the amplitude counter only; the periodicity check ignores it. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.").optional(),
   action_hint: z.string().max(200).describe("Short phrase naming the action being counted, e.g. 'jumping jacks'.").optional(),
 };
 
@@ -62,10 +66,10 @@ export const CountOccurrencesInputSchema = {
   description: z.string().min(1).max(500).describe("Visible thing to count, e.g. 'yellow outlined circle', 'green diamond', 'red star'. Name its colour and shape; text on screen goes in `text`.").optional(),
   text: z.string().min(1).max(200).describe("Exact on-screen phrase, matched as whole words (RELEASE matches 'RELEASE' and 'RELEASE NOTES', not 'RELEASED' or 'PRE-RELEASE').").optional(),
   case_sensitive: z.boolean().describe("Require the same letter case for `text`.").optional(),
-  start_sec: z.number().min(0).optional(),
-  end_sec: z.number().min(0).nullable().describe("Defaults to the end of the video. At most 2400 frames are analyzed per call, so fps is lowered automatically on long windows.").optional(),
+  start_sec: seconds(z.number().min(0)).describe("Seconds, or a timecode string in MM:SS.mmm form, e.g. 00:14.250.").optional(),
+  end_sec: seconds(z.number().min(0)).nullable().describe("Defaults to the end of the video. At most 2400 frames are analyzed per call, so fps is lowered automatically on long windows. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.").optional(),
   fps: z.number().positive().max(15).describe("Sampling rate, default 5. Appearances shorter than 1/fps can be missed; raise it for brief flashes. Larger values than 15 are clamped to 15 and the result says so.").optional(),
-  min_gap_sec: z.number().positive().describe("Absence of at least this long starts a new span; shorter dropouts stay inside one span. Raising it above the default 0.3 JOINS separate appearances whose gap is shorter than it (0.8 merges appearances 0.7 s apart); the result reports gaps_merged and count_without_merges when that happens.").optional(),
+  min_gap_sec: seconds(z.number().positive()).describe("Absence of at least this long starts a new span; shorter dropouts stay inside one span. Raising it above the default 0.3 JOINS separate appearances whose gap is shorter than it (0.8 merges appearances 0.7 s apart); the result reports gaps_merged and count_without_merges when that happens. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.").optional(),
   max_spans: z.number().int().min(1).max(100).describe("Maximum spans listed (default 20, maximum 100; larger values are clamped to 100 and the result says so). `count` always includes every span.").optional(),
 };
 
@@ -73,8 +77,8 @@ export const ContactSheetInputSchema = {
   source: SourceSchema,
   samples: z.number().int().min(1).describe("Requested number of thumbnails; values above 150 are accepted and clamped to 150.").optional(),
   cols: z.number().int().min(1).describe("Grid columns (default 4).").optional(),
-  start_sec: z.number().min(0).describe("Optional inclusive start of the overview range in absolute video seconds.").optional(),
-  end_sec: z.number().min(0).describe("Optional exclusive end of the overview range in absolute video seconds.").optional(),
+  start_sec: seconds(z.number().min(0)).describe("Optional inclusive start of the overview range in absolute video seconds. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.").optional(),
+  end_sec: seconds(z.number().min(0)).describe("Optional exclusive end of the overview range in absolute video seconds. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.").optional(),
 };
 
 export const ReviewVideoInputSchema = {
@@ -84,29 +88,29 @@ export const ReviewVideoInputSchema = {
 
 export const OverviewChunksInputSchema = {
   source: SourceSchema,
-  chunk_sec: z.number().positive().max(600).describe("Seconds covered by each sheet (default 60, maximum 600).").optional(),
+  chunk_sec: seconds(z.number().positive().max(600)).describe("Seconds covered by each sheet (default 60, maximum 600). Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.").optional(),
   samples_per_chunk: z.number().int().min(1).max(150).describe("Thumbnails per sheet (default 8; values above 150 are clamped to 150 and the result says so).").optional(),
   cols: z.number().int().min(1).optional(),
-  start_sec: z.number().min(0).describe("Optional inclusive start in absolute video seconds.").optional(),
-  end_sec: z.number().min(0).describe("Optional exclusive end in absolute video seconds; defaults to the end of the video.").optional(),
+  start_sec: seconds(z.number().min(0)).describe("Optional inclusive start in absolute video seconds. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.").optional(),
+  end_sec: seconds(z.number().min(0)).describe("Optional exclusive end in absolute video seconds; defaults to the end of the video. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.").optional(),
   max_chunks: z.number().int().min(1).max(32).describe("Most sheets in one call (default and maximum 32; larger values are clamped). The call fails if the range needs more chunks: raise chunk_sec or narrow the range.").optional(),
 };
 
 export const RefineTemporalBeamInputSchema = {
   source: SourceSchema,
-  windows: z.array(z.object({ start_sec: z.number().min(0), end_sec: z.number().min(0) })).min(1).describe("Absolute time ranges to zoom into, e.g. [{\"start_sec\": 10, \"end_sec\": 40}], each within the video."),
+  windows: z.array(z.object({ start_sec: seconds(z.number().min(0)).describe("Seconds, or a timecode string in MM:SS.mmm form, e.g. 00:14.250."), end_sec: seconds(z.number().min(0)).describe("Seconds, or a timecode string in MM:SS.mmm form, e.g. 00:14.250.") })).min(1).describe("Absolute time ranges to zoom into, e.g. [{\"start_sec\": 10, \"end_sec\": 40}], each within the video."),
   fanout: z.number().int().min(2).max(8).describe("Child ranges per window (default 4, maximum 8; larger values are clamped and the result says so).").optional(),
   samples_per_child: z.number().int().min(1).max(12).describe("Thumbnails per child range (default 3, maximum 12; larger values are clamped and the result says so).").optional(),
   cols: z.number().int().min(1).optional(),
-  context_sec: z.number().min(0).describe("Seconds of padding added to each side of every window (default 0).").optional(),
+  context_sec: seconds(z.number().min(0)).describe("Seconds of padding added to each side of every window (default 0). Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.").optional(),
   max_total_samples: z.number().int().min(1).max(300).describe("Frame budget: windows x fanout x samples_per_child must not exceed it (default 96, maximum 300; larger values are clamped and the result says so).").optional(),
   align_to_cuts: z.boolean().optional(),
   compact_parent_sheet: z.boolean().optional(),
 };
 export const TrackRegionChangesInputSchema = {
   source: SourceSchema,
-  start_sec: z.number().min(0).describe("Start of the range in seconds."),
-  end_sec: z.number().min(0).describe("End of the range in seconds; must be within the video."),
+  start_sec: seconds(z.number().min(0)).describe("Start of the range in seconds. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250."),
+  end_sec: seconds(z.number().min(0)).describe("End of the range in seconds; must be within the video. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250."),
   region: z.union([
     z.object({
       x: z.number().min(0).max(1),
@@ -125,15 +129,15 @@ export const TrackRegionChangesInputSchema = {
   frame_width: z.number().int().min(64).max(1920).describe("Decoded frame width in pixels (default 640, maximum 1920; larger values are clamped).").optional(),
   min_change_score: z.number().min(0).max(1).optional(),
   robust_sigma: z.number().min(0).optional(),
-  min_separation_sec: z.number().min(0).optional(),
+  min_separation_sec: seconds(z.number().min(0)).describe("Seconds, or a timecode string in MM:SS.mmm form, e.g. 00:14.250.").optional(),
   max_candidates: z.number().int().min(1).max(128).describe("Most candidates returned (default 32, maximum 128; larger values are clamped). Raise min_change_score to keep only stronger ones.").optional(),
   max_total_frames: z.number().int().min(2).max(2000).describe("Frame budget for the whole range (default 600, maximum 2000; larger values are clamped). The call fails when (end_sec - start_sec) x sample_fps exceeds it.").optional(),
 };
 
 export const TrackRegionEventsInputSchema = {
   source: SourceSchema,
-  start_sec: z.number().min(0).describe("Start of the range in seconds."),
-  end_sec: z.number().min(0).describe("End of the range in seconds; must be within the video."),
+  start_sec: seconds(z.number().min(0)).describe("Start of the range in seconds. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250."),
+  end_sec: seconds(z.number().min(0)).describe("End of the range in seconds; must be within the video. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250."),
   region: z.union([
     z.object({
       x: z.number().min(0).max(1),
@@ -152,7 +156,7 @@ export const TrackRegionEventsInputSchema = {
   frame_width: z.number().int().min(64).max(1920).describe("Decoded frame width in pixels (default 640, maximum 1920; larger values are clamped).").optional(),
   change_threshold: z.number().min(0).max(1).optional(),
   ambiguity_margin: z.number().min(0).max(1).optional(),
-  min_separation_sec: z.number().min(0).optional(),
+  min_separation_sec: seconds(z.number().min(0)).describe("Seconds, or a timecode string in MM:SS.mmm form, e.g. 00:14.250.").optional(),
   max_events: z.number().int().min(1).max(128).describe("Most events returned (default 32, maximum 128; larger values are clamped). Raise change_threshold to keep only stronger ones.").optional(),
   max_total_frames: z.number().int().min(2).max(2000).describe("Frame budget for the whole range (default 600, maximum 2000; larger values are clamped). The call fails when (end_sec - start_sec) x sample_fps exceeds it.").optional(),
 };
@@ -160,11 +164,11 @@ export const TrackRegionEventsInputSchema = {
 export const InspectMomentsInputSchema = {
   source: SourceSchema,
   moments: z.array(z.object({
-    timestamp_sec: z.number().min(0),
+    timestamp_sec: seconds(z.number().min(0)).describe("Seconds, or a timecode string in MM:SS.mmm form, e.g. 00:14.250."),
     label: z.string().trim().min(1).max(80).optional(),
   })).min(1).max(16).describe("Instants to inspect, e.g. [{\"timestamp_sec\": 12.5, \"label\": \"door opens\"}], at most 16, each within the video."),
-  before_sec: z.number().min(0).describe("Seconds of context before each moment (default 4).").optional(),
-  after_sec: z.number().min(0).describe("Seconds of context after each moment (default 4).").optional(),
+  before_sec: seconds(z.number().min(0)).describe("Seconds of context before each moment (default 4). Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.").optional(),
+  after_sec: seconds(z.number().min(0)).describe("Seconds of context after each moment (default 4). Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.").optional(),
   samples_per_moment: z.number().int().min(3).max(25).describe("Frames per moment, an odd number 3-25 (default 9; larger values are clamped to 25).").optional(),
   cols: z.number().int().min(1).optional(),
   max_moments: z.number().int().min(1).max(16).describe("Most moments accepted (default and maximum 16; larger values are clamped).").optional(),
@@ -174,11 +178,11 @@ export const InspectMomentsInputSchema = {
 export const InspectWindowsInputSchema = {
   source: SourceSchema,
   windows: z.array(z.object({
-    start_sec: z.number().min(0),
-    end_sec: z.number().min(0),
+    start_sec: seconds(z.number().min(0)).describe("Seconds, or a timecode string in MM:SS.mmm form, e.g. 00:14.250."),
+    end_sec: seconds(z.number().min(0)).describe("Seconds, or a timecode string in MM:SS.mmm form, e.g. 00:14.250."),
   })).min(1).max(16).describe("Time ranges to inspect, e.g. [{\"start_sec\": 10, \"end_sec\": 14}], at most 16, each within the video."),
   fps: z.number().min(0.01).max(30).describe("Sampling rate (default 4, maximum 30; larger values are clamped).").optional(),
-  context_sec: z.number().min(0).describe("Seconds of padding added to each side of every window (default 0).").optional(),
+  context_sec: seconds(z.number().min(0)).describe("Seconds of padding added to each side of every window (default 0). Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.").optional(),
   merge_overlaps: z.boolean().describe("Merge overlapping windows into one (default true).").optional(),
   max_windows: z.number().int().min(1).max(16).describe("Most windows accepted (default and maximum 16; larger values are clamped).").optional(),
   max_total_frames: z.number().int().min(1).max(500).describe("Frame budget for all windows together (default 150, maximum 500; larger values are clamped). Lower fps or shorten the windows to fit.").optional(),
@@ -186,14 +190,14 @@ export const InspectWindowsInputSchema = {
 
 export const InspectWindowInputSchema = {
   source: SourceSchema,
-  start_sec: z.number().min(0).describe("Start of the window in seconds."),
-  end_sec: z.number().min(0).describe("End of the window in seconds; must be within the video."),
+  start_sec: seconds(z.number().min(0)).describe("Start of the window in seconds. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250."),
+  end_sec: seconds(z.number().min(0)).describe("End of the window in seconds; must be within the video. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250."),
   fps: z.number().min(0.01).max(30).describe("Sampling rate (default 4, maximum 30; larger values are clamped). Frames = fps x duration and must stay within about 150.").optional(),
 };
 
 export const FrameAtInputSchema = {
   source: SourceSchema,
-  time_sec: z.number().min(0).describe("Moment in seconds, from 0 to the media duration. Returns the frame shown at that moment."),
+  time_sec: seconds(z.number().min(0)).describe("Moment in seconds, from 0 to the media duration. Returns the frame shown at that moment. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250."),
   crop: z.object({
     x: z.number().int().min(0),
     y: z.number().int().min(0),
@@ -206,8 +210,8 @@ export const FrameAtInputSchema = {
 export const DetectCutsInputSchema = {
   source: SourceSchema,
   threshold: z.number().min(0).max(1).describe("Cut strength cutoff 0-1 (default 0.25). Raise it to keep only stronger cuts.").optional(),
-  start_sec: z.number().min(0).describe("Optional inclusive start of the cut-search range in absolute video seconds.").optional(),
-  end_sec: z.number().min(0).describe("Optional exclusive end of the cut-search range in absolute video seconds.").optional(),
+  start_sec: seconds(z.number().min(0)).describe("Optional inclusive start of the cut-search range in absolute video seconds. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.").optional(),
+  end_sec: seconds(z.number().min(0)).describe("Optional exclusive end of the cut-search range in absolute video seconds. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.").optional(),
 };
 
 export const CheckFrameCadenceInputSchema = {
@@ -221,8 +225,8 @@ const AudioBandSelectionSchema = z.union([
 
 export const AudioOnsetsInputSchema = {
   source: SourceSchema,
-  start_sec: z.number().min(0).describe("Optional inclusive start in seconds; omit to analyze from the beginning.").optional(),
-  end_sec: z.number().min(0).describe("Optional exclusive end in seconds; omit to analyze to the end.").optional(),
+  start_sec: seconds(z.number().min(0)).describe("Optional inclusive start in seconds; omit to analyze from the beginning. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.").optional(),
+  end_sec: seconds(z.number().min(0)).describe("Optional exclusive end in seconds; omit to analyze to the end. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.").optional(),
   min_strength: z.number().min(0).max(1).describe("Onset strength cutoff 0-1 (default 0.12). Raise it to keep only stronger onsets.").optional(),
   band_hz: AudioBandSelectionSchema.describe("Restrict to a named band (sub, low_mid, mid, high, air) or a [low_hz, high_hz] range.").optional(),
   compare_to: z.string().trim().min(1).describe("Path or video URL of another media file whose in-band energy is compared at each onset.").optional(),
@@ -230,23 +234,23 @@ export const AudioOnsetsInputSchema = {
 
 export const LoudnessTimelineInputSchema = {
   source: SourceSchema,
-  window_sec: z.number().min(0.01).max(600).describe("Fixed window length in seconds, 0.01-600 (default 0.25). Larger values than 600 are clamped to 600. Give this or bpm, not both.").optional(),
+  window_sec: seconds(z.number().min(0.01).max(600)).describe("Fixed window length in seconds, 0.01-600 (default 0.25). Larger values than 600 are clamped to 600. Give this or bpm, not both. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.").optional(),
   bpm: z.number().min(20).max(300).describe("Use one-beat windows at this tempo, 20-300. Give this or window_sec, not both.").optional(),
-  start_sec: z.number().min(0).describe("Optional inclusive start in seconds; omit to analyze from the beginning.").optional(),
-  end_sec: z.number().min(0).describe("Optional exclusive end in seconds; omit to analyze to the end.").optional(),
+  start_sec: seconds(z.number().min(0)).describe("Optional inclusive start in seconds; omit to analyze from the beginning. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.").optional(),
+  end_sec: seconds(z.number().min(0)).describe("Optional exclusive end in seconds; omit to analyze to the end. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.").optional(),
   ignore_ranges: z.array(z.object({
-    start_sec: z.number().min(0),
-    end_sec: z.number().min(0),
+    start_sec: seconds(z.number().min(0)).describe("Seconds, or a timecode string in MM:SS.mmm form, e.g. 00:14.250."),
+    end_sec: seconds(z.number().min(0)).describe("Seconds, or a timecode string in MM:SS.mmm form, e.g. 00:14.250."),
     reason: z.string().trim().min(1).max(200),
   })).describe("Ranges with a reason (e.g. an intentional silence) that are excluded from outlier detection.").optional(),
 };
 
 export const SpectrogramWindowInputSchema = {
   source: SourceSchema,
-  start_sec: z.number().min(0).describe("Start of the window in seconds."),
-  end_sec: z.number().min(0).describe("End of the window in seconds; the window may be at most 600 s long."),
+  start_sec: seconds(z.number().min(0)).describe("Start of the window in seconds. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250."),
+  end_sec: seconds(z.number().min(0)).describe("End of the window in seconds; the window may be at most 600 s long. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250."),
   marks: z.array(z.object({
-    time_sec: z.number().min(0).optional(),
+    time_sec: seconds(z.number().min(0)).describe("Seconds, or a timecode string in MM:SS.mmm form, e.g. 00:14.250.").optional(),
     t: z.number().min(0).optional(),
     label: z.string(),
   }).refine((mark) => mark.time_sec !== undefined || mark.t !== undefined)).describe("Optional event markers drawn on the image, e.g. [{\"time_sec\": 12.5, \"label\": \"kick\"}].").optional(),
@@ -255,26 +259,26 @@ export const SpectrogramWindowInputSchema = {
 export const WatchForInputSchema = {
   source: SourceSchema,
   conditions: z.array(z.string().trim().min(1)).min(1).max(8).describe("1 to 8 distinct yes/no questions about one frame, e.g. [\"Is a person visible?\", \"Is a red rectangle visible?\"]. Name what to look for; vague questions give vague chances."),
-  start_sec: z.number().min(0).describe("Start of the range in seconds (default 0).").optional(),
-  end_sec: z.number().min(0).describe("End of the range in seconds (default: the end of the video).").optional(),
-  interval_sec: z.number().min(1).max(600).describe("Seconds between samples (default 5, from 1 to 600). The range may hold at most 720 samples.").optional(),
+  start_sec: seconds(z.number().min(0)).describe("Start of the range in seconds (default 0). Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.").optional(),
+  end_sec: seconds(z.number().min(0)).describe("End of the range in seconds (default: the end of the video). Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.").optional(),
+  interval_sec: seconds(z.number().min(1).max(600)).describe("Seconds between samples (default 5, from 1 to 600). The range may hold at most 720 samples. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.").optional(),
   cut: z.number().positive().max(1).describe("Chance of yes (above 0, up to 1) at which a sample counts as yes (default 0.5).").optional(),
   consecutive: z.number().int().min(1).max(5).describe("Samples in a row that must count as yes before a wake (1 to 5, default 2).").optional(),
-  cooldown_sec: z.number().min(0).max(3600).describe("Seconds after a wake during which the same condition wakes no more (0 to 3600, default 30).").optional(),
+  cooldown_sec: seconds(z.number().min(0).max(3600)).describe("Seconds after a wake during which the same condition wakes no more (0 to 3600, default 30). Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.").optional(),
 };
 
 export const LabelSoundsInputSchema = {
   source: SourceSchema,
-  start_sec: z.number().min(0).describe("Start of the range in seconds."),
-  end_sec: z.number().min(0).describe("End of the range in seconds; at least 1 s after start_sec, and the range may hold at most 60 windows."),
+  start_sec: seconds(z.number().min(0)).describe("Start of the range in seconds. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250."),
+  end_sec: seconds(z.number().min(0)).describe("End of the range in seconds; at least 1 s after start_sec, and the range may hold at most 60 windows. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250."),
   labels: z.array(z.string().trim().min(1)).max(50).describe("Sound names to choose from, e.g. [\"dog barking\", \"siren\"] (at most 50, distinct). Default: 20 common sounds.").optional(),
-  window_sec: z.number().min(1).max(30).describe("Length of each labelled window in seconds (default 5, from 1 to 30). The last window may be shorter; a remainder under 1 s is not labelled.").optional(),
+  window_sec: seconds(z.number().min(1).max(30)).describe("Length of each labelled window in seconds (default 5, from 1 to 30). The last window may be shorter; a remainder under 1 s is not labelled. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.").optional(),
 };
 
 export const SyncCheckInputSchema = {
   source: SourceSchema,
   cues: z.array(z.object({
-    time_sec: z.number().min(0).optional(),
+    time_sec: seconds(z.number().min(0)).describe("Seconds, or a timecode string in MM:SS.mmm form, e.g. 00:14.250.").optional(),
     t: z.number().min(0).optional(),
     label: z.string().optional(),
     band_hz: AudioBandSelectionSchema.optional(),

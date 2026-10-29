@@ -1,10 +1,23 @@
 """Parity checks for the canonical MCP contract."""
 
+import itertools
 import json
+import math
 import re
+import shutil
+import struct
+import subprocess
+import time
+import wave
 from pathlib import Path
+from types import SimpleNamespace
 
-from src.executor.mcp_server import TOOLS_MANIFEST
+import jsonschema
+import pytest
+
+from src.core.config import Config
+from src.executor.mcp_server import TOOLS_MANIFEST, _parse_timecode, handle_call
+from src.transcript import asr
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -232,3 +245,255 @@ def test_detect_cuts_contract_tells_cuts_and_transitions_apart(monkeypatch):
     data = mcp_server.handle_call("detect_cuts", {"source": "clip.mp4"})["data"]
     assert [cut["kind"] for cut in data["cuts"]] == ["cut", "transition"]
     _assert_schema_accepts(tool["outputSchema"], data)
+
+
+# ---- end-to-end checks: real results against the published schemas --------
+
+TOOL_SPECS = {tool["name"]: tool for tool in TOOLS_MANIFEST}
+
+
+def _tone_with_bursts_wav(path, seconds=8, rate=44100):
+    """A 440 Hz sine with 1 kHz bursts at 2, 4 and 6 s, so onsets and sound cues have something to match."""
+    samples = bytearray()
+    for n in range(seconds * rate):
+        t = n / rate
+        value = 0.2 * math.sin(2 * math.pi * 440 * t)
+        for start in (2.0, 4.0, 6.0):
+            if 0 <= t - start < 0.08:
+                value += 0.9 * math.sin(2 * math.pi * 1000 * t) * math.sin(math.pi * (t - start) / 0.08)
+        samples += struct.pack("<h", int(max(-1.0, min(1.0, value)) * 32767))
+    with wave.open(str(path), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(rate)
+        wav.writeframes(samples)
+
+
+@pytest.fixture
+def clips(tmp_path, monkeypatch):
+    """An 8 s 320x240 video with a sine track and a hard cut at 4 s, and a 4 s audio-only file."""
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    tone = tmp_path / "tone.wav"
+    _tone_with_bursts_wav(tone)
+    video = tmp_path / "cut.mp4"
+    subprocess.run([
+        "ffmpeg", "-nostdin", "-v", "error", "-y",
+        "-f", "lavfi", "-i", "color=c=blue:s=320x240:r=10:d=4",
+        "-f", "lavfi", "-i", "testsrc=size=320x240:r=10:d=4",
+        "-i", str(tone),
+        "-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0[v]", "-map", "[v]", "-map", "2:a",
+        "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(video),
+    ], check=True)
+    audio = tmp_path / "tone.m4a"
+    subprocess.run([
+        "ffmpeg", "-nostdin", "-v", "error", "-y",
+        "-f", "lavfi", "-i", "sine=frequency=880:duration=4", "-c:a", "aac", str(audio),
+    ], check=True)
+    return SimpleNamespace(video=str(video), audio=str(audio))
+
+
+LOCAL_CALLS = [
+    ("probe_video", {}),
+    ("contact_sheet", {}),
+    ("detect_cuts", {}),
+    ("check_frame_cadence", {}),
+    ("audio_onsets", {}),
+    ("loudness_timeline", {}),
+    ("spectrogram_window", {"start_sec": 0, "end_sec": 4}),
+    ("inspect_window", {"start_sec": 3, "end_sec": 5}),
+    ("inspect_windows", {"windows": [{"start_sec": 3, "end_sec": 5}]}),
+    ("inspect_moments", {"moments": [{"timestamp_sec": 4.0, "label": "cut"}]}),
+    ("frame_at", {"time_sec": "00:02.500"}),
+    ("sync_check", {"cues": [{"time_sec": 4.0, "label": "hit"}]}),
+    ("overview_chunks", {}),
+    ("track_region_changes", {"region": {"x": 0, "y": 0, "width": 0.5, "height": 0.5}, "start_sec": 0, "end_sec": 8}),
+]
+
+
+def _output_problems(tool, data):
+    schema = TOOL_SPECS[tool]["outputSchema"]
+    validator = jsonschema.validators.validator_for(schema)(schema)
+    return [f"{'/'.join(map(str, error.path)) or '(root)'}: {error.message}" for error in validator.iter_errors(data)][:5]
+
+
+def test_cheap_local_tool_results_match_their_published_output_schemas(clips):
+    problems = {}
+    calls = [(tool, {"source": clips.video, **extra}) for tool, extra in LOCAL_CALLS]
+    calls.append(("probe_video", {"source": clips.audio}))  # audio-only file
+    for tool, args in calls:
+        result = handle_call(tool, args)
+        assert result["ok"] is True, (tool, result)
+        found = _output_problems(tool, result["data"])
+        if found:
+            problems[tool if args["source"] == clips.video else f"{tool} (audio-only)"] = found
+    assert problems == {}
+
+
+def test_search_transcript_in_progress_result_matches_its_output_schema(clips, monkeypatch):
+    monkeypatch.setattr(asr, "_installed_whisper_models", lambda: [])
+
+    class _StartedSlot:
+        def start(self, source_path, model_size):
+            return "in_progress", None
+
+    monkeypatch.setattr(asr, "_BACKGROUND_TRANSCRIPTION_SLOT", _StartedSlot())
+    # The background worker's lock file says the run started 30 s ago, so the progress fields are filled in.
+    Config.BASE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    (Config.BASE_CACHE_DIR / "asr-worker.lock").write_bytes(json.dumps({"started_at": time.time() - 30}).encode("utf-8"))
+
+    response = handle_call("search_transcript", {"source": clips.video, "query": "cached phrase"})
+
+    assert response["ok"] is True
+    data = response["data"]
+    assert data["status"] == "in_progress"
+    assert {"elapsed_sec", "estimated_total_sec", "estimated_percent"} <= set(data)
+    assert _output_problems("search_transcript", data) == []
+
+
+@pytest.mark.parametrize("tool,args,schema_key", [
+    ("frame_at", {"time_sec": "00:02.500"}, "time_sec"),
+    ("inspect_window", {"start_sec": "00:01", "end_sec": "00:02"}, "start_sec"),
+])
+def test_timecode_strings_pass_the_published_input_schema_and_run(clips, tool, args, schema_key):
+    args = {"source": clips.video, **args}
+    schema = TOOL_SPECS[tool]["inputSchema"]
+    jsonschema.validate(args, schema)
+    assert handle_call(tool, args)["ok"] is True
+
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate({**args, schema_key: "abc"}, schema)
+
+
+# ---- timecodes: one published pattern, the server parser, and the TypeScript declarations ----
+
+TIMECODE_EDGE_CASES = ["59", "60", "0:59", "0:60", "1:99", "1:59:59.5", "1:60:00", "100:00", "12.", ".5", "", "1::2", " 1"]
+# Fractions that round up to 60.0 in float; the server must still accept them (seconds under 60).
+LONG_TIMECODE_CASES = ["0" * 31 + "2", "0" * 32 + "2", "0" * 4300 + "2", "1:" + "0" * 40 + "5"]
+LONG_FRACTION_CASES = ["00:59.99999999999999999", "0:59.9999999999999999999", "1:59:59.99999999999999999",
+                       "59.99999999999999999", "12\n"]
+
+
+def _all_patterns(node):
+    """Every "pattern" value in a JSON document, at any depth."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "pattern":
+                yield value
+            yield from _all_patterns(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from _all_patterns(item)
+
+
+def _sec_properties(node, path=""):
+    """(path, schema) for every property named *_sec in a JSON schema, at any depth."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "properties" and isinstance(value, dict):
+                for name, sub in value.items():
+                    if name.endswith("_sec"):
+                        yield f"{path}/{name}", sub
+                    yield from _sec_properties(sub, f"{path}/{name}")
+            else:
+                yield from _sec_properties(value, f"{path}/{key}")
+    elif isinstance(node, list):
+        for index, item in enumerate(node):
+            yield from _sec_properties(item, f"{path}/{index}")
+
+
+def _published_timecode_pattern():
+    """The one pattern every copy in mcp_schemas.json shares."""
+    copies = list(_all_patterns(json.loads(CANONICAL.read_text(encoding="utf-8"))))
+    assert copies and len(set(copies)) == 1, set(copies)
+    return copies[0]
+
+
+def _published_timecode_max_length():
+    """The one maxLength every *_sec property shares."""
+    contract = json.loads(CANONICAL.read_text(encoding="utf-8"))
+    lengths = {sub.get("maxLength")
+               for section in ("tools", "legacy_tools")
+               for tool in contract[section].values()
+               for _, sub in _sec_properties(tool["inputSchema"])}
+    assert lengths == {32}, lengths
+    return 32
+
+
+def _node_timecode_matches(regex_source, max_length, texts):
+    """Run the TypeScript TIMECODE_PATTERN (its source text) and length cap in Node on each text; True/False per text."""
+    script = (
+        "const re = new RegExp(process.argv[1]); const max = Number(process.argv[2]);"
+        "const texts = JSON.parse(require('fs').readFileSync(0, 'utf8'));"
+        "process.stdout.write(JSON.stringify(texts.map((text) => re.test(text) && text.length <= max)));"
+    )
+    done = subprocess.run(["node", "-e", script, regex_source, str(max_length)], input=json.dumps(list(texts)),
+                          capture_output=True, text=True, check=True)
+    return json.loads(done.stdout)
+
+
+def test_timecode_pattern_accepts_exactly_what_the_server_parses():
+    pattern = _published_timecode_pattern()
+    max_length = _published_timecode_max_length()
+    ts_source = ZOD_TS.read_text(encoding="utf-8")
+    assert pattern in ts_source  # TIMECODE_PATTERN in mcp_definitions.ts
+
+    published = re.compile(pattern)
+    cases = list(TIMECODE_EDGE_CASES) + LONG_FRACTION_CASES + LONG_TIMECODE_CASES
+    for length in range(7):
+        cases.extend("".join(chars) for chars in itertools.product("019:.5", repeat=length))
+
+    json_ok = {text: bool(published.fullmatch(text)) and len(text) <= max_length for text in cases}
+    parse_ok = {text: _parse_timecode(text) is not None for text in cases}
+    assert [text for text in cases if json_ok[text] != parse_ok[text]] == []
+
+    if shutil.which("node") is None:
+        pytest.skip("node is not installed, so the TypeScript regex was not run")
+    literal = re.search(r"const TIMECODE_PATTERN = /(.*)/;", ts_source).group(1)
+    node_ok = dict(zip(cases, _node_timecode_matches(literal, max_length, cases)))
+    assert [text for text in cases if node_ok[text] != json_ok[text]] == []
+
+
+def test_overlong_timecode_is_refused_and_the_error_names_the_parameter(clips):
+    with pytest.raises(ValueError, match="argument 'time_sec' is longer than 32"):
+        handle_call("frame_at", {"source": clips.video, "time_sec": "0" * 4300 + "2"})
+
+
+def test_every_sec_input_takes_the_timecode_string_in_schema_and_declarations():
+    pattern = _published_timecode_pattern()
+    max_length = _published_timecode_max_length()
+    contract = json.loads(CANONICAL.read_text(encoding="utf-8"))
+
+    # Schema side: every *_sec input property, at any depth, takes a string that matches the shared pattern.
+    checked = []
+    problems = []
+    for section in ("tools", "legacy_tools"):
+        for name, tool in contract[section].items():
+            for path, sub in _sec_properties(tool["inputSchema"], f"{section}/{name}"):
+                checked.append(path)
+                kinds = sub.get("type") if isinstance(sub.get("type"), list) else [sub.get("type")]
+                if "string" not in kinds or sub.get("pattern") != pattern or sub.get("maxLength") != max_length:
+                    problems.append(path)
+    assert checked and problems == []
+
+    # Declaration side: in each ...Input type, every *_sec field's type includes string.
+    # Scope: from `export interface|type ...Input` to its closing `}` (type aliases: their last `;`).
+    scope = None
+    kind = None
+    inputs = set()
+    declared = 0
+    for number, line in enumerate(PUBLIC_TS.read_text(encoding="utf-8").splitlines(), 1):
+        header = re.match(r"export (interface|type) (\w+)", line)
+        if header:
+            kind, name = header.groups()
+            scope = name if name.endswith("Input") else None
+            if scope:
+                inputs.add(scope)
+        if scope:
+            for match in re.finditer(r"_sec\??:\s*([^;}]*)", line):
+                declared += 1
+                if "string" not in match.group(1):
+                    problems.append(f"types.d.ts:{number} ({scope}): {line.strip()}")
+        if scope and (line == "}" or (kind == "type" and line.rstrip().endswith(";"))):
+            scope = None
+    assert len(inputs) > 20 and declared > 0
+    assert problems == []

@@ -404,8 +404,8 @@
           "source": { "type": "string", "minLength": 1 },
           "query": { "type": "string", "minLength": 1, "maxLength": 2000, "description": "Natural-language description of visible content." },
           "top_k": { "type": "integer", "minimum": 1, "maximum": 20, "default": 5 },
-          "start_sec": { "type": "number", "minimum": 0, "default": 0 },
-          "end_sec": { "type": ["number", "null"], "minimum": 0 }
+          "start_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "default": 0, "description": "Seconds, or a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
+          "end_sec": { "type": ["number", "string", "null"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "Seconds, or a timecode string in MM:SS.mmm form, e.g. 00:14.250." }
         },
         "required": ["source", "query"],
         "additionalProperties": false
@@ -574,17 +574,15 @@
         "properties": {
           "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
           "start_sec": {
-            "description": "Start of the window in seconds (default 0). The window may be at most 180 s long.",
-            "type": "number",
+            "description": "Start of the window in seconds (default 0). The window may be at most 180 s long. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.",
+            "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32,
             "minimum": 0,
             "default": 0
           },
           "end_sec": {
-            "description": "End of the window in seconds; defaults to the end of the video. Give both bounds for a video longer than 180 s.",
-            "type": [
-              "number",
-              "null"
-            ],
+            "description": "End of the window in seconds; defaults to the end of the video. Give both bounds for a video longer than 180 s. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.",
+            "type": ["number", "string", "null"],
+            "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32,
             "minimum": 0
           },
           "region": {
@@ -674,14 +672,14 @@
             "default": "auto"
           },
           "min_period_sec": {
-            "description": "Shortest expected cycle in seconds (default 0.4). Bounds the amplitude counter only; the periodicity check ignores it and searches from 0.25 s.",
-            "type": "number",
+            "description": "Shortest expected cycle in seconds (default 0.4). Bounds the amplitude counter only; the periodicity check ignores it and searches from 0.25 s. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.",
+            "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32,
             "exclusiveMinimum": 0,
             "default": 0.4
           },
           "max_period_sec": {
-            "description": "Longest expected cycle in seconds (default 3); must exceed min_period_sec. Bounds the amplitude counter only; the periodicity check ignores it.",
-            "type": "number",
+            "description": "Longest expected cycle in seconds (default 3); must exceed min_period_sec. Bounds the amplitude counter only; the periodicity check ignores it. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.",
+            "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32,
             "exclusiveMinimum": 0,
             "default": 3
           },
@@ -822,10 +820,10 @@
           "description": { "type": "string", "minLength": 1, "maxLength": 500, "description": "Visible thing to count, e.g. 'yellow outlined circle', 'green diamond', 'red star'. Name its colour and shape; text on screen goes in `text`." },
           "text": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Exact on-screen phrase, matched as whole words (RELEASE matches 'RELEASE' and 'RELEASE NOTES', not 'RELEASED' or 'PRE-RELEASE')." },
           "case_sensitive": { "type": "boolean", "default": false, "description": "Require the same letter case for `text`." },
-          "start_sec": { "type": "number", "minimum": 0, "default": 0 },
-          "end_sec": { "type": ["number", "null"], "minimum": 0, "description": "Defaults to the end of the video. At most 2400 frames are analyzed per call, so fps is lowered automatically on long windows." },
+          "start_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "default": 0, "description": "Seconds, or a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
+          "end_sec": { "type": ["number", "string", "null"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "Defaults to the end of the video. At most 2400 frames are analyzed per call, so fps is lowered automatically on long windows. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
           "fps": { "type": "number", "exclusiveMinimum": 0, "maximum": 15, "default": 5, "description": "Sampling rate, default 5. Appearances shorter than 1/fps can be missed; raise it for brief flashes. Larger values than 15 are clamped to 15 and the result says so." },
-          "min_gap_sec": { "type": "number", "exclusiveMinimum": 0, "default": 0.3, "description": "Absence of at least this long starts a new span; shorter dropouts stay inside one span. Raising it above the default 0.3 JOINS separate appearances whose gap is shorter than it (0.8 merges appearances 0.7 s apart); the result reports gaps_merged and count_without_merges when that happens." },
+          "min_gap_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "exclusiveMinimum": 0, "default": 0.3, "description": "Absence of at least this long starts a new span; shorter dropouts stay inside one span. Raising it above the default 0.3 JOINS separate appearances whose gap is shorter than it (0.8 merges appearances 0.7 s apart); the result reports gaps_merged and count_without_merges when that happens. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
           "max_spans": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20, "description": "Maximum spans listed (default 20, maximum 100; larger values are clamped to 100 and the result says so). `count` always includes every span." }
         },
         "required": ["source"],
@@ -1034,7 +1032,10 @@
           "transcription_status": { "type": "string", "enum": ["started", "in_progress", "busy", "start_failed", "failed"] },
           "retry_after_seconds": { "type": "integer", "minimum": 0 },
           "transcription_message": { "type": "string" },
-          "model_substitution": { "type": "string", "description": "Only when the requested model is not installed: names the installed model used instead." }
+          "model_substitution": { "type": "string", "description": "Only when the requested model is not installed: names the installed model used instead." },
+          "elapsed_sec": { "type": "integer", "minimum": 0, "description": "While status=in_progress: seconds since the background transcription started." },
+          "estimated_total_sec": { "type": "integer", "minimum": 0, "description": "While status=in_progress: rough estimate of the whole run, from the audio length and model speed." },
+          "estimated_percent": { "type": "integer", "minimum": 0, "maximum": 99, "description": "While status=in_progress: elapsed / estimated total, capped at 99. An estimate, not a measurement." }
         },
         "oneOf": [
           { "required": ["hits", "total"] },
@@ -1064,8 +1065,8 @@
           "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
           "query": { "type": "string", "minLength": 1, "maxLength": 2000, "description": "Natural-language description of visible content." },
           "top_k": { "type": "integer", "minimum": 1, "maximum": 20, "default": 5, "description": "Maximum frame hits (default 5, maximum 20; larger values are clamped to 20 and the result says so). This ranks frames and cannot count: use count_occurrences for counts." },
-          "start_sec": { "type": "number", "minimum": 0, "default": 0, "description": "Inclusive start of the range to search, in seconds." },
-          "end_sec": { "type": ["number", "null"], "minimum": 0, "description": "Exclusive end of the range to search, in seconds; defaults to the end of the video." }
+          "start_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "default": 0, "description": "Inclusive start of the range to search, in seconds. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
+          "end_sec": { "type": ["number", "string", "null"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "Exclusive end of the range to search, in seconds; defaults to the end of the video. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250." }
         },
         "required": ["source", "query"],
         "additionalProperties": false
@@ -1081,8 +1082,8 @@
           "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
           "samples": { "type": "integer", "minimum": 1, "default": 12, "description": "Requested number of thumbnails; values above 150 are accepted and clamped to 150." },
           "cols": { "type": "integer", "minimum": 1, "default": 4, "description": "Grid columns (default 4)." },
-          "start_sec": { "type": "number", "minimum": 0, "description": "Optional inclusive start of the overview range in absolute video seconds." },
-          "end_sec": { "type": "number", "minimum": 0, "description": "Optional exclusive end of the overview range in absolute video seconds." }
+          "start_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "Optional inclusive start of the overview range in absolute video seconds. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
+          "end_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "Optional exclusive end of the overview range in absolute video seconds. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250." }
         },
         "required": ["source"],
         "additionalProperties": false
@@ -1323,11 +1324,11 @@
         "type": "object",
         "properties": {
           "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
-          "chunk_sec": { "type": "number", "exclusiveMinimum": 0, "maximum": 600, "default": 60, "description": "Seconds covered by each sheet (default 60, maximum 600)." },
+          "chunk_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "exclusiveMinimum": 0, "maximum": 600, "default": 60, "description": "Seconds covered by each sheet (default 60, maximum 600). Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
           "samples_per_chunk": { "type": "integer", "minimum": 1, "maximum": 150, "default": 8, "description": "Thumbnails per sheet (default 8; values above 150 are clamped to 150 and the result says so)." },
           "cols": { "type": "integer", "minimum": 1, "default": 4 },
-          "start_sec": { "type": "number", "minimum": 0, "description": "Optional inclusive start in absolute video seconds." },
-          "end_sec": { "type": "number", "minimum": 0, "description": "Optional exclusive end in absolute video seconds; defaults to the end of the video." },
+          "start_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "Optional inclusive start in absolute video seconds. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
+          "end_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "Optional exclusive end in absolute video seconds; defaults to the end of the video. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
           "max_chunks": { "type": "integer", "minimum": 1, "maximum": 32, "default": 32, "description": "Most sheets in one call (default and maximum 32; larger values are clamped). The call fails if the range needs more chunks: raise chunk_sec or narrow the range." }
         },
         "required": ["source"],
@@ -1382,11 +1383,11 @@
         "type": "object",
         "properties": {
           "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
-          "windows": { "type": "array", "minItems": 1, "items": { "type": "object", "properties": { "start_sec": { "type": "number", "minimum": 0 }, "end_sec": { "type": "number", "minimum": 0 } }, "required": ["start_sec", "end_sec"], "additionalProperties": false }, "description": "Absolute time ranges to zoom into, e.g. [{\"start_sec\": 10, \"end_sec\": 40}], each within the video." },
+          "windows": { "type": "array", "minItems": 1, "items": { "type": "object", "properties": { "start_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "Seconds, or a timecode string in MM:SS.mmm form, e.g. 00:14.250." }, "end_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "Seconds, or a timecode string in MM:SS.mmm form, e.g. 00:14.250." } }, "required": ["start_sec", "end_sec"], "additionalProperties": false }, "description": "Absolute time ranges to zoom into, e.g. [{\"start_sec\": 10, \"end_sec\": 40}], each within the video." },
           "fanout": { "type": "integer", "minimum": 2, "maximum": 8, "default": 4, "description": "Child ranges per window (default 4, maximum 8; larger values are clamped and the result says so)." },
           "samples_per_child": { "type": "integer", "minimum": 1, "maximum": 12, "default": 3, "description": "Thumbnails per child range (default 3, maximum 12; larger values are clamped and the result says so)." },
           "cols": { "type": "integer", "minimum": 1, "default": 3 },
-          "context_sec": { "type": "number", "minimum": 0, "default": 0, "description": "Seconds of padding added to each side of every window (default 0)." },
+          "context_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "default": 0, "description": "Seconds of padding added to each side of every window (default 0). Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
           "max_total_samples": { "type": "integer", "minimum": 1, "maximum": 300, "default": 96, "description": "Frame budget: windows x fanout x samples_per_child must not exceed it (default 96, maximum 300; larger values are clamped and the result says so)." },
           "align_to_cuts": { "type": "boolean", "default": false },
           "compact_parent_sheet": { "type": "boolean", "default": false }
@@ -1419,8 +1420,8 @@
         "type": "object",
         "properties": {
           "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
-          "start_sec": { "type": "number", "minimum": 0, "description": "Start of the range in seconds." },
-          "end_sec": { "type": "number", "minimum": 0, "description": "End of the range in seconds; must be within the video." },
+          "start_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "Start of the range in seconds. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
+          "end_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "End of the range in seconds; must be within the video. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
           "region": {
             "description": "Rectangle to watch, as fractions of the frame: x, y (top-left) and width, height, with x+width <= 1 and y+height <= 1. Uses width/height, not w/h; w/h with the same meaning is also accepted.",
             "anyOf": [
@@ -1494,7 +1495,7 @@
           "frame_width": { "type": "integer", "minimum": 64, "maximum": 1920, "default": 640, "description": "Decoded frame width in pixels (default 640, maximum 1920; larger values are clamped)." },
           "min_change_score": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.02 },
           "robust_sigma": { "type": "number", "minimum": 0, "default": 6.0 },
-          "min_separation_sec": { "type": "number", "minimum": 0, "default": 2.0 },
+          "min_separation_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "default": 2.0, "description": "Seconds, or a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
           "max_candidates": { "type": "integer", "minimum": 1, "maximum": 128, "default": 32, "description": "Most candidates returned (default 32, maximum 128; larger values are clamped). Raise min_change_score to keep only stronger ones." },
           "max_total_frames": { "type": "integer", "minimum": 2, "maximum": 2000, "default": 600, "description": "Frame budget for the whole range (default 600, maximum 2000; larger values are clamped). The call fails when (end_sec - start_sec) x sample_fps exceeds it." }
         },
@@ -1538,8 +1539,8 @@
         "type": "object",
         "properties": {
           "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
-          "start_sec": { "type": "number", "minimum": 0, "description": "Start of the range in seconds." },
-          "end_sec": { "type": "number", "minimum": 0, "description": "End of the range in seconds; must be within the video." },
+          "start_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "Start of the range in seconds. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
+          "end_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "End of the range in seconds; must be within the video. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
           "region": {
             "description": "Rectangle to watch, as fractions of the frame: x, y (top-left) and width, height, with x+width <= 1 and y+height <= 1. Uses width/height, not w/h; w/h with the same meaning is also accepted.",
             "anyOf": [
@@ -1613,7 +1614,7 @@
           "frame_width": { "type": "integer", "minimum": 64, "maximum": 1920, "default": 640, "description": "Decoded frame width in pixels (default 640, maximum 1920; larger values are clamped)." },
           "change_threshold": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.02 },
           "ambiguity_margin": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.01 },
-          "min_separation_sec": { "type": "number", "minimum": 0, "default": 2.0 },
+          "min_separation_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "default": 2.0, "description": "Seconds, or a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
           "max_events": { "type": "integer", "minimum": 1, "maximum": 128, "default": 32, "description": "Most events returned (default 32, maximum 128; larger values are clamped). Raise change_threshold to keep only stronger ones." },
           "max_total_frames": { "type": "integer", "minimum": 2, "maximum": 2000, "default": 600, "description": "Frame budget for the whole range (default 600, maximum 2000; larger values are clamped). The call fails when (end_sec - start_sec) x sample_fps exceeds it." }
         },
@@ -1658,9 +1659,9 @@
         "type": "object",
         "properties": {
           "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
-          "moments": { "type": "array", "minItems": 1, "maxItems": 16, "items": { "type": "object", "properties": { "timestamp_sec": { "type": "number", "minimum": 0 }, "label": { "type": "string", "minLength": 1, "maxLength": 80 } }, "required": ["timestamp_sec"], "additionalProperties": false }, "description": "Instants to inspect, e.g. [{\"timestamp_sec\": 12.5, \"label\": \"door opens\"}], at most 16, each within the video." },
-          "before_sec": { "type": "number", "minimum": 0, "default": 4.0, "description": "Seconds of context before each moment (default 4)." },
-          "after_sec": { "type": "number", "minimum": 0, "default": 4.0, "description": "Seconds of context after each moment (default 4)." },
+          "moments": { "type": "array", "minItems": 1, "maxItems": 16, "items": { "type": "object", "properties": { "timestamp_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "Seconds, or a timecode string in MM:SS.mmm form, e.g. 00:14.250." }, "label": { "type": "string", "minLength": 1, "maxLength": 80 } }, "required": ["timestamp_sec"], "additionalProperties": false }, "description": "Instants to inspect, e.g. [{\"timestamp_sec\": 12.5, \"label\": \"door opens\"}], at most 16, each within the video." },
+          "before_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "default": 4.0, "description": "Seconds of context before each moment (default 4). Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
+          "after_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "default": 4.0, "description": "Seconds of context after each moment (default 4). Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
           "samples_per_moment": { "type": "integer", "minimum": 3, "maximum": 25, "default": 9, "description": "Frames per moment, an odd number 3-25 (default 9; larger values are clamped to 25)." },
           "cols": { "type": "integer", "minimum": 1, "default": 3 },
           "max_moments": { "type": "integer", "minimum": 1, "maximum": 16, "default": 16, "description": "Most moments accepted (default and maximum 16; larger values are clamped)." },
@@ -1716,15 +1717,15 @@
             "items": {
               "type": "object",
               "properties": {
-                "start_sec": { "type": "number", "minimum": 0 },
-                "end_sec": { "type": "number", "minimum": 0 }
+                "start_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "Seconds, or a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
+                "end_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "Seconds, or a timecode string in MM:SS.mmm form, e.g. 00:14.250." }
               },
               "required": ["start_sec", "end_sec"],
               "additionalProperties": false
             }
           },
           "fps": { "type": "number", "minimum": 0.01, "maximum": 30, "default": 4.0, "description": "Sampling rate (default 4, maximum 30; larger values are clamped)." },
-          "context_sec": { "type": "number", "minimum": 0, "default": 0.0, "description": "Seconds of padding added to each side of every window (default 0)." },
+          "context_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "default": 0.0, "description": "Seconds of padding added to each side of every window (default 0). Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
           "merge_overlaps": { "type": "boolean", "default": true, "description": "Merge overlapping windows into one (default true)." },
           "max_windows": { "type": "integer", "minimum": 1, "maximum": 16, "default": 16, "description": "Most windows accepted (default and maximum 16; larger values are clamped)." },
           "max_total_frames": { "type": "integer", "minimum": 1, "maximum": 500, "default": 150, "description": "Frame budget for all windows together (default 150, maximum 500; larger values are clamped). Lower fps or shorten the windows to fit." }
@@ -1795,8 +1796,8 @@
         "type": "object",
         "properties": {
           "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
-          "start_sec": { "type": "number", "minimum": 0, "description": "Start of the window in seconds." },
-          "end_sec": { "type": "number", "minimum": 0, "description": "End of the window in seconds; must be within the video." },
+          "start_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "Start of the window in seconds. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
+          "end_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "End of the window in seconds; must be within the video. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
           "fps": { "type": "number", "minimum": 0.01, "maximum": 30, "default": 4.0, "description": "Sampling rate (default 4, maximum 30; larger values are clamped). Frames = fps x duration and must stay within about 150." }
         },
         "required": ["source", "start_sec", "end_sec"],
@@ -1854,9 +1855,9 @@
             "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source."
           },
           "time_sec": {
-            "type": "number",
+            "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32,
             "minimum": 0,
-            "description": "Moment in seconds, from 0 to the media duration. Returns the frame shown at that moment."
+            "description": "Moment in seconds, from 0 to the media duration. Returns the frame shown at that moment. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250."
           },
           "crop": {
             "type": "object",
@@ -1939,8 +1940,8 @@
         "properties": {
           "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
           "threshold": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.25, "description": "Cut strength cutoff 0-1 (default 0.25). Raise it to keep only stronger cuts." },
-          "start_sec": { "type": "number", "minimum": 0, "description": "Optional inclusive start of the cut-search range in absolute video seconds." },
-          "end_sec": { "type": "number", "minimum": 0, "description": "Optional exclusive end of the cut-search range in absolute video seconds." }
+          "start_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "Optional inclusive start of the cut-search range in absolute video seconds. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
+          "end_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "Optional exclusive end of the cut-search range in absolute video seconds. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250." }
         },
         "required": ["source"],
         "additionalProperties": false
@@ -2025,13 +2026,13 @@
         "properties": {
           "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
           "start_sec": {
-            "description": "Optional inclusive start in seconds; omit to analyze from the beginning.",
-            "type": "number",
+            "description": "Optional inclusive start in seconds; omit to analyze from the beginning. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.",
+            "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32,
             "minimum": 0
           },
           "end_sec": {
-            "description": "Optional exclusive end in seconds; omit to analyze to the end.",
-            "type": "number",
+            "description": "Optional exclusive end in seconds; omit to analyze to the end. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.",
+            "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32,
             "minimum": 0
           },
           "min_strength": {
@@ -2224,8 +2225,8 @@
         "properties": {
           "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
           "window_sec": {
-            "description": "Fixed window length in seconds, 0.01-600 (default 0.25). Larger values than 600 are clamped to 600. Give this or bpm, not both.",
-            "type": "number",
+            "description": "Fixed window length in seconds, 0.01-600 (default 0.25). Larger values than 600 are clamped to 600. Give this or bpm, not both. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.",
+            "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32,
             "minimum": 0.01,
             "maximum": 600
           },
@@ -2236,13 +2237,13 @@
             "maximum": 300
           },
           "start_sec": {
-            "description": "Optional inclusive start in seconds; omit to analyze from the beginning.",
-            "type": "number",
+            "description": "Optional inclusive start in seconds; omit to analyze from the beginning. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.",
+            "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32,
             "minimum": 0
           },
           "end_sec": {
-            "description": "Optional exclusive end in seconds; omit to analyze to the end.",
-            "type": "number",
+            "description": "Optional exclusive end in seconds; omit to analyze to the end. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.",
+            "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32,
             "minimum": 0
           },
           "ignore_ranges": {
@@ -2252,13 +2253,11 @@
               "type": "object",
               "properties": {
                 "start_sec": {
-                  "type": "number",
-                  "minimum": 0
-                },
+                  "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32,
+                  "minimum": 0, "description": "Seconds, or a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
                 "end_sec": {
-                  "type": "number",
-                  "minimum": 0
-                },
+                  "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32,
+                  "minimum": 0, "description": "Seconds, or a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
                 "reason": {
                   "type": "string",
                   "minLength": 1,
@@ -2576,13 +2575,13 @@
         "properties": {
           "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
           "start_sec": {
-            "description": "Start of the window in seconds.",
-            "type": "number",
+            "description": "Start of the window in seconds. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.",
+            "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32,
             "minimum": 0
           },
           "end_sec": {
-            "description": "End of the window in seconds; the window may be at most 600 s long.",
-            "type": "number",
+            "description": "End of the window in seconds; the window may be at most 600 s long. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.",
+            "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32,
             "minimum": 0
           },
           "marks": {
@@ -2592,9 +2591,8 @@
               "type": "object",
               "properties": {
                 "time_sec": {
-                  "type": "number",
-                  "minimum": 0
-                },
+                  "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32,
+                  "minimum": 0, "description": "Seconds, or a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
                 "label": {
                   "type": "string"
                 }
@@ -2745,9 +2743,8 @@
               "type": "object",
               "properties": {
                 "time_sec": {
-                  "type": "number",
-                  "minimum": 0
-                },
+                  "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32,
+                  "minimum": 0, "description": "Seconds, or a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
                 "t": {
                   "type": "number",
                   "minimum": 0
@@ -2815,14 +2812,42 @@
       "outputSchema": {
         "type": "object",
         "properties": {
-          "source_url": { "type": "string", "description": "The video URL you passed as `source`; only present when `source` was a URL." },
-          "local_path": { "type": "string", "description": "Cached local copy of `source_url`; pass it to other tools or ffmpeg to skip the URL lookup." },
-          "status": { "type": "string", "enum": ["in_progress"] },
-          "retry_after_seconds": { "type": "integer", "minimum": 0 },
-          "note": { "type": "string", "description": "Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument." },
-          "tolerance_ms_clamped_from": { "type": "number", "description": "The value you requested for tolerance_ms before it was lowered to its cap." },
-          "cuts_omitted": { "type": "integer", "minimum": 1, "description": "How many cuts entries were left out of the list." },
-          "unmatched_strong_onsets_omitted": { "type": "integer", "minimum": 1, "description": "How many unmatched_strong_onsets entries were left out of the list." },
+          "source_url": {
+            "type": "string",
+            "description": "The video URL you passed as `source`; only present when `source` was a URL."
+          },
+          "local_path": {
+            "type": "string",
+            "description": "Cached local copy of `source_url`; pass it to other tools or ffmpeg to skip the URL lookup."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "in_progress"
+            ]
+          },
+          "retry_after_seconds": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "note": {
+            "type": "string",
+            "description": "Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument."
+          },
+          "tolerance_ms_clamped_from": {
+            "type": "number",
+            "description": "The value you requested for tolerance_ms before it was lowered to its cap."
+          },
+          "cuts_omitted": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "How many cuts entries were left out of the list."
+          },
+          "unmatched_strong_onsets_omitted": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "How many unmatched_strong_onsets entries were left out of the list."
+          },
           "source_path": {
             "type": "string"
           },
@@ -2831,6 +2856,99 @@
           },
           "cue_recovery_window_ms": {
             "type": "number"
+          },
+          "search_window_ms": {
+            "type": "number",
+            "description": "The window used to pair cues with onsets, in ms."
+          },
+          "bpm": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "The tempo passed in, or null."
+          },
+          "beats_per_bar": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Beats per bar used with bpm; null without bpm."
+          },
+          "cue_signatures": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "bands": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "sample_count": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "method": {
+                  "type": "string"
+                },
+                "control_count": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "profile": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "number"
+                  },
+                  "description": "Mean level per third-octave band name."
+                },
+                "example_times_sec": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  }
+                }
+              },
+              "required": [
+                "bands",
+                "sample_count",
+                "method",
+                "control_count",
+                "profile",
+                "example_times_sec"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Learned sound signature for each cue group, keyed by group name."
+          },
+          "systematic_lags": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "group": {
+                  "type": "string"
+                },
+                "lag_ms": {
+                  "type": "integer"
+                },
+                "method": {
+                  "type": "string"
+                },
+                "classification": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "group",
+                "lag_ms",
+                "method",
+                "classification"
+              ],
+              "additionalProperties": false
+            }
           },
           "cuts": {
             "type": "array",
@@ -2895,7 +3013,8 @@
                     "ok",
                     "early",
                     "late",
-                    "missing"
+                    "missing",
+                    "ambiguous"
                   ]
                 },
                 "matched_onset_time_sec": {
@@ -2909,6 +3028,231 @@
                     "number",
                     "null"
                   ]
+                },
+                "nearest_onset_time_sec": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "nearest_onset_offset_ms": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "cue_group": {
+                  "type": "string"
+                },
+                "dominant_band": {
+                  "type": "string"
+                },
+                "simple_check_on_time": {
+                  "type": "boolean"
+                },
+                "simple_check_onset_offset_ms": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "simple_check_level_db": {
+                  "type": "number"
+                },
+                "simple_check_reference_db": {
+                  "type": "number"
+                },
+                "simple_check_reference": {
+                  "type": "string"
+                },
+                "group_typical_level_db": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "template_status": {
+                  "type": "string",
+                  "enum": [
+                    "ok",
+                    "early",
+                    "late",
+                    "missing",
+                    "ambiguous"
+                  ]
+                },
+                "evidence": {
+                  "type": "string"
+                },
+                "audible_in_any_band": {
+                  "type": "boolean"
+                },
+                "signature_bands": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "signature_sample_count": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "signature_score": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "group_median_score": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "group_typical_attack_lag_ms": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "on_cue_score": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "companion_gain": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "displaced_time_sec": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "shifted_null_floor": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "credible_score_floor": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "slot_before_ms": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "slot_after_ms": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "signature_excess_ratio": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "search_window_ms": {
+                  "type": "number"
+                },
+                "match_method": {
+                  "type": "string"
+                },
+                "ambiguous_reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "candidate_onsets": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "time_sec": {
+                        "type": "number"
+                      },
+                      "offset_ms": {
+                        "type": "number"
+                      },
+                      "strength": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "time_sec",
+                      "offset_ms",
+                      "strength"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "soft_attack_build": {
+                  "type": "object",
+                  "properties": {
+                    "conclusive": {
+                      "type": "boolean"
+                    },
+                    "measured": {
+                      "type": "boolean"
+                    },
+                    "band": {
+                      "type": "string",
+                      "description": "The band measured: 'broadband' or a 'low-high Hz' range."
+                    },
+                    "window_sec": {
+                      "type": "number"
+                    },
+                    "comparison_count": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "relative_rise_db": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "prior_relative_rise_db": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "end_excess_db": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "steady_steps": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "conclusive",
+                    "measured",
+                    "band",
+                    "window_sec",
+                    "comparison_count",
+                    "relative_rise_db",
+                    "prior_relative_rise_db",
+                    "end_excess_db",
+                    "steady_steps"
+                  ],
+                  "additionalProperties": false
                 },
                 "band_hz": {
                   "oneOf": [
@@ -2938,7 +3282,37 @@
                 "label",
                 "status",
                 "matched_onset_time_sec",
-                "offset_ms"
+                "offset_ms",
+                "nearest_onset_time_sec",
+                "nearest_onset_offset_ms",
+                "cue_group",
+                "dominant_band",
+                "simple_check_on_time",
+                "simple_check_onset_offset_ms",
+                "simple_check_level_db",
+                "simple_check_reference_db",
+                "simple_check_reference",
+                "group_typical_level_db",
+                "template_status",
+                "evidence",
+                "audible_in_any_band",
+                "signature_bands",
+                "signature_sample_count",
+                "signature_score",
+                "group_median_score",
+                "group_typical_attack_lag_ms",
+                "on_cue_score",
+                "companion_gain",
+                "displaced_time_sec",
+                "shifted_null_floor",
+                "credible_score_floor",
+                "slot_before_ms",
+                "slot_after_ms",
+                "signature_excess_ratio",
+                "search_window_ms",
+                "match_method",
+                "ambiguous_reason",
+                "candidate_onsets"
               ],
               "additionalProperties": false
             }
@@ -2991,6 +3365,79 @@
               "additionalProperties": false
             }
           },
+          "uncued_sounds": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "time_sec": {
+                  "type": "number"
+                },
+                "group": {
+                  "type": "string"
+                },
+                "score": {
+                  "type": "number"
+                },
+                "group_median_score": {
+                  "type": "number"
+                },
+                "threshold": {
+                  "type": "number"
+                },
+                "dominant_band": {
+                  "type": "string"
+                },
+                "simple_check_level_db": {
+                  "type": "number"
+                },
+                "group_typical_level_db": {
+                  "type": "number"
+                },
+                "confirmed_by": {
+                  "type": "string",
+                  "enum": [
+                    "group_band",
+                    "own_attack_band"
+                  ]
+                },
+                "attack_rise_db": {
+                  "type": "number",
+                  "description": "Only when confirmed_by is own_attack_band."
+                },
+                "group_cue_rise_db": {
+                  "type": "number",
+                  "description": "Only when confirmed_by is own_attack_band."
+                },
+                "group_cue_count": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "also_matches": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Other cue groups that sound at this same moment."
+                }
+              },
+              "required": [
+                "time_sec",
+                "group",
+                "score",
+                "group_median_score",
+                "threshold",
+                "dominant_band",
+                "simple_check_level_db",
+                "group_typical_level_db",
+                "confirmed_by",
+                "group_cue_count",
+                "also_matches"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Strong sounds with no cue, found from a cue group's repeated sound."
+          },
           "strong_onset_threshold": {
             "type": "number"
           },
@@ -3001,7 +3448,39 @@
             "type": "integer"
           }
         },
-        "anyOf": [{ "required": ["source_path", "tolerance_ms", "cue_recovery_window_ms", "cuts", "cues", "unmatched_strong_onsets", "strong_onset_threshold", "total_cuts", "total_cues"] }, { "required": ["status", "source_url", "retry_after_seconds"], "not": { "required": ["local_path"] } }],
+        "anyOf": [
+          {
+            "required": [
+              "source_path",
+              "tolerance_ms",
+              "cue_recovery_window_ms",
+              "search_window_ms",
+              "bpm",
+              "beats_per_bar",
+              "cue_signatures",
+              "systematic_lags",
+              "cuts",
+              "cues",
+              "unmatched_strong_onsets",
+              "uncued_sounds",
+              "strong_onset_threshold",
+              "total_cuts",
+              "total_cues"
+            ]
+          },
+          {
+            "required": [
+              "status",
+              "source_url",
+              "retry_after_seconds"
+            ],
+            "not": {
+              "required": [
+                "local_path"
+              ]
+            }
+          }
+        ],
         "additionalProperties": false
       }
     },
@@ -3013,13 +3492,13 @@
         "properties": {
           "source": {"type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source."},
           "start_sec": {
-            "description": "Start of the range in seconds.",
-            "type": "number",
+            "description": "Start of the range in seconds. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.",
+            "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32,
             "minimum": 0
           },
           "end_sec": {
-            "description": "End of the range in seconds; at least 1 s after start_sec, and the range may hold at most 60 windows.",
-            "type": "number",
+            "description": "End of the range in seconds; at least 1 s after start_sec, and the range may hold at most 60 windows. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.",
+            "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32,
             "minimum": 0
           },
           "labels": {
@@ -3032,8 +3511,8 @@
             "maxItems": 50
           },
           "window_sec": {
-            "description": "Length of each labelled window in seconds (default 5, from 1 to 30). The last window may be shorter; a remainder under 1 s is not labelled.",
-            "type": "number",
+            "description": "Length of each labelled window in seconds (default 5, from 1 to 30). The last window may be shorter; a remainder under 1 s is not labelled. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.",
+            "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32,
             "minimum": 1,
             "maximum": 30
           }
@@ -3161,18 +3640,18 @@
             "maxItems": 8
           },
           "start_sec": {
-            "description": "Start of the range in seconds (default 0).",
-            "type": "number",
+            "description": "Start of the range in seconds (default 0). Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.",
+            "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32,
             "minimum": 0
           },
           "end_sec": {
-            "description": "End of the range in seconds (default: the end of the video).",
-            "type": "number",
+            "description": "End of the range in seconds (default: the end of the video). Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.",
+            "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32,
             "minimum": 0
           },
           "interval_sec": {
-            "description": "Seconds between samples (default 5, from 1 to 600). The range may hold at most 720 samples.",
-            "type": "number",
+            "description": "Seconds between samples (default 5, from 1 to 600). The range may hold at most 720 samples. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.",
+            "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32,
             "minimum": 1,
             "maximum": 600
           },
@@ -3189,8 +3668,8 @@
             "maximum": 5
           },
           "cooldown_sec": {
-            "description": "Seconds after a wake during which the same condition wakes no more (0 to 3600, default 30).",
-            "type": "number",
+            "description": "Seconds after a wake during which the same condition wakes no more (0 to 3600, default 30). Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.",
+            "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32,
             "minimum": 0,
             "maximum": 3600
           }

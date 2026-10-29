@@ -44,7 +44,7 @@ brew install ffmpeg uv
 git clone https://github.com/tlq5l/agentic-video.git
 cd agentic-video
 uv venv --python 3.12 .venv
-uv pip install --python .venv/bin/python -r requirements.txt pytest
+uv pip install --python .venv/bin/python -r requirements.txt pytest jsonschema
 .venv/bin/python -m pytest -q   # optional: about 3 minutes
 ```
 
