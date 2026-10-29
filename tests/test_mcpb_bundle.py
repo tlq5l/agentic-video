@@ -103,7 +103,7 @@ def test_manifest_fields_and_archive_contents(bundle):
     assert manifest["compatibility"] == {"platforms": ["darwin"], "runtimes": {"python": ">=3.10"}}
     assert "user_config" not in manifest
     for forbidden in ("tests/", "fixtures/", ".venv/", "server/", ".git/"):
-        assert not [name for name in names if name.startswith(forbidden)], f"bundle contains {forbidden}"
+        assert not any(name.startswith(forbidden) for name in names), f"bundle contains {forbidden}"
     assert "src/executor/mcp_server.py" in names
 
 

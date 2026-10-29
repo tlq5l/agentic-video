@@ -5,10 +5,6 @@ from dataclasses import dataclass
 import os
 from pathlib import Path
 
-def _holds_ffmpeg_pair(folder: Path) -> bool:
-    return all(os.access(folder / name, os.X_OK) for name in ("ffmpeg", "ffprobe"))
-
-
 def ensure_ffmpeg_on_path():
     """Make ffmpeg and ffprobe discoverable when the host starts the server with a minimal PATH.
 
@@ -20,7 +16,7 @@ def ensure_ffmpeg_on_path():
         return
     if sys.platform == "darwin":
         for folder in (Path("/opt/homebrew/bin"), Path("/usr/local/bin"), Path.home() / ".local/bin"):
-            if _holds_ffmpeg_pair(folder):
+            if all(os.access(folder / name, os.X_OK) for name in ("ffmpeg", "ffprobe")):
                 os.environ["PATH"] = str(folder) + os.pathsep + os.environ.get("PATH", "")
                 return
         return
