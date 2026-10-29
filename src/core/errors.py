@@ -38,7 +38,14 @@ class ASRModelError(AgenticVideoError):
 
 class DependencyNotFoundError(AgenticVideoError):
     """Raised when an external system dependency (e.g. ffmpeg, ffprobe) is missing or not executable."""
-    pass
+    FFMPEG_FIX = (". Install FFmpeg with `brew install ffmpeg` on macOS (Windows: `winget install Gyan.FFmpeg`), "
+                  "then restart Claude Desktop (or the MCP client) so it starts the server again.")
+
+    def __init__(self, message: str, details: dict | None = None):
+        # The fix is part of the message, so every caller (tools that raise it and workers that turn it into a string) shows it.
+        if (details or {}).get("dependency") in ("ffmpeg", "ffprobe"):
+            message += self.FFMPEG_FIX
+        super().__init__(message, details)
 
 class CacheWriteError(AgenticVideoError):
     """Raised when the media cache directory cannot be created or written (e.g. ACL/permission failure)."""

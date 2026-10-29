@@ -16,7 +16,7 @@ def ensure_ffmpeg_on_path():
         return
     if sys.platform == "darwin":
         for folder in (Path("/opt/homebrew/bin"), Path("/usr/local/bin"), Path.home() / ".local/bin"):
-            if all(os.access(folder / name, os.X_OK) for name in ("ffmpeg", "ffprobe")):
+            if all((folder / name).is_file() and os.access(folder / name, os.X_OK) for name in ("ffmpeg", "ffprobe")):
                 os.environ["PATH"] = str(folder) + os.pathsep + os.environ.get("PATH", "")
                 return
         return

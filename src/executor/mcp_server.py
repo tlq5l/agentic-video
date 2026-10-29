@@ -12,7 +12,7 @@ from typing import Dict, Any, Iterator, List, Optional, Tuple
 
 from src.retrieval.engine import AgenticVideoEngine
 from src.core.config import Config
-from src.core.errors import AgenticVideoError, DependencyNotFoundError, MediaNotFoundError
+from src.core.errors import AgenticVideoError, MediaNotFoundError
 from src.media import fetch, visual_timing
 from src.transcript import asr
 
@@ -274,9 +274,6 @@ def format_tool_error(exc: Exception, tool: Optional[str] = None) -> str:
         text = f"{type(exc).__name__}: {exc.message}"
         if isinstance(exc, MediaNotFoundError):
             text += ". Pass the path of an existing local video file, or a video URL, as `source`."
-        if isinstance(exc, DependencyNotFoundError) and exc.details.get("dependency") in ("ffmpeg", "ffprobe"):
-            text += (". Install FFmpeg with `brew install ffmpeg` on macOS (Windows: `winget install Gyan.FFmpeg`), "
-                     "then restart Claude Desktop (or the MCP client) so it starts the server again.")
         if exc.details:
             text += " | details: " + json.dumps(exc.details, default=str)[:600]
         return text

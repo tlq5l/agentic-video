@@ -9,6 +9,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import zipfile
 from pathlib import Path
 
@@ -85,6 +86,38 @@ def _talk_to_server(command: list, env: dict) -> dict:
     return replies
 
 
+def _talk_to_server_with_pause(command: list, env: dict) -> dict:
+    """One server session: probe_video, then count_repetitions twice, with a pause between the two.
+
+    The first count_repetitions starts a background job and answers in_progress; the second, sent after the
+    pause, gets that job's final result. Both calls share one server process, so the job state is shared.
+    """
+    def line(message: dict) -> str:
+        return json.dumps(message) + "\n"
+
+    count_args = {"name": "count_repetitions", "arguments": {"source": str(SAMPLE_VIDEO)}}
+    proc = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            text=True, env=env)
+    proc.stdin.write(line({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                           "params": {"protocolVersion": "2024-11-05", "capabilities": {},
+                                      "clientInfo": {"name": "test", "version": "0"}}}))
+    proc.stdin.write(line({"jsonrpc": "2.0", "method": "notifications/initialized"}))
+    proc.stdin.write(line({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                           "params": {"name": "probe_video", "arguments": {"source": str(SAMPLE_VIDEO)}}}))
+    proc.stdin.write(line({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": count_args}))
+    proc.stdin.flush()
+    time.sleep(3)  # the background job fails in well under a second; the pause lets it finish first
+    proc.stdin.write(line({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": count_args}))
+    stdout, stderr = proc.communicate(timeout=900)  # closes stdin, so the server sees end of input and exits
+    replies = {}
+    for out_line in stdout.splitlines():
+        if out_line.strip():
+            message = json.loads(out_line)
+            replies[message.get("id")] = message
+    assert {2, 3, 4} <= set(replies), f"server did not answer every request (exit {proc.returncode}):\n{stderr[-3000:]}"
+    return replies
+
+
 def test_manifest_fields_and_archive_contents(bundle):
     archive, _ = bundle
     with zipfile.ZipFile(archive) as zf:
@@ -139,11 +172,17 @@ def test_missing_ffmpeg_error_tells_the_user_the_fix(bundle, tmp_path):
         "UV_CACHE_DIR": cache,
         "UV_PYTHON": sys.executable,
     }
-    replies = _talk_to_server(_manifest_server_command(extracted), env)
+    replies = _talk_to_server_with_pause(_manifest_server_command(extracted), env)
 
-    result = replies[3]["result"]
+    result = replies[2]["result"]
     text = result["content"][0]["text"]
     assert result.get("isError") is True
     assert "ffprobe binary not found" in text
     assert "brew install ffmpeg" in text
     assert "restart Claude Desktop" in text
+
+    # Background tools (count_repetitions) run in a thread; their final error must carry the same fix.
+    polled = replies[4]["result"]["content"][0]["text"]
+    assert "ffprobe binary not found" in polled, polled
+    assert "brew install ffmpeg" in polled, polled
+    assert "restart Claude Desktop" in polled, polled

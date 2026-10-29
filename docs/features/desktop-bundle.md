@@ -8,11 +8,13 @@ How it is built: `python3 scripts/build_mcpb.py` (stdlib only). It stages `src/`
 
 How it is released: the `mcpb` job in `.github/workflows/publish.yml` runs on each published release, builds the bundle and uploads it to that release with `gh release upload --clobber`. The PyPI job is unchanged.
 
-ffmpeg PATH rule: Claude Desktop starts servers with a minimal PATH, so Homebrew's ffmpeg is often not on it. `ensure_ffmpeg_on_path()` in `src/core/config.py` prepends the first of `/opt/homebrew/bin`, `/usr/local/bin` and `~/.local/bin` that holds both `ffmpeg` and `ffprobe`. When a tool still cannot find them, the error text says to run `brew install ffmpeg` and restart Claude Desktop (`format_tool_error` in `src/executor/mcp_server.py`).
+ffmpeg PATH rule: Claude Desktop starts servers with a minimal PATH, so Homebrew's ffmpeg is often not on it. `ensure_ffmpeg_on_path()` in `src/core/config.py` prepends the first of `/opt/homebrew/bin`, `/usr/local/bin` and `~/.local/bin` that holds both `ffmpeg` and `ffprobe`. When a tool still cannot find them, the error text says to run `brew install ffmpeg` and restart Claude Desktop. The text is added in `DependencyNotFoundError` (`src/core/errors.py`), so background tools (`count_repetitions`, `count_occurrences`, `build_visual_index`) show it too.
 
 Known limits:
 - macOS only (the manifest lists the `darwin` platform).
-- The optional visual extras (`requirements-visual.txt`: PyTorch, Transformers and about 605 MB of CLIP weights) are not installed by the bundle. `search_visual`, `build_visual_index` and on-screen text matching then return an error that explains the setup; see the README section "Optional: visual search (CLIP) and on-screen text".
+- Not in the bundle: the optional visual extras (`requirements-visual.txt`: PyTorch, Transformers and about 605 MB of CLIP weights) are not installed. These need them, so use the git install in the README (section "Optional: visual search (CLIP) and on-screen text") for them:
+  - local visual search: `build_visual_index`, `search_visual`
+  - on-screen text counting: `count_occurrences` with `text=`
 - The first run needs network access for uv to download the packages.
 
 How to check it works: `pytest tests/test_mcpb_bundle.py` (builds the bundle, runs the server from the unzipped bundle, checks the ffmpeg error text).
