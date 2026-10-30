@@ -124,8 +124,10 @@ def main():
                 f"{k}={data[k]}" for k in ("confidence", "count_reliable", "method_used", "spans_omitted", "capped", "gaps_merged",
                                    "count_without_merges", "min_gap_sec_clamped_from") if k in data)
             results["real_rep" if row.get("real") else name][row["split"]].append((expected, answer))
+            # With a direction passed, travel_counts only lists the other directions, so it does not flag the count.
             flagged = bool((answer is None and data.get("status") == "complete")
-                           or data.get("capped") or data.get("gaps_merged") or data.get("travel_counts"))
+                           or data.get("capped") or data.get("gaps_merged")
+                           or (data.get("travel_counts") and "direction" not in call))
             records.append({"id": row["id"], "split": row["split"], "tool": name, "trap": "args" in row,
                             "expected": expected, "answer": answer, "flagged": flagged, "error": "error" in data})
             if "args" in row:
