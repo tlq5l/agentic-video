@@ -27,7 +27,7 @@ Then ask: "Use agentic-video to review `/path/to/video.mp4`." Other clients and 
 
 The MCP server exposes 25 tools (full schemas in `src/adapters/mcp_schemas.json`):
 
-- **Look:** `review_video` (first look in one call: metadata, contact sheet, cuts and a loudness summary), `probe_video` (duration, fps, size, codecs, audio), `contact_sheet`, `overview_chunks` (consecutive sheets across a long video), `inspect_window` / `inspect_windows` (dense frames for short ranges), `frame_at` (one exact frame at full size, optionally cropped and enlarged to read small text), `inspect_moments` (frames around given instants), `refine_temporal_beam` (zoom into candidate windows).
+- **Look:** `review_video` (first look in one call: metadata, contact sheet, cuts, near-black stretches and a loudness summary), `probe_video` (duration, fps, size, codecs, audio), `contact_sheet`, `overview_chunks` (consecutive sheets across a long video), `inspect_window` / `inspect_windows` (dense frames for short ranges), `frame_at` (one exact frame at full size, optionally cropped and enlarged to read small text), `inspect_moments` (frames around given instants), `refine_temporal_beam` (zoom into candidate windows).
 - **Listen:** `transcribe` (timestamped speech, cached), `search_transcript` (find when words are spoken: exact words first, then passages that match by meaning when the optional on-device EmbeddingGemma 2 model is set up; keyword-only without it).
 - **Find:** `detect_cuts` (hard cuts and animated scene changes), `check_frame_cadence` (stretches where frames repeat so the picture updates less often than the frame rate, such as 30 fps padded to 60), `build_visual_index` + `search_visual` (local CLIP search for things that are visible, optional; the interval holding the top hit is at least 15 seconds long, or the whole searched range when shorter). `watch_for` (cloud: wakes when yes/no questions about the picture start to hold, from sampled frames).
 - **Count and track:** `count_occurrences` (separate appearances of an object or on-screen text), `count_repetitions` (cycles of a repeated action), `track_region_changes` / `track_region_events` (changes inside one fixed rectangle).
@@ -137,7 +137,7 @@ An always-loaded note works better than hoping the agent finds the tool:
 ```md
 ## Video files (agentic-video MCP)
 You cannot watch video. For any .mp4/.mov/.webm question, use the agentic-video MCP tools; never guess from the filename.
-- First look: `review_video` with an absolute path. It returns metadata, a contact sheet, cuts and loudness. Open the JPEG at `file_path` to see the frames.
+- First look: `review_video` with an absolute path. It returns metadata, a contact sheet, cuts, near-black stretches and loudness. Open the JPEG at `file_path` to see the frames.
 - Spoken words: `search_transcript` (when is X said) or `transcribe`. Do this before looking at frames.
 - A short range: `inspect_window` (start_sec, end_sec). Counting: `count_occurrences`. Sync and audio faults: `sync_check`, `loudness_timeline`.
 - Sampling can miss brief events and a missing hit is not proof. Quote the burned-in timestamps. Full guide: AGENTS.md in the agentic-video repo.
