@@ -2021,7 +2021,7 @@
     },
     "audio_onsets": {
       "name": "audio_onsets",
-      "description": "List non-speech sound attacks (hits, claps, beats) with millisecond timestamps and five-band energy profiles, optionally restricted to a frequency band (band_hz: sub, low_mid, mid, high, air, or [low_hz, high_hz]) and compared with another source (compare_to). min_strength 0-1 (default 0.12): raise it for only strong onsets. At most 500 onsets are listed; `total` is the full count and the result says how to see the rest. Needs an audio track (probe_video has_audio); audio-only files (.m4a, .mp3, .wav) work. For level over time use loudness_timeline; for speech use transcribe. To name what a sound is, use label_sounds (cloud).",
+      "description": "List non-speech sound attacks (hits, claps, beats) with millisecond timestamps and five-band energy profiles, optionally restricted to a frequency band (band_hz: sub, low_mid, mid, high, air, or [low_hz, high_hz]) and compared with another source (compare_to). min_strength 0-1 (default 0.12): raise it for only strong onsets. min_gap_sec (default 0.035 s) merges onsets within that gap of a group's first onset into one onset at the first time with the group's strongest strength; 0 keeps every raw onset. At most 500 onsets are listed; `total` is the full count and the result says how to see the rest. Needs an audio track (probe_video has_audio); audio-only files (.m4a, .mp3, .wav) work. For level over time use loudness_timeline; for speech use transcribe. To name what a sound is, use label_sounds (cloud).",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -2042,6 +2042,12 @@
             "minimum": 0,
             "maximum": 1,
             "default": 0.12
+          },
+          "min_gap_sec": {
+            "description": "Onsets closer than this many seconds to a group's first onset are merged into it: the group keeps the first onset's time and the strongest strength. 0 keeps every raw onset (default 0.035). Also accepts a timecode string in MM:SS.mmm form, e.g. 00:00.035.",
+            "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32,
+            "minimum": 0,
+            "default": 0.035
           },
           "band_hz": {
             "description": "Restrict to a named band (sub, low_mid, mid, high, air) or a [low_hz, high_hz] range.",
@@ -2103,6 +2109,9 @@
           "min_strength": {
             "type": "number"
           },
+          "min_gap_sec": {
+            "type": "number"
+          },
           "onsets": {
             "type": "array",
             "items": {
@@ -2162,6 +2171,10 @@
           },
           "total": {
             "type": "integer"
+          },
+          "merged_count": {
+            "type": "integer",
+            "description": "How many detected onsets were merged into a neighbouring onset by min_gap_sec."
           },
           "band_hz": {
             "anyOf": [
