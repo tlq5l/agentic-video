@@ -5,10 +5,14 @@ top_k 5). Needs the EmbeddingGemma 2 Core ML model and an interpreter that has c
 and numpy, set in the environment (AGENTIC_VIDEO_EG2_DIR, AGENTIC_VIDEO_EG2_PYTHON). Without them the
 semantic half is off and the script stops, because the climb metric would read zero.
 
-    python benchmarks/search_no_match/score.py [--baseline FILE] [--out FILE] [--heldout]
+    python benchmarks/search_no_match/score.py --source PATH_TO_CLIP [--baseline FILE] [--out FILE] [--final]
 
-Splits: list position in questions.json, even = train, odd = test. Train numbers are printed on every
-run. Test numbers are printed only with --heldout (measure them once per commit, never to tune).
+--source is the local copy of the bench-v1 clip named by its public id in questions.json.
+
+Splits: list position in questions.json, even = train, odd = test. Every run measures only train; the test
+split is measured only with --final, once per commit, for the final comparison. Queries of the split not
+asked for are never run and never written to --out. The test split was already printed in commit 97de39a,
+so it is no longer untouched: a clean final comparison needs new held-out items.
 
 Metrics (METRIC lines):
   climb_nomatch_semantic_share   share of no-match queries that return any match=semantic hit (lower is better)
@@ -61,11 +65,15 @@ def covers(hit, start_sec):
     return hit["start_sec"] - TARGET_TOLERANCE_SEC <= start_sec <= hit["end_sec"] + TARGET_TOLERANCE_SEC
 
 
-def measure(questions):
-    source = questions["source"]
+def split_of(index):
+    return "train" if index % 2 == 0 else "test"
+
+
+def measure(questions, source, splits):
     records = []
     plan = [("no_match", i, query, None) for i, query in enumerate(questions["no_match"])]
     plan += [("positive", i, item["query"], item) for i, item in enumerate(questions["positive"])]
+    plan = [step for step in plan if split_of(step[1]) in splits]
     for kind, index, query, item in plan:
         hybrid = call(source, query, "hybrid")
         lexical = call(source, query, "lexical")
@@ -73,7 +81,7 @@ def measure(questions):
         semantic_scores = [h["score"] for h in hits if h["match"] == "semantic"]
         record = {
             "kind": kind,
-            "split": "train" if index % 2 == 0 else "test",
+            "split": split_of(index),
             "index": index,
             "query": query,
             "semantic_scores": semantic_scores,
@@ -123,18 +131,21 @@ def summarize(records, split, baseline):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--source", required=True,
+                        help="local path to the bench-v1 clip named in questions.json")
     parser.add_argument("--baseline", help="records JSON from --out of the baseline run (for the lexical and top-5 guards)")
     parser.add_argument("--out", help="write the per-query records here (scratch folder, never committed)")
-    parser.add_argument("--heldout", action="store_true", help="also print the test split (once per commit)")
+    parser.add_argument("--final", action="store_true",
+                        help="also measure and print the test split (once per commit, for the final comparison only)")
     args = parser.parse_args()
 
     questions = json.loads(QUESTIONS.read_text(encoding="utf-8"))
-    records = measure(questions)
+    splits = ["train", "test"] if args.final else ["train"]
+    records = measure(questions, args.source, splits)
     baseline = json.loads(Path(args.baseline).read_text(encoding="utf-8")) if args.baseline else None
     if args.out:
         Path(args.out).write_text(json.dumps(records, indent=1, ensure_ascii=False), encoding="utf-8")
 
-    splits = ["train"] + (["test"] if args.heldout else [])
     for split in splits:
         s = summarize(records, split, baseline)
         tag = "" if split == "train" else "heldout_"
