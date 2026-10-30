@@ -13,6 +13,8 @@ from src.core.config import Config
 from src.executor.mcp_server import handle_call
 from src.transcript import semantic
 
+pytestmark = pytest.mark.model
+
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
 PARAPHRASE = "a very bright explosion of a star"  # the speech says "Supernova optical flash detected"
 
