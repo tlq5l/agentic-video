@@ -35,6 +35,7 @@ MODEL_ID = "embeddinggemma-2-coreml-768"
 CHUNK_SEC = 20.0
 STRIDE_SEC = 10.0
 GAP_SEC = 20.0
+MIN_SCORE = 0.70           # cosine below this is not a match by meaning; see docs/features/transcribe.md
 EMBED_BATCH = 128
 INDEX_WAIT_SEC = 30.0       # a search waits this long for a missing index, then answers keyword-only
 QUERY_WAIT_SEC = 30.0       # first query pays the model load (about 20 s)
@@ -336,6 +337,8 @@ def search(fingerprint: str, segments: List[dict], query: str, top_k: int,
     picked: List[int] = []
     for i in np.argsort(-scores)[:200]:
         chunk = chunks[i]
+        if scores[i] < MIN_SCORE:
+            break
         if chunk["end"] < t_start or chunk["start"] > t_end:
             continue
         if all(abs(chunk["start"] - chunks[j]["start"]) >= GAP_SEC for j in picked):
