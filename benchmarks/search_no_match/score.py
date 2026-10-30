@@ -100,7 +100,7 @@ def measure(questions, source, splits):
             record["target_segment_id"] = item["segment_id"]
             record["target_start_sec"] = item["start_sec"]
             record["top5_has_target"] = any(covers(h, item["start_sec"]) for h in hits[:TOP_K])
-            covering = [h for h in hybrid["hits"] if covers(h, item["start_sec"])]
+            covering = [h for h in hits if covers(h, item["start_sec"])]
             record["target_hit_scores"] = [[h["match"], h["score"]] for h in covering]
         records.append(record)
     return records

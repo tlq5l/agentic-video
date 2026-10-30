@@ -129,16 +129,19 @@ def _fuse(lexical: List[SearchResult], chunks: List[dict], query: str, last_end:
                     score += 1.0 / (RRF_K + rank + 1)
             scored.append((-score, source, item[0], item))
     scored.sort(key=lambda row: row[:3])
-    picked = []
+    selected = len(out)
     for _, source, _, item in scored:
-        if len(out) + len(picked) >= top_k:
+        if selected >= top_k:
             break
         if all(abs(centre(item) - c) >= GAP_SEC for c in chosen):
+            hit = item[2]
             if source == 0:
-                item[2].match = "all_terms"
-            picked.append((source, item))
+                hit.match = "all_terms"
+            if source == 0 or item[3] >= semantic.MIN_SCORE:
+                out.append(hit)
             chosen.append(centre(item))
-    return out + [item[2] for source, item in picked if source == 0 or item[3] >= semantic.MIN_SCORE]
+            selected += 1
+    return out
 
 
 def search_transcript(
