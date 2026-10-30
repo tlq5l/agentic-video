@@ -7,8 +7,13 @@ Usage:
   python scripts/related_tests.py --list          # print the chosen tests, run nothing
 
 A test is chosen when it imports a changed module directly, or imports a src module that
-imports the changed one (one level). Changing tests/conftest.py, pytest.ini or pyproject.toml
-selects every test file. Non-Python files under src/ select the tests whose source names them.
+imports the changed one (one level). Importing a module also runs the __init__ files of its
+parent packages, so a test importing src.core.cache is chosen by a change to src/core/__init__.py.
+A rename counts as two changes: the old path and the new one. Changing tests/conftest.py,
+pytest.ini or pyproject.toml selects every test file. Non-Python files under src/ select the
+tests whose source names them.
+--files takes paths relative to the current folder or absolute. Each must be a .py file, a file
+under src/, or one of the config files above; a folder is refused, and so is any other path.
 """
 
 import argparse
@@ -31,7 +36,33 @@ def git_lines(*args):
 
 
 def changed_files(base):
-    return sorted(set(git_lines("diff", "--name-only", base, "--") + git_lines("ls-files", "--others", "--exclude-standard")))
+    tracked = git_lines("diff", "--no-renames", "--name-only", base, "--")
+    return sorted(set(tracked + git_lines("ls-files", "--others", "--exclude-standard")))
+
+
+def known_to_git(relative):
+    """True for a path git tracks in the index or in HEAD, so a deleted file still counts as a change."""
+    return bool(git_lines("ls-files", "--", relative) or git_lines("ls-tree", "--name-only", "HEAD", "--", relative))
+
+
+def normalize_files(parser, names):
+    """Repo-relative posix paths for --files; a path that cannot select a test is an error, not a silent pass."""
+    normalized = set()
+    for name in names:
+        given = Path(name.replace("\\", "/"))
+        resolved = (given if given.is_absolute() else Path.cwd() / given).resolve()
+        try:
+            relative = resolved.relative_to(ROOT).as_posix()
+        except ValueError:
+            parser.error(f"--files: {name} is outside the repository")
+        if resolved.is_dir():
+            parser.error(f"--files: {name} is a folder; name the files in it")
+        if not (relative.endswith(".py") or relative.startswith("src/") or relative in SELECT_ALL):
+            parser.error(f"--files: {name} cannot select any test (use a .py file, a file under src/, or a config file)")
+        if not resolved.exists() and not known_to_git(relative):
+            parser.error(f"--files: {name} does not exist and git has no record of it (check the spelling)")
+        normalized.add(relative)
+    return sorted(normalized)
 
 
 def module_of(relative_path):
@@ -40,8 +71,15 @@ def module_of(relative_path):
     return dotted[: -len(".__init__")] if dotted.endswith(".__init__") else dotted
 
 
+def dotted_prefixes(name):
+    """"src.core.cache" -> {"src", "src.core", "src.core.cache"}."""
+    parts = name.split(".")
+    return {".".join(parts[:i]) for i in range(1, len(parts) + 1)}
+
+
 def src_imports(path):
-    """Dotted names of the src modules this file imports (absolute imports; `from pkg import mod` counts mod)."""
+    """Dotted names of the src modules this file imports, with their parent packages (absolute imports;
+    `from pkg import mod` counts mod)."""
     found = set()
     for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
         if isinstance(node, ast.Import):
@@ -49,7 +87,9 @@ def src_imports(path):
         elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
             found.add(node.module)
             found.update(f"{node.module}.{alias.name}" for alias in node.names)
-    return {name for name in found if name == "src" or name.startswith("src.")}
+    return {
+        prefix for name in found if name == "src" or name.startswith("src.") for prefix in dotted_prefixes(name)
+    }
 
 
 def select_tests(changed):
@@ -83,11 +123,11 @@ def select_tests(changed):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--base", default="HEAD", help="git ref to diff against (default HEAD)")
-    parser.add_argument("--files", nargs="+", help="use these changed files instead of git's")
+    parser.add_argument("--files", nargs="+", help="use these changed files instead of git's (relative to the current folder, or absolute)")
     parser.add_argument("--list", action="store_true", help="print the chosen tests and do not run them")
     args = parser.parse_args(argv)
 
-    changed = [f.replace("\\", "/") for f in args.files] if args.files else changed_files(args.base)
+    changed = normalize_files(parser, args.files) if args.files else changed_files(args.base)
     chosen = [p.relative_to(ROOT).as_posix() for p in select_tests(changed)]
     print(f"changed: {len(changed)} file(s); related tests: {len(chosen)}")
     for name in chosen:
