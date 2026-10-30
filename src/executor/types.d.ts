@@ -406,6 +406,7 @@ export interface OccurrenceSpan {
   frame_badge?: string;
   /** Normalized box of the match at representative_sec. */
   region?: { x: number; y: number; w: number; h: number };
+  /** Estimated net motion of the match from its first and last positions in the span, not a verified crossing. Verify directional questions visually. */
   travel?: "stationary" | "left_to_right" | "right_to_left" | "top_to_bottom" | "bottom_to_top";
   /** True for a single detection, a span shorter than 0.5 s, or a score below 75% of the median span score. Still counted; its tile label ends in *. */
   weak?: boolean;
@@ -431,6 +432,8 @@ export interface CountOccurrencesOutput {
   gaps_merged?: number;
   /** The count if the joined pairs were kept apart. */
   count_without_merges?: number;
+  /** Net motion of appearances across the frame, by direction; only set when some move. Each value is an estimate from a span's first and last positions, not a verified crossing or direction count. The count includes every direction; directional counting is unsupported, so verify any directional answer visually before reporting it. */
+  travel_counts?: Record<string, number>;
   spans?: OccurrenceSpan[];
   spans_returned?: number;
   spans_omitted?: number;
