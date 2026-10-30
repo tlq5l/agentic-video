@@ -26,13 +26,26 @@ def _flat(level):
     return np.full((H, W, 3), level, dtype=np.uint8)
 
 
-def _fade_clip(path, start, duration):
-    """100 to 113 over `duration` seconds from `start`, in a 6 s clip: a low-contrast cross-fade between flat pictures."""
+TEXTURE = np.random.default_rng(3).integers(40, 200, size=(H, 64, 3), dtype=np.uint8)
+
+
+def _fade_clip(path, start, duration, end=113.0, layout="flat"):
+    """A low-contrast fade from 100 to `end` over `duration` seconds from `start`, in a 6 s clip.
+
+    "flat": the whole picture fades. "bars": fixed black bars at the top and bottom, the picture between them
+    fades. "static": a fixed textured picture on the left 40 %, the rest fades.
+    """
     frames = []
     for n in range(6 * FPS):
         t = n / FPS
-        level = 100.0 if t < start else 113.0 if t >= start + duration else 100.0 + 13.0 * (t - start) / duration
-        frames.append(_flat(int(round(level))))
+        level = 100.0 if t < start else end if t >= start + duration else 100.0 + (end - 100.0) * (t - start) / duration
+        frame = _flat(int(round(level)))
+        if layout == "bars":
+            frame[:11] = 0
+            frame[79:] = 0
+        elif layout == "static":
+            frame[:, :64] = TEXTURE
+        frames.append(frame)
     return _encode(path, frames)
 
 
@@ -78,12 +91,16 @@ def test_low_scoring_step_after_motion_is_a_cut_on_both_scan_paths(tmp_path, mon
     assert [(kind, t) for kind, t in found if kind == "cut"] == [("cut", 3.0)]
 
 
+@pytest.mark.parametrize("large", [False, True], ids=["small_video", "large_video"])
+@pytest.mark.parametrize("duration", [0.2, 0.3, 0.4])
 @pytest.mark.parametrize("start", [3.0, 3.033, 3.067])
-def test_low_contrast_fade_is_a_transition_at_any_sampling_offset(tmp_path, monkeypatch, start):
-    clip = _fade_clip(tmp_path / f"fade_{start}.mkv", start, 0.2)
-    found = _detect(clip, tmp_path / "cache", monkeypatch)
+@pytest.mark.parametrize("layout", ["flat", "bars", "static"])
+def test_low_contrast_fade_is_a_transition_on_both_scan_paths(tmp_path, monkeypatch, layout, start, duration, large):
+    end = 113.0 if layout == "flat" else 117.0
+    clip = _fade_clip(tmp_path / f"fade_{layout}_{start}_{duration}.mkv", start, duration, end, layout)
+    found = _detect(clip, tmp_path / ("large" if large else "small"), monkeypatch, large)
     assert [kind for kind, _ in found] == ["transition"]
-    assert start < found[0][1] < start + 0.3
+    assert start < found[0][1] < start + duration + 0.3
 
 
 def test_weak_cut_between_still_slides_is_kept(tmp_path, monkeypatch):

@@ -168,8 +168,9 @@ SOFT_STILL_LEVEL = 0.015
 SOFT_STILL_MIN_DIFF = 0.035
 SOFT_WEAK_DIFF = 0.06
 SOFT_WEAK_MIN_BLEND = 0.1
-# A weak peak that is not a dissolve is motion only when the change stays in part of the frame;
-# a fade or a whole-frame brightness step changes every cell, so it is kept.
+# A weak peak that is not a dissolve is kept when the picture is steady on both sides (a fade between
+# still pictures, with or without fixed bars) or when at least this share of the frame changes
+# (a whole-frame fade or step). Otherwise it is motion.
 SOFT_FADE_MIN_AREA = 0.9
 SOFT_STILL_REACH_SEC = 1.0
 # A dissolve or fade passes through the average of the pictures before and
@@ -202,9 +203,10 @@ def _range_key(start_sec: float, duration_sec: Optional[float]) -> str:
 
 
 def _changes_key(span: str) -> str:
+    # v14: a weak peak with steady pictures on both sides is kept whatever share of the frame changes.
     # v13: a change on a large video may still carry its "window", settled by _settle_changes;
     # a rescued candidate carries a "rescue" marker and is kept only when it settles as a cut.
-    return f"softtrans_v13_{span}"
+    return f"softtrans_v14_{span}"
 
 
 def _scenes_key(threshold: float, span: str) -> str:
@@ -490,19 +492,19 @@ def _find_transitions(diff, area, colour, blend, start_sec: float, rescue=None) 
             around = [float(np.percentile(part, 25)) for part in sides if len(part)]
             if new_colours - (max(around) if around else 0.0) < SOFT_MIN_HIST_PROMINENCE:
                 new_colours = 0.0
+        left = diff[max(lag_edge, lo - reach): lo]
+        right = diff[hi + 1: min(count - lag_edge, hi + 1 + reach)]
+        # "Still" also needs calm side windows: a peak that only stood
+        # out against the dips beside it sits in busy footage.
+        still = calm_sides and max(float(left.min()), float(right.min())) <= SOFT_STILL_LEVEL
         if new_colours < SOFT_MIN_HIST and float(blend[lo: hi + 1].min()) > SOFT_MAX_BLEND_ERROR:
-            left = diff[max(lag_edge, lo - reach): lo]
-            right = diff[hi + 1: min(count - lag_edge, hi + 1 + reach)]
-            # "Still" also needs calm side windows: a peak that only stood
-            # out against the dips beside it sits in busy footage.
-            still = calm_sides and max(float(left.min()), float(right.min())) <= SOFT_STILL_LEVEL
             if not still or value < SOFT_STILL_MIN_DIFF:
                 # Not a clear soft change: it is kept only if its frame step proves a hard cut.
                 if rescue is not None:
                     rescue.append((start_sec + ((lo + hi) / 2.0) / SOFT_SAMPLE_FPS, value))
                 continue
         if (value < SOFT_WEAK_DIFF and SOFT_WEAK_MIN_BLEND < float(blend[lo: hi + 1].min()) <= SOFT_MAX_BLEND_ERROR
-                and float(area[lo: hi + 1].max()) < SOFT_FADE_MIN_AREA):
+                and not still and float(area[lo: hi + 1].max()) < SOFT_FADE_MIN_AREA):
             if rescue is not None:
                 rescue.append((start_sec + ((lo + hi) / 2.0) / SOFT_SAMPLE_FPS, value))
             continue
