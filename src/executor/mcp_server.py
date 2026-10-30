@@ -634,11 +634,100 @@ def _region_in_tool_keys(name: str, region: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+# One example value per argument whose shape is easy to guess wrong. Arguments with a default or an enum use those.
+_CALL_EXAMPLES = {
+    "moments": [{"timestamp_sec": 12.5}],
+    "windows": [{"start_sec": 10, "end_sec": 14}],
+    "cues": [{"time_sec": 12.5, "label": "hit"}],
+    "marks": [{"time_sec": 12.5, "label": "kick"}],
+    "source": "/path/to/video.mp4",
+    "query": "launch date",
+    "description": "yellow outlined circle",
+    "text": "RELEASE",
+    "time_sec": 12.5,
+}
+_MOMENT_TIME_KEYS = ("timestamp_sec", "time_sec", "time", "t")
+
+
+def _example_value(name: str, key: str, schema: Dict[str, Any]) -> Any:
+    """A value the schema accepts for `key`: its default, its first enum value, or a known example."""
+    if key == "region":
+        return {"x": 0.25, "y": 0.1, "w": 0.5, "h": 0.6} if name == "count_repetitions" \
+            else {"x": 0.25, "y": 0.1, "width": 0.5, "height": 0.6}
+    if "default" in schema:
+        return schema["default"]
+    if "enum" in schema:
+        return schema["enum"][0]
+    if key in _CALL_EXAMPLES:
+        return _CALL_EXAMPLES[key]
+    for combinator in ("anyOf", "oneOf"):
+        if schema.get(combinator):
+            return _example_value(name, key, schema[combinator][0])
+    kinds = _schema_types(schema)
+    if "number" in kinds or "integer" in kinds:
+        value = 1
+        if "maximum" in schema:
+            value = min(value, schema["maximum"])
+        if "minimum" in schema:
+            value = max(value, schema["minimum"])
+        return value
+    if "string" in kinds:
+        return "text"
+    if "boolean" in kinds:
+        return True
+    if "object" in kinds:
+        properties = schema.get("properties", {})
+        return {field: _example_value(name, field, properties.get(field, {})) for field in schema.get("required", [])}
+    if "array" in kinds:
+        return [_example_value(name, key, schema.get("items", {}))]
+    return None
+
+
+def _argument_error(name: str, key: str, path: str, reason: str, expected: str) -> str:
+    """Where the argument is wrong, what it must be, and one correct call fragment to copy."""
+    example = f'"{key}": {json.dumps(_example_value(name, key, _TOOL_SCHEMAS[name].get("properties", {}).get(key, {})))}'
+    return f"{name}: argument '{key}{path}' {reason}; expected {expected}. Example: {example}."
+
+
+def _moment_shape(name: str, item: Any, index: int) -> Any:
+    """A bare number, or an object with one time key, becomes {"timestamp_sec": t}. Two time keys are ambiguous."""
+    if _is_kind(item, "number"):
+        return {"timestamp_sec": item}
+    if isinstance(item, dict):
+        found = [key for key in _MOMENT_TIME_KEYS if key in item]
+        if len(found) > 1:
+            raise ValueError(_argument_error(name, "moments", f"[{index}]",
+                                             f"has more than one time key ({', '.join(found)})",
+                                             "exactly one of timestamp_sec, time_sec, time, t"))
+        if found and found[0] != "timestamp_sec":
+            rest = {key: value for key, value in item.items() if key != found[0]}
+            return {"timestamp_sec": item[found[0]], **rest}
+    return item
+
+
+def _accepted_shapes(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+    """Rewrite the wrong shapes whose meaning is certain: bare or time-keyed moments, and a four-number region list.
+    Anything else is left for the schema check to refuse."""
+    properties = _TOOL_SCHEMAS[name].get("properties", {})
+    out = dict(args)
+    if "moments" in properties and isinstance(out.get("moments"), list):
+        out["moments"] = [_moment_shape(name, item, index) for index, item in enumerate(out["moments"])]
+    region = out.get("region")
+    if "region" in properties and isinstance(region, list):
+        if len(region) != 4 or not all(_is_kind(value, "number") for value in region):
+            keys = "x, y, w, h" if name == "count_repetitions" else "x, y, width, height"
+            raise ValueError(_argument_error(name, "region", "", "is a list that is not four numbers",
+                                             f"an object with {keys}, or a list of four numbers [{keys}]"))
+        x, y, width, height = region
+        out["region"] = {"x": x, "y": y, "width": width, "height": height}
+    return out
+
+
 def _checked_arguments(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
-    """Read timecodes and region keys, and reject any value that breaks the tool's schema (nulls included)."""
+    """Read shapes and timecodes, and reject any value that breaks the tool's schema (nulls included)."""
     schema = _TOOL_SCHEMAS[name]
     properties = schema.get("properties", {})
-    kept = _read_timecodes(schema, args)
+    kept = _read_timecodes(schema, _accepted_shapes(name, args))
     if isinstance(kept.get("region"), dict) and "region" in properties:
         kept["region"] = _region_in_tool_keys(name, kept["region"])
     clamped = CLAMPED_ARGS.get(name, {})
@@ -648,7 +737,7 @@ def _checked_arguments(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         problem = _argument_problem(properties[key], value, key, check_range=key not in clamped)
         if problem:
             path, reason, expected = problem
-            raise ValueError(f"{name}: argument '{key}{path}' {reason}; expected {expected}.")
+            raise ValueError(_argument_error(name, key, path, reason, expected))
     return kept
 
 

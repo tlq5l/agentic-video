@@ -31,7 +31,7 @@ export const SearchTranscriptInputSchema = {
   source: SourceSchema,
   query: z.string().trim().min(1).describe("Words or a phrase to find in the speech, e.g. 'launch date'. Punctuation and case are ignored."),
   top_k: z.number().int().min(1).max(50).describe("Maximum hits (default 5, maximum 50; larger values are clamped to 50 and the result says so).").optional(),
-  mode: z.enum(["hybrid", "lexical"]).describe("hybrid (default): keyword matches first, then matches by meaning. lexical: keyword matches only.").optional(),
+  mode: z.enum(["hybrid", "lexical"]).describe("hybrid (default): keyword matches first, then matches by meaning. lexical: keyword matches only. For example: \"mode\": \"lexical\".").optional(),
 };
 
 export const BuildVisualIndexInputSchema = {
@@ -53,7 +53,7 @@ export const CountRepetitionsInputSchema = {
   region: z.union([
     z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1), w: z.number().min(0).max(1), h: z.number().min(0).max(1) }),
     z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1), width: z.number().min(0).max(1), height: z.number().min(0).max(1) }),
-  ]).describe("Rectangle that contains the repeating motion, as fractions of the frame: x, y (top-left) and w, h (size), with x+w <= 1 and y+h <= 1. Uses w/h; width/height with the same meaning is also accepted. Omit for the whole frame.").optional(),
+  ]).describe("Rectangle that contains the repeating motion, as fractions of the frame: x, y (top-left) and w, h (size), with x+w <= 1 and y+h <= 1. Uses w/h; width/height with the same meaning is also accepted. For example: {\"x\": 0.25, \"y\": 0.1, \"w\": 0.5, \"h\": 0.6}. Omit for the whole frame.").optional(),
   fps: z.number().positive().max(15).describe("Sampling rate, default 10. Larger values than 15 are clamped to 15 and the result says so.").optional(),
   method: z.enum(["auto", "motion", "embedding"]).describe("auto (default) picks between motion, embedding and a periodicity check; motion or embedding forces that amplitude counter alone.").optional(),
   min_period_sec: seconds(z.number().positive()).describe("Shortest expected cycle in seconds (default 0.4). Bounds the amplitude counter only; the periodicity check ignores it and searches from 0.25 s. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.").optional(),
@@ -124,7 +124,7 @@ export const TrackRegionChangesInputSchema = {
       w: z.number().positive().max(1),
       h: z.number().positive().max(1),
     }),
-  ]).describe("Rectangle to watch, as fractions of the frame: x, y (top-left) and width, height, with x+width <= 1 and y+height <= 1. Uses width/height, not w/h; w/h with the same meaning is also accepted."),
+  ]).describe("Rectangle to watch, as fractions of the frame: x, y (top-left) and width, height, with x+width <= 1 and y+height <= 1. Uses width/height, not w/h; w/h with the same meaning is also accepted. For example: {\"x\": 0.25, \"y\": 0.1, \"width\": 0.5, \"height\": 0.6}."),
   sample_fps: z.number().positive().max(10).describe("Sampling rate (default 0.25, maximum 10; larger values are clamped and the result says so). Changes shorter than 1/sample_fps can be missed.").optional(),
   frame_width: z.number().int().min(64).max(1920).describe("Decoded frame width in pixels (default 640, maximum 1920; larger values are clamped).").optional(),
   min_change_score: z.number().min(0).max(1).optional(),
@@ -151,7 +151,7 @@ export const TrackRegionEventsInputSchema = {
       w: z.number().positive().max(1),
       h: z.number().positive().max(1),
     }),
-  ]).describe("Rectangle to watch, as fractions of the frame: x, y (top-left) and width, height, with x+width <= 1 and y+height <= 1. Uses width/height, not w/h; w/h with the same meaning is also accepted."),
+  ]).describe("Rectangle to watch, as fractions of the frame: x, y (top-left) and width, height, with x+width <= 1 and y+height <= 1. Uses width/height, not w/h; w/h with the same meaning is also accepted. For example: {\"x\": 0.25, \"y\": 0.1, \"width\": 0.5, \"height\": 0.6}."),
   sample_fps: z.number().positive().max(10).describe("Sampling rate (default 0.25, maximum 10; larger values are clamped and the result says so). Transitions shorter than 1/sample_fps can be missed.").optional(),
   frame_width: z.number().int().min(64).max(1920).describe("Decoded frame width in pixels (default 640, maximum 1920; larger values are clamped).").optional(),
   change_threshold: z.number().min(0).max(1).optional(),
