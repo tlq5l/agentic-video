@@ -305,7 +305,7 @@ def widen_top_interval(intervals, lower, upper, frames, margin, maximum=MAX_WIND
     `maximum`. Growth never goes past `maximum`, but a seed already longer than `maximum` (a held frame, or hits
     merged together) is kept whole. Other intervals that overlap the grown one are merged into it (union, ranks and
     scores combined), repeatedly, so the returned intervals never overlap; that merge can make the result longer
-    than `maximum`.
+    than `maximum` and pull in lower-scoring hits.
     """
     top = next(item for item in intervals if 1 in item["ranks"])
     others = [item for item in intervals if item is not top]
@@ -450,7 +450,7 @@ def search_index(engine, query, top_k=5, start_sec=0.0, end_sec=None):
         _check_source(engine, stamp)
         return {"status": state, "hits": hits, "intervals": intervals, "contact_sheet": sheet, **pending,
                 "index_complete": progress["indexed_until_sec"] >= duration, **progress,
-                "note": "Cosine similarity is not confidence. Sample-based intervals are approximate; the interval holding rank 1 grows from its best frames only over frames that score close to the best, up to 8 s, so it can be shorter; a span already longer than 8 s, such as a held frame or hits merged together, is kept whole, so it can be longer. Verify badges and inspect_window. Empty results do not establish absence."}
+                "note": "Cosine similarity is not confidence. Sample-based intervals are approximate; the interval holding rank 1 grows from its best frames only over frames that score close to the best, up to 8 s, so it can be shorter; a span already longer than 8 s, such as a held frame or hits merged together, is kept whole, so it can be longer and can include lower-scoring hits. Verify badges and inspect_window. Empty results do not establish absence."}
     finally:
         conn.close()
 
