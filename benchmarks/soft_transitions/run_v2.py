@@ -33,14 +33,8 @@ def score_with_kinds(clips):
     soft = [0, 0]
     for clip in clips.values():
         found = sorted((float(cut.timestamp_sec), cut.kind) for cut in v1.found_cuts(clip["path"]))
-        matched = [None] * len(clip["boundaries"])
-        for t, kind in found:
-            hit = next((i for i, (s, e) in enumerate(clip["boundaries"])
-                        if matched[i] is None and s - v1.TOL <= t <= e + v1.TOL), None)
-            if hit is not None:
-                matched[hit] = kind
-            elif not any(s <= t <= e for s, e in clip["ignore"]):
-                fp += 1
+        matched, extra_fp = v1.match_clip(clip, found)
+        fp += extra_fp
         for kind, label in zip(matched, clip["labels"]):
             tp += 1 if kind else 0
             fn += 0 if kind else 1

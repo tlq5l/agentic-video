@@ -60,41 +60,43 @@ def _locate_clips(node, folder):
 
 def times(result):
     items = result.get("cuts", []) if isinstance(result, dict) else result
-    out = []
-    for item in items:
-        value = item["timestamp_sec"] if isinstance(item, dict) else getattr(item, "timestamp_sec")
-        out.append(float(value))
-    return sorted(out)
+    return sorted(
+        float(item["timestamp_sec"] if isinstance(item, dict) else getattr(item, "timestamp_sec"))
+        for item in items
+    )
+
+
+def match_clip(clip, detections):
+    """Match (time, value) detections to the clip's boundaries, first unmatched boundary first."""
+    matched = [None] * len(clip["boundaries"])
+    fp = 0
+    for t, value in detections:
+        hit = next((i for i, (s, e) in enumerate(clip["boundaries"])
+                    if matched[i] is None and s - TOL <= t <= e + TOL), None)
+        if hit is not None:
+            matched[hit] = value
+        elif not any(s <= t <= e for s, e in clip["ignore"]):
+            fp += 1
+    return matched, fp
 
 
 def score(clips):
-    tp = fp = fn = 0
+    fp = 0
     hard = [0, 0]
     soft = [0, 0]
     fp_neg = 0
-    for name, clip in clips.items():
+    for clip in clips.values():
         found = times(found_cuts(clip["path"]))
-        matched = [False] * len(clip["boundaries"])
-        for t in found:
-            hit = None
-            for i, (s, e) in enumerate(clip["boundaries"]):
-                if not matched[i] and s - TOL <= t <= e + TOL:
-                    hit = i
-                    break
-            if hit is not None:
-                matched[hit] = True
-                continue
-            if any(s <= t <= e for s, e in clip["ignore"]):
-                continue
-            fp += 1
-            if not clip["boundaries"]:
-                fp_neg += 1
+        matched, extra_fp = match_clip(clip, ((t, True) for t in found))
+        fp += extra_fp
+        if not clip["boundaries"]:
+            fp_neg += extra_fp
         for ok, kind in zip(matched, clip["kinds"]):
             bucket = hard if kind == "hard" else soft
             bucket[1] += 1
-            bucket[0] += 1 if ok else 0
-            tp += 1 if ok else 0
-            fn += 0 if ok else 1
+            bucket[0] += bool(ok)
+    tp = hard[0] + soft[0]
+    fn = hard[1] + soft[1] - tp
     precision = tp / (tp + fp) if tp + fp else 0.0
     recall = tp / (tp + fn) if tp + fn else 0.0
     f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0

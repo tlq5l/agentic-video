@@ -15,7 +15,7 @@ W, H, FPS = 160, 90, 30
 
 
 def _encode(path, frames):
-    raw = np.stack(frames).astype(np.uint8).tobytes()
+    raw = np.stack(frames).tobytes()
     cmd = ["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(FPS),
            "-i", "-", "-c:v", "ffv1", "-pix_fmt", "rgb24", str(path)]
     subprocess.run(cmd, input=raw, check=True)

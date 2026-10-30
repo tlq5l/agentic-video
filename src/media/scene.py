@@ -498,13 +498,13 @@ def _find_transitions(diff, area, colour, blend, start_sec: float, rescue=None) 
         # out against the dips beside it sits in busy footage.
         still = calm_sides and max(float(left.min()), float(right.min())) <= SOFT_STILL_LEVEL
         if new_colours < SOFT_MIN_HIST and float(blend[lo: hi + 1].min()) > SOFT_MAX_BLEND_ERROR:
-            if not still or value < SOFT_STILL_MIN_DIFF:
-                # Not a clear soft change: it is kept only if its frame step proves a hard cut.
-                if rescue is not None:
-                    rescue.append((start_sec + ((lo + hi) / 2.0) / SOFT_SAMPLE_FPS, value))
-                continue
-        if (value < SOFT_WEAK_DIFF and SOFT_WEAK_MIN_BLEND < float(blend[lo: hi + 1].min()) <= SOFT_MAX_BLEND_ERROR
-                and not still and float(area[lo: hi + 1].max()) < SOFT_FADE_MIN_AREA):
+            rejected = not still or value < SOFT_STILL_MIN_DIFF
+        else:
+            rejected = (value < SOFT_WEAK_DIFF
+                        and SOFT_WEAK_MIN_BLEND < float(blend[lo: hi + 1].min()) <= SOFT_MAX_BLEND_ERROR
+                        and not still and float(area[lo: hi + 1].max()) < SOFT_FADE_MIN_AREA)
+        if rejected:
+            # Not a clear soft change: it is kept only if its frame step proves a hard cut.
             if rescue is not None:
                 rescue.append((start_sec + ((lo + hi) / 2.0) / SOFT_SAMPLE_FPS, value))
             continue
@@ -632,12 +632,12 @@ def _scan_scene_changes(video_path: str, start_sec: float, duration_sec: Optiona
         entry = {"timestamp_sec": round(when, 3), "score": round(value, 6), "kind": "transition", "plateau_sec": round(when, 3), "rescue": True}
         if gray is not None:
             _settle_entry(entry, times[lo:hi], scores[lo:hi], gray[lo:hi])
-            if entry["kind"] == "cut":
-                del entry["rescue"]
-                changes.append(entry)
+            if entry["kind"] != "cut":
+                continue
+            del entry["rescue"]
         else:
             entry["window"] = {"times": [float(t) for t in times[lo:hi]], "scores": [float(x) for x in scores[lo:hi]]}
-            changes.append(entry)
+        changes.append(entry)
     return strong, changes
 
 
@@ -687,7 +687,8 @@ def _settle_changes(
     for entry, t, frames in zip(todo, stretch_times, stretches):
         _settle_entry(entry, t, np.array(entry.pop("window")["scores"], dtype=np.float32), frames)
     dropped = {id(entry) for entry in todo if entry.pop("rescue", False) and entry["kind"] == "transition"}
-    changes[:] = [entry for entry in changes if id(entry) not in dropped]
+    if dropped:
+        changes[:] = [entry for entry in changes if id(entry) not in dropped]
     return True
 
 
