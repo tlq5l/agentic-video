@@ -13,8 +13,9 @@ Splits: list position in questions.json, even = train (used for tuning), odd = t
 measures only train; the test split is measured only with --final, once per commit, for the final comparison.
 Queries of the split not asked for are never run and never written to --out. The odd items were replaced on
 2026-10-30 before any run of them; the first odd set was printed during the 0.70 tuning and is retired.
-The 0.70 cut (MIN_SCORE in src/transcript/semantic.py) was frozen before the replacement and is not tuned on
-the test split.
+The 0.70 cut (MIN_SCORE in src/transcript/semantic.py) was chosen on train and the repo fixture while the first
+odd set was printed, so that set cannot count as held out. The replaced set has not been run yet.
+Core ML needs Apple silicon: on an Intel Mac the query embeddings come back NaN, and the run is meaningless.
 
 Metrics (METRIC lines):
   climb_nomatch_semantic_share   share of no-match queries that return any match=semantic hit (lower is better)
