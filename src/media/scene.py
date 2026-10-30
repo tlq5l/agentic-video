@@ -165,6 +165,13 @@ SOFT_MIN_HIST = 0.4
 SOFT_SURE_HIST = 0.5
 SOFT_MIN_HIST_PROMINENCE = 0.35
 SOFT_STILL_LEVEL = 0.015
+SOFT_STILL_MIN_DIFF = 0.035
+SOFT_WEAK_DIFF = 0.06
+SOFT_WEAK_MIN_BLEND = 0.1
+# A weak peak that is not a dissolve is kept when the picture is steady on both sides (a fade between
+# still pictures, with or without fixed bars) or when at least this share of the frame changes
+# (a whole-frame fade or step). Otherwise it is motion.
+SOFT_FADE_MIN_AREA = 0.9
 SOFT_STILL_REACH_SEC = 1.0
 # A dissolve or fade passes through the average of the pictures before and
 # after it; moving objects do not. This lets dark dissolves through the gate.
@@ -196,8 +203,10 @@ def _range_key(start_sec: float, duration_sec: Optional[float]) -> str:
 
 
 def _changes_key(span: str) -> str:
-    # v9: a change on a large video may still carry its "window", settled by _settle_changes.
-    return f"softtrans_v9_{span}"
+    # v14: a weak peak with steady pictures on both sides is kept whatever share of the frame changes.
+    # v13: a change on a large video may still carry its "window", settled by _settle_changes;
+    # a rescued candidate carries a "rescue" marker and is kept only when it settles as a cut.
+    return f"softtrans_v14_{span}"
 
 
 def _scenes_key(threshold: float, span: str) -> str:
@@ -420,7 +429,7 @@ def _side_dip(diff, index: int, step: int, reach: int) -> float:
     return lowest
 
 
-def _find_transitions(diff, area, colour, blend, start_sec: float) -> List[tuple]:
+def _find_transitions(diff, area, colour, blend, start_sec: float, rescue=None) -> List[tuple]:
     """Pick the scene changes out of the lag-difference curves: (time, strength) in time order."""
     import numpy as np
 
@@ -483,13 +492,22 @@ def _find_transitions(diff, area, colour, blend, start_sec: float) -> List[tuple
             around = [float(np.percentile(part, 25)) for part in sides if len(part)]
             if new_colours - (max(around) if around else 0.0) < SOFT_MIN_HIST_PROMINENCE:
                 new_colours = 0.0
+        left = diff[max(lag_edge, lo - reach): lo]
+        right = diff[hi + 1: min(count - lag_edge, hi + 1 + reach)]
+        # "Still" also needs calm side windows: a peak that only stood
+        # out against the dips beside it sits in busy footage.
+        still = calm_sides and max(float(left.min()), float(right.min())) <= SOFT_STILL_LEVEL
         if new_colours < SOFT_MIN_HIST and float(blend[lo: hi + 1].min()) > SOFT_MAX_BLEND_ERROR:
-            left = diff[max(lag_edge, lo - reach): lo]
-            right = diff[hi + 1: min(count - lag_edge, hi + 1 + reach)]
-            # "Still" also needs calm side windows: a peak that only stood
-            # out against the dips beside it sits in busy footage.
-            if not calm_sides or max(float(left.min()), float(right.min())) > SOFT_STILL_LEVEL:
-                continue
+            rejected = not still or value < SOFT_STILL_MIN_DIFF
+        else:
+            rejected = (value < SOFT_WEAK_DIFF
+                        and SOFT_WEAK_MIN_BLEND < float(blend[lo: hi + 1].min()) <= SOFT_MAX_BLEND_ERROR
+                        and not still and float(area[lo: hi + 1].max()) < SOFT_FADE_MIN_AREA)
+        if rejected:
+            # Not a clear soft change: it is kept only if its frame step proves a hard cut.
+            if rescue is not None:
+                rescue.append((start_sec + ((lo + hi) / 2.0) / SOFT_SAMPLE_FPS, value))
+            continue
         found.append((start_sec + ((lo + hi) / 2.0) / SOFT_SAMPLE_FPS, value))
     found.sort()
     return found
@@ -595,7 +613,8 @@ def _scan_scene_changes(video_path: str, start_sec: float, duration_sec: Optiona
     times, scores, rgb, gray = _scan_frames(video_path, start_sec, duration_sec, timeout, with_gray=with_gray)
     strong = [[round(float(t), 6), round(float(s), 6)] for t, s in zip(times, scores) if s > SCAN_SCORE_FLOOR]
     changes = []
-    for when, value in _find_transitions(*_lag_curves(rgb), start_sec):
+    rescued = []
+    for when, value in _find_transitions(*_lag_curves(rgb), start_sec, rescued):
         entry = {"timestamp_sec": round(when, 3), "score": round(value, 6), "kind": "transition", "plateau_sec": round(when, 3)}
         window = _step_window(times, when)
         if window is not None:
@@ -604,6 +623,20 @@ def _scan_scene_changes(video_path: str, start_sec: float, duration_sec: Optiona
                 _settle_entry(entry, times[lo:hi], scores[lo:hi], gray[lo:hi])
             else:
                 entry["window"] = {"times": [float(t) for t in times[lo:hi]], "scores": [float(x) for x in scores[lo:hi]]}
+        changes.append(entry)
+    for when, value in rescued:
+        window = _step_window(times, when)
+        if window is None:
+            continue
+        lo, hi = window
+        entry = {"timestamp_sec": round(when, 3), "score": round(value, 6), "kind": "transition", "plateau_sec": round(when, 3), "rescue": True}
+        if gray is not None:
+            _settle_entry(entry, times[lo:hi], scores[lo:hi], gray[lo:hi])
+            if entry["kind"] != "cut":
+                continue
+            del entry["rescue"]
+        else:
+            entry["window"] = {"times": [float(t) for t in times[lo:hi]], "scores": [float(x) for x in scores[lo:hi]]}
         changes.append(entry)
     return strong, changes
 
@@ -627,6 +660,7 @@ def _settle_changes(
 ) -> bool:
     """Decide cut or transition for each change that still has a "window" (in place), except those `skip` names.
 
+    A rescued candidate (marked "rescue") that does not settle as a cut is removed from `changes`.
     Reads the gray frames of each window with its own short decode, which
     costs about a third of the whole scan if done for every change; a caller
     that will throw some changes away anyway (the echoes of hard cuts) skips
@@ -652,6 +686,9 @@ def _settle_changes(
             stretches.append(gray[at: at + len(t)])
     for entry, t, frames in zip(todo, stretch_times, stretches):
         _settle_entry(entry, t, np.array(entry.pop("window")["scores"], dtype=np.float32), frames)
+    dropped = {id(entry) for entry in todo if entry.pop("rescue", False) and entry["kind"] == "transition"}
+    if dropped:
+        changes[:] = [entry for entry in changes if id(entry) not in dropped]
     return True
 
 

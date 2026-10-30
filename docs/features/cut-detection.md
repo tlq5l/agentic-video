@@ -4,7 +4,7 @@ How a user reaches it: the `detect_cuts` tool, `sync_check`, and `python -m src.
 
 Code: `src/media/scene.py` (`detect_scenes`, `scan_scene_changes`, `detect_soft_transitions`, `_debounce`, `_sharp_step`) and `src/retrieval/engine.py` (`detect_cuts`).
 
-How to check it works: `pytest tests/test_cut_strongest_frame.py tests/test_media.py`.
+How to check it works: `pytest tests/test_cut_strongest_frame.py tests/test_media.py tests/test_soft_changes_e2e.py tests/test_scene_lazy_path.py`.
 
 What depends on it: `src/loop.py` (cut list for the check loop), `src/media/audio.py` (`sync_check`), `src/adapters/model_adapter.py` (window around the first cut), cut-aligned boundaries in `src/retrieval/engine.py`, and `partition_into_scene_segments`.
 
@@ -14,4 +14,7 @@ Gotchas:
 - After that, a cut closer than 0.5 s to the last kept cut is dropped, even when it is the stronger one.
 - A cut found by the soft scan (score under the threshold) is timed the same way: at the stronger of its one or two frames.
 - Two paths must give the same answer: `detect_scenes` on its own (ffmpeg returns only the frames over the threshold) and the one-decode scan in `scan_scene_changes` (cached scores of every frame over 0.05).
-- Result cache keys are versioned (`scenes_v2_th…`, `softtrans_v8_…`); bump them when the stored answer changes. `scenescores_v1_…` holds raw scores.
+- A soft peak whose colours do not change much and whose picture is not a dissolve (blend error above 0.28) is kept only when both sides are still (under 0.015) and it is at least 0.035 strong. A weaker one is not dropped outright: it is kept only if the frame-step check (below) finds a cut.
+- A soft peak under 0.06 whose blend error is between 0.1 and 0.28 is weak motion (not a dissolve) unless it is kept by either of two tests: the picture is still on both sides (the still-sides level, under 0.015, within a second of the peak), or at least 90% of the frame changes. Fades with fixed black bars or a static part pass the first test; whole-frame fades and steps pass the second. A weak peak that fails both is dropped unless the frame-step check finds a cut. Blend alone cannot tell them apart: a short fade sampled off its midpoint has a blend error near 0.2.
+- A peak that the still-sides test drops (motion on a side, or under 0.035 strong), or that the weak-motion rule above drops, is kept as a cut when the frame step at it is one cut (the same check as a hard cut that the scene score missed). Other dropped peaks stay dropped. On a large video the candidate carries a `rescue` marker and is settled later by `_settle_changes`, which removes it if it does not settle as a cut.
+- Result cache keys are versioned (`scenes_v2_th…`, `softtrans_v14_…`); bump them when the stored answer changes. `scenescores_v1_…` holds raw scores.
