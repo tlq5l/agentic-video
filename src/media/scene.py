@@ -503,6 +503,8 @@ def _find_transitions(diff, area, colour, blend, start_sec: float, rescue=None) 
                 continue
         if (value < SOFT_WEAK_DIFF and SOFT_WEAK_MIN_BLEND < float(blend[lo: hi + 1].min()) <= SOFT_MAX_BLEND_ERROR
                 and float(area[lo: hi + 1].max()) < SOFT_FADE_MIN_AREA):
+            if rescue is not None:
+                rescue.append((start_sec + ((lo + hi) / 2.0) / SOFT_SAMPLE_FPS, value))
             continue
         found.append((start_sec + ((lo + hi) / 2.0) / SOFT_SAMPLE_FPS, value))
     found.sort()
