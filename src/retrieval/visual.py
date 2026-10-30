@@ -288,7 +288,7 @@ def _build_locked(engine, stamp, duration, report):
         conn.close()
 
 
-MIN_WINDOW_SEC = 15.0
+MIN_WINDOW_SEC = 8.0
 WIDEN_MARGIN = 0.02  # cosine points below the top score that a neighbouring frame may have and still join the rank-1 window
 
 
