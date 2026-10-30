@@ -14,7 +14,8 @@ measures only train; the test split is measured only with --final, once per comm
 Queries of the split not asked for are never run and never written to --out. The odd items were replaced on
 2026-10-30 before any run of them; the first odd set was printed during the 0.70 tuning and is retired.
 The 0.70 cut (MIN_SCORE in src/transcript/semantic.py) was chosen on train and the repo fixture while the first
-odd set was printed, so that set cannot count as held out. The replaced set has not been run yet.
+odd set was printed, so that set cannot count as held out. The replaced set was run once on 74eb3b3 and once
+on the 0.70 cut (2026-10-30); the results are on docs/features/transcribe.md.
 Core ML needs Apple silicon: on an Intel Mac the query embeddings come back NaN, and the run is meaningless.
 
 Metrics (METRIC lines):
