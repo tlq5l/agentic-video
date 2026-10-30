@@ -1214,6 +1214,27 @@ def _package_version():
         return "dev"
 
 
+def _cli(argv):
+    """`list [--schemas]` prints tool names or full schemas; `call <tool> '<json>'` prints the tools/call result the server returns."""
+    if argv == ["list"]:
+        print("\n".join(tool["name"] for tool in TOOLS_MANIFEST))
+        return 0
+    if argv == ["list", "--schemas"]:
+        print(json.dumps(TOOLS_MANIFEST, indent=2))
+        return 0
+    if len(argv) == 3 and argv[0] == "call":
+        try:
+            arguments = json.loads(argv[2])
+        except json.JSONDecodeError as exc:
+            print(f"arguments must be a JSON object: {exc}", file=sys.stderr)
+            return 2
+        result = json.loads(tool_call_response(None, argv[1], arguments))["result"]
+        print(json.dumps(result))
+        return 1 if result.get("isError") else 0
+    print("usage: python -m src.executor.mcp_server [list [--schemas] | call <tool> '<json arguments>']", file=sys.stderr)
+    return 2
+
+
 def main(argv=None):
     """Console-script entry point: `agentic-video` starts the stdio MCP server."""
     args = sys.argv[1:] if argv is None else list(argv)
@@ -1232,4 +1253,6 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        sys.exit(_cli(sys.argv[1:]))
     run_stdio_server()
