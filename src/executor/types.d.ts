@@ -1018,7 +1018,6 @@ export interface AudioOnsetsOutput {
   band_hz: AudioFrequencyBand | null;
   compare_to: string | null;
   compare_min_delta_db: number | null;
-  min_gap_sec: number;
   onsets: AudioOnset[];
   total: number;
   /** How many detected onsets min_gap_sec merged into a neighbouring onset. */

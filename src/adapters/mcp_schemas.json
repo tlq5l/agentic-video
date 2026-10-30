@@ -2109,9 +2109,6 @@
           "min_strength": {
             "type": "number"
           },
-          "min_gap_sec": {
-            "type": "number"
-          },
           "onsets": {
             "type": "array",
             "items": {

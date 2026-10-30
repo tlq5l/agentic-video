@@ -582,7 +582,6 @@ def audio_onsets(
         "hop_samples": HOP_SAMPLES,
         "time_resolution_ms": round(HOP_SAMPLES * 1000.0 / SAMPLE_RATE, 3),
         "min_strength": round(threshold, 6),
-        "min_gap_sec": round(gap, 6),
         "band_hz": band,
         "compare_to": None if compare_to is None else str(Path(compare_to).expanduser().resolve()),
         "compare_min_delta_db": None if compare_to is None else 2.5,

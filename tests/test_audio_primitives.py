@@ -59,7 +59,8 @@ def test_audio_onsets_min_gap_merges_double_hits_through_handle_call(monkeypatch
     monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
     source = tmp_path / "clicks.wav"
     # Five decaying 1700 Hz clicks at 0.5, 1.0, ... 2.5 s over silence, written by ffmpeg as lossless PCM.
-    # Each click's attack shows as two onsets about 38 ms apart, so min_gap_sec merges them.
+    # Each click's attack shows as two onsets about 38 ms apart. The default 0.035 s keeps both (the climb set
+    # sets that default), so the test passes 0.05 s, which merges them.
     click = "0.3*sin(2*PI*1700*mod(t,0.5))*exp(-110*mod(t,0.5))*gte(t,0.5)"
     subprocess.run(
         ["ffmpeg", "-nostdin", "-y", "-v", "error", "-f", "lavfi", "-i", f"aevalsrc='{click}':s=48000:d=3",
@@ -72,13 +73,14 @@ def test_audio_onsets_min_gap_merges_double_hits_through_handle_call(monkeypatch
     merged = handle_call("audio_onsets", {"source": str(source), "min_gap_sec": 0.05})
 
     assert raw["ok"] is True and merged["ok"] is True
+    assert raw["data"]["merged_count"] == 0
     assert raw["data"]["total"] > len(clicks)
+    raw_times = [onset["time_sec"] for onset in raw["data"]["onsets"]]
+    assert all(any(abs(hit - target) <= 0.03 for hit in raw_times) for target in clicks)
     times = [onset["time_sec"] for onset in merged["data"]["onsets"]]
     assert len(times) == len(clicks)
     assert times == pytest.approx(clicks, abs=0.03)
     assert merged["data"]["merged_count"] == raw["data"]["total"] - len(clicks)
-    raw_times = [onset["time_sec"] for onset in raw["data"]["onsets"]]
-    assert all(any(abs(hit - target) <= 0.03 for hit in raw_times) for target in clicks)
     with pytest.raises(ValueError, match="min_gap_sec"):
         handle_call("audio_onsets", {"source": str(source), "min_gap_sec": -0.01})
 
