@@ -393,6 +393,8 @@ export interface CountOccurrencesInput {
   min_gap_sec?: number | string;
   /** Maximum spans listed (default 20, maximum 100; larger values are clamped and the result says so); count always includes omitted spans. */
   max_spans?: number;
+  /** Count only appearances moving this way across the frame (estimated from first and last positions; verify the spans). Default "any". */
+  direction?: "any" | "left_to_right" | "right_to_left" | "top_to_bottom" | "bottom_to_top";
 }
 
 export interface OccurrenceSpan {
@@ -432,7 +434,7 @@ export interface CountOccurrencesOutput {
   gaps_merged?: number;
   /** The count if the joined pairs were kept apart. */
   count_without_merges?: number;
-  /** Net motion of appearances across the frame, by direction; only set when some move. Each value is an estimate from a span's first and last positions, not a verified crossing or direction count. The count includes every direction; directional counting is unsupported, so verify any directional answer visually before reporting it. */
+  /** Net motion of appearances across the frame, by direction; only set when some move. Each value is an estimate from a span's first and last positions, not a verified crossing or direction count. Without `direction`, the count includes every direction and directional counting is unsupported, so verify any directional answer visually before reporting it. With `direction`, these are the appearances left out of count and spans. */
   travel_counts?: Record<string, number>;
   spans?: OccurrenceSpan[];
   spans_returned?: number;

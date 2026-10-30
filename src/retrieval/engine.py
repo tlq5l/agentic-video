@@ -125,12 +125,12 @@ class AgenticVideoEngine:
     def count_occurrences(self, description: Optional[str] = None, text: Optional[str] = None,
                           case_sensitive: bool = False, start_sec: float = 0.0,
                           end_sec: Optional[float] = None, fps: float = 5.0,
-                          min_gap_sec: float = 0.3, max_spans: int = 20) -> Dict[str, Any]:
+                          min_gap_sec: float = 0.3, max_spans: int = 20, direction: str = "any") -> Dict[str, Any]:
         """Start or poll a bounded count of distinct appearances of a symbol or exact text."""
         from src.retrieval.occurrence import submit
         return submit(self, description=description, text=text, case_sensitive=case_sensitive,
                       start_sec=start_sec, end_sec=end_sec, fps=fps, min_gap_sec=min_gap_sec,
-                      max_spans=max_spans)
+                      max_spans=max_spans, direction=direction)
 
     def overview(
         self,

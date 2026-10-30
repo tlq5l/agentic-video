@@ -49,6 +49,7 @@ MIN_SYMBOL_WIDTH = 0.025  # smaller specks (video noise) are not symbols; fracti
 TELEPORT_JUMP = 0.4  # fraction of the frame a match may move between two samples before it counts as a new appearance
 SPAN_NOTE = "Spans are sample-based (+/- 1/fps); verify each representative_sec with inspect_window."
 SHEET_TILES = 24
+DIRECTIONS = ("any", "left_to_right", "right_to_left", "top_to_bottom", "bottom_to_top")
 TILE_NOTE = (" contact_sheet is one image with a tile per listed span, in span order: a zoomed frame of the span's best "
              "match, boxed, labeled with the span number and time. Look at each tile and drop any span whose tile is not "
              "the asked-for thing; spans marked * (`weak`) are the likeliest false ones. The answer is the number of "
@@ -533,6 +534,9 @@ def _validate(args, duration=None):
         raise ValueError(f"min_gap_sec must be positive (got {gap:g}); omit it for the default of 0.3")
     if isinstance(max_spans, bool) or not isinstance(max_spans, int) or not 1 <= max_spans <= MAX_SPANS_LIMIT:
         raise ValueError(f"max_spans must be an integer between 1 and {MAX_SPANS_LIMIT} (got {max_spans!r}); count always includes every span")
+    direction = args.get("direction", "any")
+    if direction not in DIRECTIONS:
+        raise ValueError(f"direction must be one of {', '.join(DIRECTIONS)} (got {direction!r}); omit it to count every direction")
 
 
 def _needs_clip(spec):
@@ -702,7 +706,9 @@ def count_video(engine, progress=lambda done, total: None, **args):
                          f"use start_sec/end_sec windows of at most {MAX_FRAMES} seconds, one call each: {windows}")
     fps = round(fps, 3)
     judged = [ALGORITHM_VERSION, meta.fingerprint, description, text, case_sensitive, start, end, requested_fps]
-    tag = hashlib.sha256(json.dumps(judged + [min_gap, max_spans]).encode()).hexdigest()[:20]
+    direction = args.get("direction", "any")
+    filters = [] if direction == "any" else [direction]
+    tag = hashlib.sha256(json.dumps(judged + [min_gap, max_spans] + filters).encode()).hexdigest()[:20]
     cache_dir = engine._cache.get_entry_dir(meta.fingerprint)
     result_path = cache_dir / f"{tag}.occurrences.json"
     if result_path.exists():
@@ -725,9 +731,11 @@ def count_video(engine, progress=lambda done, total: None, **args):
             builder.add(start + index / fps, hit, None)
     spans = builder.finish()
     capped = len(spans) >= MAX_SPANS_LIMIT
-    shown = spans[:max_spans]
-    if replayed is not None:
-        _fill_tiles(engine.source_path, shown[:SHEET_TILES], (start, fps, width, height))
+    matched = spans if direction == "any" else [span for span in spans if _direction(span["points"]) == direction]
+    shown = matched[:max_spans]
+    missing_tiles = [span for span in shown[:SHEET_TILES] if span["rep"][3] is None]  # replayed runs, or spans past the builder's tile limit
+    if missing_tiles:
+        _fill_tiles(engine.source_path, missing_tiles, (start, fps, width, height))
     entries = []
     for i, span in enumerate(shown):
         x, y, w, h = span["rep"][2]
@@ -737,9 +745,9 @@ def count_video(engine, progress=lambda done, total: None, **args):
                         "representative_sec": round(span["rep"][0], 3), "frame_badge": f"#{i + 1}", "weak": span["weak"],
                         "region": {"x": round(x, 3), "y": round(y, 3), "w": round(w, 3), "h": round(h, 3)},
                         "travel": _direction(span["points"])})
-    omitted = len(spans) - len(shown)
+    omitted = len(matched) - len(shown)
     spec = judge.spec
-    result = {"status": "complete", "count": None if capped else len(spans), "spans": entries, "spans_returned": len(shown),
+    result = {"status": "complete", "count": None if capped else len(matched), "spans": entries, "spans_returned": len(shown),
               "spans_omitted": omitted, "window": {"start_sec": round(start, 3), "end_sec": round(end, 3)},
               "fps_used": fps, "frames_sampled": total, "frames_analyzed": analyzed,
               "checks": {"text": text, "description": description, "color": spec and spec["color"],
@@ -759,19 +767,32 @@ def count_video(engine, progress=lambda done, total: None, **args):
                            f"start_sec={entries[-1]['end_sec']} or a larger max_spans.")
     if builder.bridged and not capped:
         joined = ", ".join(f"{a:.1f}-{b:.1f}s" for a, b in builder.bridged[:5]) + (", ..." if len(builder.bridged) > 5 else "")
-        result.update({"gaps_merged": len(builder.bridged), "count_without_merges": len(spans) + len(builder.bridged)})
+        result["gaps_merged"] = len(builder.bridged)
+        if direction == "any":
+            result["count_without_merges"] = len(spans) + len(builder.bridged)
+            unmerged = f"without merging the count is {len(spans) + len(builder.bridged)}"
+        else:
+            unmerged = f"the joined pairs' direction is unknown, so no count without merging is given for direction={direction}"
         result["note"] += (f" min_gap_sec={min_gap:g} joined {len(builder.bridged)} pair(s) of appearances that the default "
-                           f"{DEFAULT_MIN_GAP:g} s keeps apart (gaps at {joined}); without merging the count is "
-                           f"{len(spans) + len(builder.bridged)}. Lower min_gap_sec if those were separate appearances.")
-    travel = collections.Counter(entry["travel"] for entry in entries)
-    travel.update(_direction(span["points"]) for span in spans[len(shown):])
-    moving = {direction: n for direction, n in travel.items() if direction != "stationary"}
+                           f"{DEFAULT_MIN_GAP:g} s keeps apart (gaps at {joined}); {unmerged}. "
+                           f"Lower min_gap_sec if those were separate appearances.")
+    travel = collections.Counter(_direction(span["points"]) for span in spans)
+    moving = {way: n for way, n in travel.items() if way != "stationary"}
     if moving:
         result["travel_counts"] = moving
+        if direction == "any":
+            outcome = ("The count includes every direction. Directional counting is unsupported: verify each span with "
+                       "inspect_window before answering a directional question.")
+        else:
+            outcome = "Verify each span with inspect_window before answering."
         result["note"] += (f" {sum(moving.values())} appearance(s) show net motion across the frame ("
-                           f"{', '.join(f'{n} {d}' for d, n in moving.items())}), estimated from each span's first and last "
-                           f"positions; these are not verified crossings. The count includes every direction. Directional "
-                           f"counting is unsupported: verify each span with inspect_window before answering a directional question.")
+                           f"{', '.join(f'{n} {way}' for way, n in moving.items())}), estimated from each span's first and last "
+                           f"positions; these are not verified crossings. {outcome}")
+    if direction != "any" and not capped:
+        stationary = travel.get("stationary", 0)
+        result["note"] += (f" direction={direction}: counted the {len(matched)} of {len(spans)} appearance(s) that travel "
+                           f"{direction}; {len(spans) - len(matched) - stationary} moved another way and {stationary} stayed "
+                           f"still, and are left out of count and spans.")
     if shown and not capped:
         result["note"] += TILE_NOTE
     if len(shown) > SHEET_TILES:

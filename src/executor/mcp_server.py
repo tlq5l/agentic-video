@@ -799,12 +799,13 @@ def _dispatch(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": True, "data": data}
         
     elif name == "count_occurrences":
+        direction = args.get("direction", "any")
         data = dict(engine.count_occurrences(
             description=args.get("description"), text=args.get("text"),
             case_sensitive=args.get("case_sensitive", False),
             start_sec=args.get("start_sec", 0.0), end_sec=args.get("end_sec"),
             fps=args.get("fps", 5.0), min_gap_sec=args.get("min_gap_sec", 0.3),
-            max_spans=args.get("max_spans", 20)))
+            max_spans=args.get("max_spans", 20), direction=direction))
         data["verify"] = ("Rough count: spans can be false, merge across scene cuts, split one appearance, or miss "
                           "crossings. Before answering, look at each tile of the contact_sheet image (one per span, "
                           "in span order, a zoomed frame of its best match, boxed) and drop any span whose tile is "
@@ -817,15 +818,23 @@ def _dispatch(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         elif data.get("status") != "complete":
             data.pop("verify", None)
         elif not data.get("spans"):
-            data["verify"] = ("Nothing matched. Before answering 0, look at contact_sheet frames over the same window "
+            nothing = "Nothing matched" if direction == "any" else f"No appearance travels {direction}"
+            data["verify"] = (f"{nothing}. Before answering 0, look at contact_sheet frames over the same window "
                               "and count by eye; if your count differs, trust your own.")
         elif data.get("gaps_merged"):
-            data["verify"] += (" min_gap_sec joined separate appearances here; a tile can show only one of them, so "
-                               "check the gaps listed in note and use count_without_merges if they were separate.")
+            unmerged = "use count_without_merges if they were separate" if "count_without_merges" in data else \
+                "rerun with the default min_gap_sec if they were separate"
+            data["verify"] += (f" min_gap_sec joined separate appearances here; a tile can show only one of them, so "
+                               f"check the gaps listed in note and {unmerged}.")
         if data.get("travel_counts") and not data.get("capped") and "verify" in data:
-            data["verify"] += (" Some appearances show net motion across the frame; travel_counts estimates it from first "
-                               "and last positions, so it is not a verified crossing or direction count. The count includes "
-                               "all directions: do not answer a directional question from it without checking with inspect_window.")
+            if direction == "any":
+                data["verify"] += (" Some appearances show net motion across the frame; travel_counts estimates it from first "
+                                   "and last positions, so it is not a verified crossing or direction count. The count includes "
+                                   "all directions: do not answer a directional question from it without checking with inspect_window.")
+            else:
+                data["verify"] += (f" Some appearances show net motion across the frame; travel_counts estimates it from first "
+                                   f"and last positions, so it is not a verified crossing. The count holds only the appearances "
+                                   f"that travel {direction}; check them with inspect_window before answering.")
         sheet = data.get("contact_sheet")
         if isinstance(sheet, dict) and sheet.get("file_path"):
             sheet = dict(sheet)
