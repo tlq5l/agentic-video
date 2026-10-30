@@ -92,7 +92,7 @@ def main():
     args = parser.parse_args()
     from benchmarks.dev.count_dev.generate import data_root
     splits = set(args.split.split(","))
-    if not splits <= {"train", "train2", "test", "all"}:
+    if not splits <= {*SPLITS, "all"}:
         parser.error(f"unknown split in {args.split!r}")
     videos = data_root(args.out) / "videos"
     with tempfile.TemporaryDirectory(prefix="count-dev-cache-") as cache:
@@ -124,8 +124,8 @@ def main():
                 f"{k}={data[k]}" for k in ("confidence", "count_reliable", "method_used", "spans_omitted", "capped", "gaps_merged",
                                    "count_without_merges", "min_gap_sec_clamped_from") if k in data)
             results["real_rep" if row.get("real") else name][row["split"]].append((expected, answer))
-            flagged = ((answer is None and data.get("status") == "complete") or bool(data.get("capped") or data.get("gaps_merged"))
-                       or bool(data.get("travel_counts")))
+            flagged = bool((answer is None and data.get("status") == "complete")
+                           or data.get("capped") or data.get("gaps_merged") or data.get("travel_counts"))
             records.append({"id": row["id"], "split": row["split"], "tool": name, "trap": "args" in row,
                             "expected": expected, "answer": answer, "flagged": flagged, "error": "error" in data})
             if "args" in row:

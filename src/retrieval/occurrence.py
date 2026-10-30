@@ -763,7 +763,8 @@ def count_video(engine, progress=lambda done, total: None, **args):
         result["note"] += (f" min_gap_sec={min_gap:g} joined {len(builder.bridged)} pair(s) of appearances that the default "
                            f"{DEFAULT_MIN_GAP:g} s keeps apart (gaps at {joined}); without merging the count is "
                            f"{len(spans) + len(builder.bridged)}. Lower min_gap_sec if those were separate appearances.")
-    travel = collections.Counter(_direction(span["points"]) for span in spans)
+    travel = collections.Counter(entry["travel"] for entry in entries)
+    travel.update(_direction(span["points"]) for span in spans[len(shown):])
     moving = {direction: n for direction, n in travel.items() if direction != "stationary"}
     if moving:
         result["travel_counts"] = moving
