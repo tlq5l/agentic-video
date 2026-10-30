@@ -1231,6 +1231,8 @@ export interface SyncCheckInput {
   tolerance_ms?: number;
   /** Tempo of the music, 20-300: compares cues with uncued moments at the same beat phase. */
   bpm?: number;
+  /** false (default): each cue gives candidate_onsets_count; true adds its candidate_onsets list. */
+  verbose?: boolean;
 }
 
 export interface SyncCutMatch {
@@ -1290,7 +1292,10 @@ export interface SyncCueResult {
   search_window_ms: number;
   match_method: string;
   ambiguous_reason: string | null;
-  candidate_onsets: { time_sec: number; offset_ms: number; strength: number }[];
+  /** Only with verbose true. */
+  candidate_onsets?: { time_sec: number; offset_ms: number; strength: number }[];
+  /** Onsets near this cue; reported instead of candidate_onsets unless verbose is true. */
+  candidate_onsets_count?: number;
   /** Only for a cue with a gradual build (a swell, not a hit). */
   soft_attack_build?: SyncSoftAttackBuild;
   band_hz?: AudioBandSelection;

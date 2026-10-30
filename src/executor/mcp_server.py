@@ -1060,6 +1060,7 @@ def _dispatch(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
             cues=args.get("cues"),
             tolerance_ms=float(args.get("tolerance_ms", 80.0)),
             bpm=None if bpm_raw is None else float(bpm_raw),
+            verbose=bool(args.get("verbose", False)),
         )
         data = dict(data)
         for key in ("cuts", "unmatched_strong_onsets"):
