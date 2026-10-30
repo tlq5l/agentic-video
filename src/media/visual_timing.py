@@ -93,6 +93,9 @@ def _grid_frames(path: Path, rate: float) -> Iterator[np.ndarray]:
                 if len(kept) > _SHARE_MAX_BYTES:
                     kept = None
             yield np.frombuffer(chunk, dtype=np.uint8).astype(np.float32)
+        exit_code = process.wait(timeout=max(Config.SUBPROCESS_TIMEOUT_SEC * 4, 180.0))
+        if exit_code != 0:
+            raise MediaCorruptError("FFmpeg could not decode the video frames", {"source": str(path), "exit_code": exit_code})
         if kept is not None:
             _shared = (key, np.frombuffer(kept, dtype=np.uint8).reshape(-1, size))
     finally:
@@ -186,6 +189,26 @@ _BLACK_MIN_SEC = 0.2
 _BLACK_CACHE_KEY = "black_ranges_v1"
 
 
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def _cached_black_ranges(cache: MediaCache, fingerprint: str) -> Optional[Dict[str, Any]]:
+    """The saved black scan when it has the shape black_ranges writes; anything else is a cache miss."""
+    cached = cache.load_json(fingerprint, _BLACK_CACHE_KEY)
+    if not isinstance(cached, dict) or not _is_number(cached.get("frame_rate")) or cached["frame_rate"] <= 0:
+        return None
+    ranges = cached.get("ranges")
+    if not isinstance(ranges, list):
+        return None
+    for item in ranges:
+        if not isinstance(item, dict) or not all(_is_number(item.get(key)) for key in ("start_sec", "end_sec", "duration_sec")):
+            return None
+        if item["end_sec"] < item["start_sec"]:
+            return None
+    return cached
+
+
 def black_ranges(source: str, cache: Optional[MediaCache] = None) -> Dict[str, Any]:
     """Stretches of at least 0.2 s where every frame is near-black (the blank_flashes test).
 
@@ -196,8 +219,8 @@ def black_ranges(source: str, cache: Optional[MediaCache] = None) -> Dict[str, A
     if cache is None:
         cache = MediaCache()
     fingerprint = cache.compute_fingerprint(str(path))
-    cached = cache.load_json(fingerprint, _BLACK_CACHE_KEY)
-    if isinstance(cached, dict):
+    cached = _cached_black_ranges(cache, fingerprint)
+    if cached is not None:
         return cached
     rate = _frame_rate(path)
     blank = _brightest_percent(path, rate) < _BLANK_P99

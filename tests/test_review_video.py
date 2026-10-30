@@ -5,6 +5,7 @@ import subprocess
 import time
 from pathlib import Path
 
+from src.core.cache import MediaCache
 from src.core.config import Config
 from src.executor import mcp_server
 from src.executor.mcp_server import handle_call
@@ -73,3 +74,46 @@ def test_review_video_finds_a_black_stretch_and_ignores_a_dim_picture(tmp_path, 
     assert dim["ok"] is True, dim
     assert dim["data"]["black_ranges"] == []
     assert dim["data"]["black_total"] == 0
+
+
+def test_review_video_replaces_a_damaged_black_cache_entry(tmp_path, monkeypatch):
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(Config, "TEMP_DIR", tmp_path / "tmp")
+    clip = _write_lossless_clip(tmp_path / "solid.mkv", [("black", 2.0)])
+    cache = MediaCache(base_dir=tmp_path / "cache")
+    fingerprint = MediaCache.compute_fingerprint(clip)
+    damaged_entries = [
+        {},
+        {"frame_rate": 30.0},
+        {"frame_rate": 30.0, "ranges": [{"start_sec": "0"}]},
+        {"frame_rate": 30.0, "ranges": [{"start_sec": 1.0, "end_sec": 0.5, "duration_sec": 0.5}]},
+    ]
+    for entry in damaged_entries:
+        cache.save_json(fingerprint, "black_ranges_v1", entry)
+        result = handle_call("review_video", {"source": clip})
+        assert result["ok"] is True, result
+        assert [(s["start_sec"], s["end_sec"], s["duration_sec"]) for s in result["data"]["black_ranges"]] == [(0.0, 2.0, 2.0)]
+        assert cache.load_json(fingerprint, "black_ranges_v1")["ranges"] == result["data"]["black_ranges"]
+
+
+def test_review_video_decoder_failure_is_an_error_and_leaves_no_black_result(tmp_path, monkeypatch):
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(Config, "TEMP_DIR", tmp_path / "tmp")
+    clip = _write_lossless_clip(tmp_path / "solid.mkv", [("black", 2.0)])
+    real_popen = subprocess.Popen
+
+    def grid_decoder_stops_after_ten_frames(args, **kwargs):
+        if any("scale=160:90:flags=area" in arg for arg in args):
+            return real_popen(["sh", "-c", "head -c 144000 /dev/zero; exit 23"], **kwargs)
+        return real_popen(args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "Popen", grid_decoder_stops_after_ten_frames)
+    failed = json.loads(mcp_server.tool_call_response(1, "review_video", {"source": clip}))["result"]
+    assert failed["isError"] is True, failed
+    assert "MediaCorruptError" in failed["content"][0]["text"]
+    assert MediaCache(base_dir=tmp_path / "cache").load_json(MediaCache.compute_fingerprint(clip), "black_ranges_v1") is None
+
+    monkeypatch.setattr(subprocess, "Popen", real_popen)
+    healthy = handle_call("review_video", {"source": clip})
+    assert healthy["ok"] is True, healthy
+    assert [(s["start_sec"], s["end_sec"]) for s in healthy["data"]["black_ranges"]] == [(0.0, 2.0)]
