@@ -34,11 +34,10 @@ def changed_files(base):
     return sorted(set(git_lines("diff", "--name-only", base, "--") + git_lines("ls-files", "--others", "--exclude-standard")))
 
 
-def module_name(path):
-    parts = list(path.relative_to(ROOT).with_suffix("").parts)
-    if parts[-1] == "__init__":
-        parts.pop()
-    return ".".join(parts)
+def module_of(relative_path):
+    """"src/retrieval/visual.py" -> "src.retrieval.visual"; also works for a file that was deleted."""
+    dotted = relative_path[: -len(".py")].replace("/", ".")
+    return dotted[: -len(".__init__")] if dotted.endswith(".__init__") else dotted
 
 
 def src_imports(path):
@@ -57,9 +56,8 @@ def select_tests(changed):
     if SELECT_ALL & set(changed):
         return sorted(TESTS.glob("test_*.py"))
 
-    modules = {module_name(p): p for p in SRC.rglob("*.py")}
-    module_of_file = {p.relative_to(ROOT).as_posix(): name for name, p in modules.items()}
-    changed_modules = {module_of_file[f] for f in changed if f in module_of_file}
+    modules = {module_of(p.relative_to(ROOT).as_posix()): p for p in SRC.rglob("*.py")}
+    changed_modules = {module_of(f) for f in changed if f.startswith("src/") and f.endswith(".py")}
     importers = {name: src_imports(path) for name, path in modules.items()}
     test_files = sorted(TESTS.glob("test_*.py"))
     chosen = {p for p in test_files if p.relative_to(ROOT).as_posix() in changed}
