@@ -1,4 +1,5 @@
 """Argument shapes agents guess, through handle_call on a real lossless clip with a tone and a scene change."""
+import json
 import shutil
 import subprocess
 
@@ -49,3 +50,32 @@ def test_guessed_argument_shapes_match_the_documented_ones_and_wrong_modes_name_
     assert "argument 'mode'" in message
     assert "hybrid" in message and "lexical" in message
     assert '"mode": "hybrid"' in message
+
+
+def test_wrong_nested_fields_lengths_and_missing_arguments_name_the_fix_and_the_example_runs(tmp_path):
+    source = _clip(tmp_path / "shapes.mkv")
+
+    with pytest.raises(ValueError) as unknown_field:
+        handle_call("inspect_moments", {"source": source, "moments": [{"time": 2, "timestamp": 4}]})
+    message = str(unknown_field.value)
+    assert "argument 'moments[0].timestamp' is not an accepted field" in message
+    assert "timestamp_sec, label" in message
+    assert 'Example: "moments": [{"timestamp_sec": 12.5}].' in message
+
+    with pytest.raises(ValueError) as wrong_length:
+        handle_call("audio_onsets", {"source": source, "band_hz": [300, 600, 900]})
+    message = str(wrong_length.value)
+    assert "argument 'band_hz' has 3 item(s)" in message
+    assert "exactly 2 item(s)" in message
+
+    with pytest.raises(ValueError) as missing_source:
+        handle_call("inspect_moments", {"moments": [{"timestamp_sec": 2.5}]})
+    message = str(missing_source.value)
+    assert "argument 'source' is missing or empty" in message
+    assert 'Example: "source": "/path/to/video.mp4".' in message
+
+    with pytest.raises(ValueError) as bad_ranges:
+        handle_call("loudness_timeline", {"source": source, "ignore_ranges": "bad"})
+    example = str(bad_ranges.value).split('Example: "ignore_ranges": ')[1].rstrip(".")
+    result = handle_call("loudness_timeline", {"source": source, "ignore_ranges": json.loads(example)})
+    assert result["ok"] is True

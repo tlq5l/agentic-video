@@ -547,7 +547,21 @@ def _expected(schema: Dict[str, Any], key: str = "") -> str:
         bounds.append(f"at most {schema['maximum']:g}")
     if "minLength" in schema:
         bounds.append(f"at least {schema['minLength']} character(s)")
+    if schema.get("minItems") is not None and schema.get("minItems") == schema.get("maxItems"):
+        bounds.append(f"exactly {schema['minItems']} item(s)")
+    else:
+        if "minItems" in schema:
+            bounds.append(f"at least {schema['minItems']} item(s)")
+        if "maxItems" in schema:
+            bounds.append(f"at most {schema['maxItems']} item(s)")
     return f"{words}, {' and '.join(bounds)}" if bounds else words
+
+
+def _fields_expected(schema: Dict[str, Any]) -> str:
+    """The keys an object accepts, and which of them it needs."""
+    text = f"an object with fields {', '.join(schema.get('properties', {}))}"
+    required = schema.get("required", [])
+    return f"{text}; {', '.join(required)} required" if required else text
 
 
 def _describe_alternative(schema: Dict[str, Any], key: str) -> str:
@@ -585,6 +599,11 @@ def _argument_problem(schema: Dict[str, Any], value: Any, key: str, check_range:
         return "", f"must be {_KIND_WORDS.get(kinds[0], 'a value')} (got {_show(value)})", _expected(schema, key)
     if "enum" in schema and value not in schema["enum"]:
         return "", f"is not one of the allowed values (got {_show(value)})", _expected(schema, key)
+    if isinstance(value, list):
+        if len(value) < schema.get("minItems", 0):
+            return "", f"has {len(value)} item(s) (needs at least {schema['minItems']})", _expected(schema, key)
+        if check_range and len(value) > schema.get("maxItems", len(value)):
+            return "", f"has {len(value)} item(s) (allows at most {schema['maxItems']})", _expected(schema, key)
     if check_range and _is_kind(value, "number"):
         if "minimum" in schema and value < schema["minimum"]:
             return "", f"is below the minimum {schema['minimum']:g} (got {_show(value)})", _expected(schema, key)
@@ -596,6 +615,10 @@ def _argument_problem(schema: Dict[str, Any], value: Any, key: str, check_range:
         missing = [item for item in schema.get("required", []) if item not in value]
         if missing:
             return "", f"is missing required key(s): {', '.join(missing)}", _expected(schema, key)
+        if schema.get("additionalProperties") is False:
+            unknown = [field for field in value if field not in schema.get("properties", {})]
+            if unknown:
+                return f".{unknown[0]}", "is not an accepted field", _fields_expected(schema)
         for field, sub in schema.get("properties", {}).items():
             if field in value:
                 problem = _argument_problem(sub, value[field], field, check_range)
@@ -640,6 +663,7 @@ _CALL_EXAMPLES = {
     "windows": [{"start_sec": 10, "end_sec": 14}],
     "cues": [{"time_sec": 12.5, "label": "hit"}],
     "marks": [{"time_sec": 12.5, "label": "kick"}],
+    "ignore_ranges": [{"start_sec": 1, "end_sec": 2, "reason": "title card"}],
     "source": "/path/to/video.mp4",
     "query": "launch date",
     "description": "yellow outlined circle",
@@ -753,7 +777,11 @@ def handle_call(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
     if missing:
         hint = (" `source` is a local video file path or a video URL (X post, YouTube, direct link)."
                 if "source" in missing else "")
-        raise ValueError(f"{name} is missing required argument(s): {', '.join(missing)}. Required: {', '.join(required)}.{hint}")
+        properties = schema.get("properties", {})
+        problems = " ".join(_argument_error(name, key, "", "is missing or empty", _expected(properties.get(key, {}), key))
+                            for key in missing)
+        raise ValueError(f"{name} is missing required argument(s): {', '.join(missing)}. Required: {', '.join(required)}. "
+                         f"{problems}{hint}")
     unknown = sorted(set(args) - set(schema.get("properties", {})))
     args = _checked_arguments(name, args)
     url_args = {key: args[key] for key in ("source", "compare_to")

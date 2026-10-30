@@ -77,7 +77,8 @@ def test_oversized_response_without_images_is_a_clear_error(monkeypatch):
 
 def test_unexpected_exception_names_tool_type_and_next_step(monkeypatch):
     _patch_dispatch(monkeypatch, RuntimeError("pool broke"))
-    result = json.loads(mcp_server.tool_call_response(1, "inspect_windows", {"source": "v.mp4", "windows": []}))["result"]
+    result = json.loads(mcp_server.tool_call_response(1, "inspect_windows",
+                                                      {"source": "v.mp4", "windows": [{"start_sec": 0, "end_sec": 1}]}))["result"]
     assert result["isError"]
     text = result["content"][0]["text"]
     assert "RuntimeError" in text and "`inspect_windows`" in text and "pool broke" in text
