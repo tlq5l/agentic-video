@@ -537,11 +537,11 @@ def audio_onsets(
         compare_samples, compare_fingerprint, _ = _decode_pcm(compare_to, cache)
         _range(compare_samples, start, end)
     options = {
-        "start_sec": round(start, 6), "end_sec": round(end, 6),
-        "min_strength": round(threshold, 6), "band_hz": band,
-        "min_gap_sec": round(gap, 6), "compare_fingerprint": compare_fingerprint,
+        "start_sec": start, "end_sec": end,
+        "min_strength": threshold, "band_hz": band,
+        "min_gap_sec": gap, "compare_fingerprint": compare_fingerprint,
     }
-    result_key = _cache_tag("audio_onsets_v8", options)
+    result_key = _cache_tag("audio_onsets_v9", options)
     cached = cache.load_json(fingerprint, result_key)
     if isinstance(cached, dict):
         return cached
