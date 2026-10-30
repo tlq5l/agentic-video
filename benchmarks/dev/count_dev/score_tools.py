@@ -72,6 +72,8 @@ def run_tool(handler, name, args):
         if not outcome.get("ok"):
             return {"error": json.dumps(outcome.get("error"))}
         data = outcome["data"]
+        if data.get("status") == "error":
+            return {"error": data.get("message") or "tool returned status=error"}
         if data.get("status") != "in_progress":
             return data
         if time.time() > deadline:
@@ -122,7 +124,7 @@ def main():
                 f"{k}={data[k]}" for k in ("confidence", "count_reliable", "method_used", "spans_omitted", "capped", "gaps_merged",
                                    "count_without_merges", "min_gap_sec_clamped_from") if k in data)
             results["real_rep" if row.get("real") else name][row["split"]].append((expected, answer))
-            flagged = ((answer is None and "error" not in data) or bool(data.get("capped") or data.get("gaps_merged"))
+            flagged = ((answer is None and data.get("status") == "complete") or bool(data.get("capped") or data.get("gaps_merged"))
                        or bool(data.get("travel_counts")))
             records.append({"id": row["id"], "split": row["split"], "tool": name, "trap": "args" in row,
                             "expected": expected, "answer": answer, "flagged": flagged, "error": "error" in data})
