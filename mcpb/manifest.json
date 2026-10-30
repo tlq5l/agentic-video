@@ -2,7 +2,7 @@
   "manifest_version": "0.4",
   "name": "agentic-video",
   "display_name": "agentic-video",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Local video tools for AI agents that read text and images but not video: contact sheets, transcripts, cut, loudness and sync checks, served over MCP.",
   "author": {
     "name": "tlq5l"
