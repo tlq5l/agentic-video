@@ -267,10 +267,25 @@ def test_frame_at_picks_frame_covering_request_on_variable_rate_video(tmp_path, 
     assert outcome["data"]["frame_time_sec"] == pytest.approx(0.16, abs=0.001)
 
 
+def _missing_display_rotation_reason():
+    probe = subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-display_rotation:v:0", "90",
+         "-f", "lavfi", "-i", "nullsrc=s=16x16:d=0.1", "-f", "null", "-"],
+        capture_output=True, text=True, check=False,
+    )
+    if probe.returncode == 0 or "Unrecognized option" not in probe.stderr:
+        return None
+    version = subprocess.run(["ffmpeg", "-version"], capture_output=True, text=True, check=False).stdout.splitlines()[0]
+    return f"{version.split(' Copyright')[0]} has no -display_rotation input option (added in FFmpeg 6.0)"
+
+
 def test_frame_at_uses_displayed_size_for_rotated_video(tmp_path, monkeypatch):
     import src.executor.mcp_server as mcp_server
     from src.core.config import Config
 
+    reason = _missing_display_rotation_reason()
+    if reason:
+        pytest.skip(reason)
     monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
     source = _write_testsrc_clip(tmp_path / "clip.mp4")
     rotated = str(tmp_path / "rotated.mp4")

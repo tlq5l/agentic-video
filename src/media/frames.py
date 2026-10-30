@@ -141,6 +141,8 @@ def _decode_one_frame(
                 if _shows_at(retry.stderr, timestamp_sec, fps):
                     proc = retry
                     last_frame_fallback = True
+                else:
+                    _discard_file(tmp_file)
                 # A frame that ended before the requested time means frames are missing
                 # (e.g. a truncated file): fail below rather than relabel it.
                 break

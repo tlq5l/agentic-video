@@ -32,7 +32,7 @@ def _lowpass(segment, cutoff_hz):
 
 def _soundtrack(tmp_path: Path, bpm: int, design: int, *, hardened=False, no_fault=False,
                 accents=False, reveals=(), muffle=None, pop_faults=None, whoosh_faults=None,
-                ticks=(), tick_faults=None):
+                ticks=(), tick_faults=None, pns_off=False):
     """Synthetic layered mix. `*_faults` map a cue index to a time shift in
     seconds, or None for a missing sound; they replace the default faults."""
     rng = np.random.default_rng(1000 + bpm * 10 + design)
@@ -171,7 +171,7 @@ def _soundtrack(tmp_path: Path, bpm: int, design: int, *, hardened=False, no_fau
         "ffmpeg", "-nostdin", "-y", "-v", "error", "-f", "lavfi", "-i",
         f"testsrc=size=96x54:rate=12:duration={duration}", "-i", str(wav),
         "-map", "0:v:0", "-map", "1:a:0", "-c:v", "mpeg4", "-q:v", "8",
-        "-c:a", "aac", "-b:a", "192k", "-shortest", str(video),
+        "-c:a", "aac", "-b:a", "192k", *(["-aac_pns", "0"] if pns_off else []), "-shortest", str(video),
     ], check=True, capture_output=True, text=True)
     cues = [{"time_sec": index * beat, "label": f"downbeat kick {index:02d}"} for index in range(36)]
     cues += [{"time_sec": index * beat, "label": f"text pop {index:02d}"} for index in click_indices]
@@ -309,7 +309,8 @@ def _assert_exact(result, faults, context):
 def test_late_whoosh_under_kick_and_click(tmp_path, bpm, design, no_fault):
     """A whoosh 250 ms late on beats that also carry a kick and a text-pop click."""
     video, cues, faults = _soundtrack(tmp_path, bpm, design, hardened=True, no_fault=no_fault,
-                                      accents=True, pop_faults={}, whoosh_faults={12: .250, 24: .250})
+                                      accents=True, pop_faults={}, whoosh_faults={12: .250, 24: .250},
+                                      pns_off=True)
     _assert_exact(_check(video, cues, bpm, tmp_path), faults, (bpm, design, no_fault))
 
 

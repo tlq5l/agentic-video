@@ -311,9 +311,11 @@ def search(fingerprint: str, segments: List[dict], query: str, top_k: int,
     global _PERMANENT
     if _PERMANENT:
         raise SemanticUnavailable(_PERMANENT, permanent=True)
-    if sys.platform != "darwin" or not (model_dir() / "EmbeddingGemma2Text.mlpackage").exists():
-        _PERMANENT = (f"the EmbeddingGemma 2 Core ML model was not found in {model_dir()} (macOS only; "
-                      "set AGENTIC_VIDEO_EG2_DIR)")
+    if sys.platform != "darwin":
+        _PERMANENT = "semantic search needs macOS: the EmbeddingGemma 2 model runs as a Core ML model"
+        raise SemanticUnavailable(_PERMANENT, permanent=True)
+    if not (model_dir() / "EmbeddingGemma2Text.mlpackage").exists():
+        _PERMANENT = f"the EmbeddingGemma 2 Core ML model was not found in {model_dir()} (set AGENTIC_VIDEO_EG2_DIR)"
         raise SemanticUnavailable(_PERMANENT, permanent=True)
     try:
         chunks = make_chunks(segments)
