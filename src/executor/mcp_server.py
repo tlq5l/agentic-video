@@ -7,6 +7,7 @@ import sys
 import base64
 import hashlib
 import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Dict, Any, Iterator, List, Optional, Tuple
 
@@ -266,6 +267,7 @@ MAX_ONSETS = 500
 MAX_LOUDNESS_WINDOWS = 500
 MAX_SYNC_ITEMS = 500
 MAX_CADENCE_RANGES = 500
+MAX_BLACK_RANGES = 50
 
 
 def format_tool_error(exc: Exception, tool: Optional[str] = None) -> str:
@@ -859,10 +861,16 @@ def _dispatch(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
     elif name == "review_video":
         # Any step failing fails the whole call with that step's own error.
         meta = engine.probe().to_dict()
-        sheet = _dispatch("contact_sheet", {"source": source, "samples": args.get("samples", 24)})["data"]
-        cuts = _dispatch("detect_cuts", {"source": source})["data"]
+        # The black scan decodes the whole file like detect_cuts does, so it runs beside it.
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            black_scan = pool.submit(visual_timing.black_ranges, source)
+            sheet = _dispatch("contact_sheet", {"source": source, "samples": args.get("samples", 24)})["data"]
+            cuts = _dispatch("detect_cuts", {"source": source})["data"]
+            black = black_scan.result()
         data = {"metadata": meta, "contact_sheet": sheet, "cuts": cuts["cuts"], "cuts_total": cuts["total"],
+                "black_ranges": black["ranges"], "black_total": len(black["ranges"]),
                 "loudness": _loudness_summary(engine.loudness_timeline()) if meta["has_audio"] else None}
+        _bound_list(data, "black_ranges", MAX_BLACK_RANGES, "Ranges are in time order, so the omitted ones are later in the file.")
         if "cuts_omitted" in cuts:
             data["cuts_omitted"] = cuts["cuts_omitted"]
         for note in (cuts.get("note"), None if meta["has_audio"] else "No audio track, so loudness is null.", sheet.pop("note", None)):

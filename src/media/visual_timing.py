@@ -19,6 +19,7 @@ from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence
 
 import numpy as np
 
+from src.core.cache import MediaCache
 from src.core.config import Config
 from src.core.errors import MediaCorruptError, MediaNotFoundError
 
@@ -136,6 +137,27 @@ _SPLICE_MIN_FRAME_DELTA = 10.0
 _SPLICE_MIN_FRAME_CHANGED_SHARE = 0.20
 
 
+def _runs(flags: np.ndarray) -> List[tuple]:
+    """(first, last) frame index of each run of True values, in time order."""
+    runs: List[tuple] = []
+    index = 0
+    while index < len(flags):
+        if not flags[index]:
+            index += 1
+            continue
+        end = index
+        while end + 1 < len(flags) and flags[end + 1]:
+            end += 1
+        runs.append((index, end))
+        index = end + 1
+    return runs
+
+
+def _brightest_percent(path: Path, rate: float) -> np.ndarray:
+    """Per frame, the grey level of its brightest 1% of grid cells (the near-black test)."""
+    return np.asarray([float(np.percentile(frame, 99)) for frame in _grid_frames(path, rate)])
+
+
 def blank_flashes(source: str) -> Dict[str, Any]:
     """Runs of at most 0.15 s of near-black frames between two visible pictures.
 
@@ -145,17 +167,10 @@ def blank_flashes(source: str) -> Dict[str, Any]:
     """
     path = _video_path(source)
     rate = _frame_rate(path)
-    bright = np.asarray([float(np.percentile(frame, 99)) for frame in _grid_frames(path, rate)])
+    bright = _brightest_percent(path, rate)
     blank = bright < _BLANK_P99
     flashes: List[Dict[str, Any]] = []
-    index = 0
-    while index < len(blank):
-        if not blank[index]:
-            index += 1
-            continue
-        end = index
-        while end + 1 < len(blank) and blank[end + 1]:
-            end += 1
+    for index, end in _runs(blank):
         frames = end - index + 1
         span = max(1, int(round(_SETTLED_SEC * rate)))
         if (index > 0 and end + 1 < len(blank) and frames / rate <= _MAX_FLASH_SEC + 1e-6
@@ -164,8 +179,37 @@ def blank_flashes(source: str) -> Dict[str, Any]:
             flashes.append({"start_sec": round(index / rate, 3), "end_sec": round((end + 1) / rate, 3),
                             "frames": frames, "brightest_before": round(float(bright[index - 1]), 1),
                             "brightest_after": round(float(bright[end + 1]), 1)})
-        index = end + 1
     return {"frame_rate": rate, "flashes": flashes}
+
+
+_BLACK_MIN_SEC = 0.2
+_BLACK_CACHE_KEY = "black_ranges_v1"
+
+
+def black_ranges(source: str, cache: Optional[MediaCache] = None) -> Dict[str, Any]:
+    """Stretches of at least 0.2 s where every frame is near-black (the blank_flashes test).
+
+    A frame is near-black when its brightest 1% of grid cells stay below
+    _BLANK_P99, so a dim scene that keeps some bright cells is not listed.
+    """
+    path = _video_path(source)
+    if cache is None:
+        cache = MediaCache()
+    fingerprint = cache.compute_fingerprint(str(path))
+    cached = cache.load_json(fingerprint, _BLACK_CACHE_KEY)
+    if isinstance(cached, dict):
+        return cached
+    rate = _frame_rate(path)
+    blank = _brightest_percent(path, rate) < _BLANK_P99
+    ranges: List[Dict[str, Any]] = []
+    for index, end in _runs(blank):
+        frames = end - index + 1
+        if frames / rate + 1e-9 >= _BLACK_MIN_SEC:
+            ranges.append({"start_sec": round(index / rate, 3), "end_sec": round((end + 1) / rate, 3),
+                           "duration_sec": round(frames / rate, 3)})
+    result = {"frame_rate": rate, "ranges": ranges}
+    cache.save_json(fingerprint, _BLACK_CACHE_KEY, result)
+    return result
 
 
 def frame_splices(source: str) -> Dict[str, Any]:

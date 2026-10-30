@@ -915,6 +915,12 @@ export interface ReviewVideoLoudness {
   }>;
 }
 
+export interface ReviewVideoBlackRange {
+  start_sec: number;
+  end_sec: number;
+  duration_sec: number;
+}
+
 export interface ReviewVideoOutput {
   /** Same fields as probe_video. */
   metadata: ProbeVideoOutput;
@@ -923,6 +929,11 @@ export interface ReviewVideoOutput {
   cuts: SceneCut[];
   cuts_total: number;
   cuts_omitted?: number;
+  /** Near-black stretches of at least 0.2 s, in time order; at most 50 are listed. */
+  black_ranges: ReviewVideoBlackRange[];
+  /** How many near-black stretches were found in all. */
+  black_total: number;
+  black_ranges_omitted?: number;
   /** Null when the video has no audio track. */
   loudness: ReviewVideoLoudness | null;
   note?: string;
