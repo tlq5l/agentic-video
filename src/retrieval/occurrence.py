@@ -32,7 +32,7 @@ from src.core.config import Config
 from src.core.errors import as_dependency_error
 from src.retrieval import ocr
 
-ALGORITHM_VERSION = "occurrences-v7"
+ALGORITHM_VERSION = "occurrences-v8"
 MAX_FRAMES = 2400
 MAX_SPANS_LIMIT = 100
 DEFAULT_MIN_GAP = 0.3
@@ -401,7 +401,12 @@ class FrameJudge:
 
 
 def _direction(points):
-    """Travel of the matched region across a span, from its first and last centres (normalized)."""
+    """Travel of the matched region across a span, from its first and last centres (normalized).
+
+    Under three samples the first and last centres are the same point, so the span cannot show travel: "unknown".
+    """
+    if len(points) < 3:
+        return "unknown"
     head, tail = np.mean(points[:2], axis=0), np.mean(points[-2:], axis=0)
     dx, dy = tail - head
     if max(abs(dx), abs(dy)) < .15:
@@ -731,7 +736,7 @@ def count_video(engine, progress=lambda done, total: None, **args):
             builder.add(start + index / fps, hit, None)
     spans = builder.finish()
     capped = len(spans) >= MAX_SPANS_LIMIT
-    matched = spans if direction == "any" else [span for span in spans if _direction(span["points"]) == direction]
+    matched = spans if direction == "any" else [span for span in spans if _direction(span["points"]) in (direction, "unknown")]
     shown = matched[:max_spans]
     missing_tiles = [span for span in shown[:SHEET_TILES] if span["rep"][3] is None]  # replayed runs, or spans past the builder's tile limit
     if missing_tiles:
@@ -777,7 +782,7 @@ def count_video(engine, progress=lambda done, total: None, **args):
                            f"{DEFAULT_MIN_GAP:g} s keeps apart (gaps at {joined}); {unmerged}. "
                            f"Lower min_gap_sec if those were separate appearances.")
     travel = collections.Counter(_direction(span["points"]) for span in spans)
-    moving = {way: n for way, n in travel.items() if way != "stationary"}
+    moving = {way: n for way, n in travel.items() if way not in ("stationary", "unknown")}
     if moving:
         result["travel_counts"] = moving
         if direction == "any":
@@ -789,9 +794,10 @@ def count_video(engine, progress=lambda done, total: None, **args):
                            f"{', '.join(f'{n} {way}' for way, n in moving.items())}), estimated from each span's first and last "
                            f"positions; these are not verified crossings. {outcome}")
     if direction != "any" and not capped:
-        stationary = travel.get("stationary", 0)
-        result["note"] += (f" direction={direction}: counted the {len(matched)} of {len(spans)} appearance(s) that travel "
-                           f"{direction}; {len(spans) - len(matched) - stationary} moved another way and {stationary} stayed "
+        stationary, unknown = travel.get("stationary", 0), travel.get("unknown", 0)
+        result["note"] += (f" direction={direction}: counted the {len(matched) - unknown} of {len(spans)} appearance(s) that travel "
+                           f"{direction}, and {unknown} too brief to show any direction (counted; verify them); "
+                           f"{len(spans) - len(matched) - stationary} moved another way and {stationary} stayed "
                            f"still, and are left out of count and spans.")
     if shown and not capped:
         result["note"] += TILE_NOTE
