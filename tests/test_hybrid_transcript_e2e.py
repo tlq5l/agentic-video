@@ -56,6 +56,7 @@ def test_hybrid_with_a_missing_interpreter_still_answers_with_keywords_every_tim
     (model / "EmbeddingGemma2Text.mlpackage").mkdir(parents=True)  # present, so only the interpreter is wrong
     monkeypatch.setenv("AGENTIC_VIDEO_EG2_DIR", str(model))
     monkeypatch.setenv("AGENTIC_VIDEO_EG2_PYTHON", str(tmp_path / "gone" / "python"))
+    monkeypatch.setattr(semantic.sys, "platform", "darwin")
     for _ in range(2):
         result = _call(video, "Supernova")
         assert result["hits"][0]["match"] == "exact" and "Supernova" in result["hits"][0]["text"]
