@@ -15,8 +15,8 @@ Cells in the two run columns come from one smoke run per machine on 2026-10-31. 
 | `search_transcript` | not run | started | started | no | no | no |
 | `build_visual_index` | not run | started | started | no | no | yes |
 | `search_visual` | not run | started | started | no | no | yes |
-| `count_repetitions` | not run | started, ok on a repeat call | started, ok on a repeat call | no | no | only for `method=embedding`, or `auto` on windows up to 30 s where motion and periodicity disagree |
-| `count_occurrences` | not run | started | started | no | only for `text=` | only for `description=` |
+| `count_repetitions` | not run | started, ok on a repeat call | started, ok on a repeat call | no | no | required for `method=embedding`; optional for `auto`, which uses it only on windows up to 30 s where motion and periodicity disagree, and runs without it otherwise |
+| `count_occurrences` | not run | started | started | no | only for `text=` | only for `description=` that names no shape (`yellow circle` needs none; `red mug` does) |
 | `contact_sheet` | not run | ok | ok | no | no | no |
 | `review_video` | not run | ok | ok | no | no | no |
 | `overview_chunks` | not run | ok | ok | no | no | no |
