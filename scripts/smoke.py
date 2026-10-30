@@ -3,17 +3,23 @@
 Usage: python scripts/smoke.py
 Prints PASS or FAIL per check with its seconds, then exits 1 if any check failed.
 The ground truth holds the duration, size, frame rate and each event's start time; the checks
-compare only those, with the tolerances below. No model is loaded.
+compare only those, with the tolerances below. No model is loaded. Every run uses a new empty
+cache in a temporary folder, so each check measures the current code, and the seconds are cold-cache times.
 """
 
 import json
+import os
 import statistics
 import sys
+import tempfile
 import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+
+CACHE = tempfile.TemporaryDirectory(prefix="smoke-cache-")
+os.environ["AGENTIC_VIDEO_CACHE_DIR"] = CACHE.name  # read when src.core.config is imported, so set before the import below
 
 from src.executor.mcp_server import handle_call
 
