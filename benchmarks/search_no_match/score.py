@@ -11,8 +11,8 @@ semantic half is off and the script stops, because the climb metric would read z
 
 Splits: list position in questions.json, even = train, odd = test. Every run measures only train; the test
 split is measured only with --final, once per commit, for the final comparison. Queries of the split not
-asked for are never run and never written to --out. The test split was already printed in commit 97de39a,
-so it is no longer untouched: a clean final comparison needs new held-out items.
+asked for are never run and never written to --out. The test split was already printed during the
+0.70 tuning on 2026-10-30, so it is no longer untouched: a clean final comparison needs new held-out items.
 
 Metrics (METRIC lines):
   climb_nomatch_semantic_share   share of no-match queries that return any match=semantic hit (lower is better)
