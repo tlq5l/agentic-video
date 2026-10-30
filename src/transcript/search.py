@@ -107,9 +107,10 @@ def _fuse(lexical: List[SearchResult], chunks: List[dict], query: str, last_end:
 
     Each candidate scores the sum of 1/(60 + rank) over the lists with a hit within 15 s of it
     (the best rank in that list); places closer than 20 s to one already chosen are dropped.
+    A semantic pick below MIN_SCORE takes its place in the fusion but is not returned.
     """
     keyword = [(h.start_sec, h.end_sec, h) for h in lexical[:top_k]]
-    related = [(c["start"], c["end"], _semantic_result(c, last_end)) for c in chunks]
+    related = [(c["start"], c["end"], _semantic_result(c, last_end), c["score"]) for c in chunks]
     out = [hit for _, _, hit in keyword if _is_exact(query, hit.text)]
     for hit in out:
         hit.match = "exact"
@@ -128,16 +129,19 @@ def _fuse(lexical: List[SearchResult], chunks: List[dict], query: str, last_end:
                     score += 1.0 / (RRF_K + rank + 1)
             scored.append((-score, source, item[0], item))
     scored.sort(key=lambda row: row[:3])
+    selected = len(out)
     for _, source, _, item in scored:
-        if len(out) >= top_k:
+        if selected >= top_k:
             break
         if all(abs(centre(item) - c) >= GAP_SEC for c in chosen):
             hit = item[2]
             if source == 0:
                 hit.match = "all_terms"
-            out.append(hit)
+            if source == 0 or item[3] >= semantic.MIN_SCORE:
+                out.append(hit)
             chosen.append(centre(item))
-    return out[:top_k]
+            selected += 1
+    return out
 
 
 def search_transcript(
@@ -193,8 +197,9 @@ def search_transcript(
             probe_video(source_path, allow_audio_only=True).fingerprint, segments, query, top_k, (t_start, t_end))
         hits = _fuse(matches, chunks, query, max(float(s["end_sec"]) for s in segments), top_k)
         if not any(hit.match in ("exact", "all_terms") for hit in hits):
-            notes.append("No keyword match: the words were not found in the speech. match=semantic hits are the "
-                         "closest passages by meaning, not proof the words were said; read their text first.")
+            notes.append("No keyword match: the words were not found in the speech." + (
+                " match=semantic hits are the closest passages by meaning, not proof the words were said; "
+                "read their text first." if hits else " No passage is close enough by meaning either."))
     except semantic.SemanticUnavailable as exc:
         hits = matches[:top_k]
         for hit in hits:
