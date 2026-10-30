@@ -14,4 +14,5 @@ Gotchas:
 - After that, a cut closer than 0.5 s to the last kept cut is dropped, even when it is the stronger one.
 - A cut found by the soft scan (score under the threshold) is timed the same way: at the stronger of its one or two frames.
 - Two paths must give the same answer: `detect_scenes` on its own (ffmpeg returns only the frames over the threshold) and the one-decode scan in `scan_scene_changes` (cached scores of every frame over 0.05).
-- Result cache keys are versioned (`scenes_v2_th…`, `softtrans_v8_…`); bump them when the stored answer changes. `scenescores_v1_…` holds raw scores.
+- A soft peak whose colours do not change much and whose picture is not a dissolve (blend error above 0.28) is kept only when both sides are still (under 0.015) and it is at least 0.035 strong. Without the 0.035 floor, weak motion in a film shot passed the still-sides exemption.
+- Result cache keys are versioned (`scenes_v2_th…`, `softtrans_v10_…`); bump them when the stored answer changes. `scenescores_v1_…` holds raw scores.

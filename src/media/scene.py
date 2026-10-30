@@ -165,6 +165,7 @@ SOFT_MIN_HIST = 0.4
 SOFT_SURE_HIST = 0.5
 SOFT_MIN_HIST_PROMINENCE = 0.35
 SOFT_STILL_LEVEL = 0.015
+SOFT_STILL_MIN_DIFF = 0.035
 SOFT_STILL_REACH_SEC = 1.0
 # A dissolve or fade passes through the average of the pictures before and
 # after it; moving objects do not. This lets dark dissolves through the gate.
@@ -197,7 +198,7 @@ def _range_key(start_sec: float, duration_sec: Optional[float]) -> str:
 
 def _changes_key(span: str) -> str:
     # v9: a change on a large video may still carry its "window", settled by _settle_changes.
-    return f"softtrans_v9_{span}"
+    return f"softtrans_v10_{span}"
 
 
 def _scenes_key(threshold: float, span: str) -> str:
@@ -488,7 +489,8 @@ def _find_transitions(diff, area, colour, blend, start_sec: float) -> List[tuple
             right = diff[hi + 1: min(count - lag_edge, hi + 1 + reach)]
             # "Still" also needs calm side windows: a peak that only stood
             # out against the dips beside it sits in busy footage.
-            if not calm_sides or max(float(left.min()), float(right.min())) > SOFT_STILL_LEVEL:
+            if (not calm_sides or max(float(left.min()), float(right.min())) > SOFT_STILL_LEVEL
+                    or value < SOFT_STILL_MIN_DIFF):
                 continue
         found.append((start_sec + ((lo + hi) / 2.0) / SOFT_SAMPLE_FPS, value))
     found.sort()
