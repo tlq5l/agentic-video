@@ -200,7 +200,7 @@ def _range_key(start_sec: float, duration_sec: Optional[float]) -> str:
 
 def _changes_key(span: str) -> str:
     # v9: a change on a large video may still carry its "window", settled by _settle_changes.
-    return f"softtrans_v11_{span}"
+    return f"softtrans_v12_{span}"
 
 
 def _scenes_key(threshold: float, span: str) -> str:
@@ -423,7 +423,7 @@ def _side_dip(diff, index: int, step: int, reach: int) -> float:
     return lowest
 
 
-def _find_transitions(diff, area, colour, blend, start_sec: float) -> List[tuple]:
+def _find_transitions(diff, area, colour, blend, start_sec: float, rescue=None) -> List[tuple]:
     """Pick the scene changes out of the lag-difference curves: (time, strength) in time order."""
     import numpy as np
 
@@ -491,8 +491,11 @@ def _find_transitions(diff, area, colour, blend, start_sec: float) -> List[tuple
             right = diff[hi + 1: min(count - lag_edge, hi + 1 + reach)]
             # "Still" also needs calm side windows: a peak that only stood
             # out against the dips beside it sits in busy footage.
-            if (not calm_sides or max(float(left.min()), float(right.min())) > SOFT_STILL_LEVEL
-                    or value < SOFT_STILL_MIN_DIFF):
+            if not calm_sides or max(float(left.min()), float(right.min())) > SOFT_STILL_LEVEL:
+                if rescue is not None:
+                    rescue.append((start_sec + ((lo + hi) / 2.0) / SOFT_SAMPLE_FPS, value))
+                continue
+            if value < SOFT_STILL_MIN_DIFF:
                 continue
         if value < SOFT_WEAK_DIFF and SOFT_WEAK_MIN_BLEND < float(blend[lo: hi + 1].min()) <= SOFT_MAX_BLEND_ERROR:
             continue
@@ -601,7 +604,8 @@ def _scan_scene_changes(video_path: str, start_sec: float, duration_sec: Optiona
     times, scores, rgb, gray = _scan_frames(video_path, start_sec, duration_sec, timeout, with_gray=with_gray)
     strong = [[round(float(t), 6), round(float(s), 6)] for t, s in zip(times, scores) if s > SCAN_SCORE_FLOOR]
     changes = []
-    for when, value in _find_transitions(*_lag_curves(rgb), start_sec):
+    rescued = []
+    for when, value in _find_transitions(*_lag_curves(rgb), start_sec, rescued):
         entry = {"timestamp_sec": round(when, 3), "score": round(value, 6), "kind": "transition", "plateau_sec": round(when, 3)}
         window = _step_window(times, when)
         if window is not None:
@@ -611,6 +615,16 @@ def _scan_scene_changes(video_path: str, start_sec: float, duration_sec: Optiona
             else:
                 entry["window"] = {"times": [float(t) for t in times[lo:hi]], "scores": [float(x) for x in scores[lo:hi]]}
         changes.append(entry)
+    if gray is not None:
+        for when, value in rescued:
+            window = _step_window(times, when)
+            if window is None:
+                continue
+            lo, hi = window
+            entry = {"timestamp_sec": round(when, 3), "score": round(value, 6), "kind": "transition", "plateau_sec": round(when, 3)}
+            _settle_entry(entry, times[lo:hi], scores[lo:hi], gray[lo:hi])
+            if entry["kind"] == "cut":
+                changes.append(entry)
     return strong, changes
 
 

@@ -16,4 +16,5 @@ Gotchas:
 - Two paths must give the same answer: `detect_scenes` on its own (ffmpeg returns only the frames over the threshold) and the one-decode scan in `scan_scene_changes` (cached scores of every frame over 0.05).
 - A soft peak whose colours do not change much and whose picture is not a dissolve (blend error above 0.28) is kept only when both sides are still (under 0.015) and it is at least 0.035 strong. Without the 0.035 floor, weak motion in a film shot passed the still-sides exemption.
 - A soft peak under 0.06 whose blend error is between 0.1 and 0.28 is dropped: weak motion that is not a dissolve.
-- Result cache keys are versioned (`scenes_v2_th…`, `softtrans_v11_…`); bump them when the stored answer changes. `scenescores_v1_…` holds raw scores.
+- A peak that the still-sides test drops is kept as a cut when the frame step at it is one cut (the same check as a hard cut that the scene score missed). Other dropped peaks stay dropped.
+- Result cache keys are versioned (`scenes_v2_th…`, `softtrans_v12_…`); bump them when the stored answer changes. `scenescores_v1_…` holds raw scores.
