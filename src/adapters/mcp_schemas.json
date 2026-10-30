@@ -1792,14 +1792,15 @@
     },
     "inspect_window": {
       "name": "inspect_window",
-      "description": "Dense consecutive frames of ONE short window [start_sec, end_sec] (both required) with timestamp overlays, as a contact sheet plus frame list. Default 4 fps, maximum 30 (larger values are clamped). At most about 150 frames and 600 seconds per call: frames = fps x duration, so a 10 s window allows at most 15 fps; a call over budget fails and says the fps that fits. Use it to verify a moment or a count. For a wide overview use contact_sheet; for several ranges use inspect_windows.",
+      "description": "Dense consecutive frames of ONE short window [start_sec, end_sec] (both required) with timestamp overlays, as a contact sheet plus frame list. Default 4 fps, maximum 30 (larger values are clamped). At most about 150 frames and 600 seconds per call: frames = fps x duration, so a 10 s window allows at most 15 fps; a call over budget fails and says the fps that fits. Use it to verify a moment or a count. For a wide overview use contact_sheet; for several ranges use inspect_windows. With read_text true each frame also lists the on-screen text read from it (Apple Vision, macOS only).",
       "inputSchema": {
         "type": "object",
         "properties": {
           "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
           "start_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "Start of the window in seconds. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
           "end_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "End of the window in seconds; must be within the video. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
-          "fps": { "type": "number", "minimum": 0.01, "maximum": 30, "default": 4.0, "description": "Sampling rate (default 4, maximum 30; larger values are clamped). Frames = fps x duration and must stay within about 150." }
+          "fps": { "type": "number", "minimum": 0.01, "maximum": 30, "default": 4.0, "description": "Sampling rate (default 4, maximum 30; larger values are clamped). Frames = fps x duration and must stay within about 150." },
+          "read_text": { "type": "boolean", "default": false, "description": "Also read the on-screen text in each returned frame with Apple Vision OCR (macOS only). Each frame then lists text_lines: the text, confidence and box (x, y, width, height; 0 to 1, top-left origin) of each line, top to bottom then left to right. Default false: no text is read. When true and Apple Vision is unavailable, the call fails before extracting any frame." }
         },
         "required": ["source", "start_sec", "end_sec"],
         "additionalProperties": false
@@ -1830,7 +1831,9 @@
                 "height": { "type": "integer" },
                 "requested_timestamp": { "type": ["number", "null"] },
                 "decoded_timestamp": { "type": ["number", "null"] },
-                "timestamp_delta": { "type": ["number", "null"] }
+                "timestamp_delta": { "type": ["number", "null"] },
+                "text_lines": { "type": "array", "description": "Lines of on-screen text read from this frame by Apple Vision, top to bottom then left to right. Present only when read_text was true. An empty list means OCR found no text in the frame.", "items": { "type": "object", "properties": { "text": { "type": "string" }, "confidence": { "type": "number", "minimum": 0, "maximum": 1 }, "box": { "type": "object", "properties": { "x": { "type": "number", "minimum": 0, "maximum": 1 }, "y": { "type": "number", "minimum": 0, "maximum": 1 }, "width": { "type": "number", "minimum": 0, "maximum": 1 }, "height": { "type": "number", "minimum": 0, "maximum": 1 } }, "required": ["x", "y", "width", "height"], "additionalProperties": false } }, "required": ["text", "confidence", "box"], "additionalProperties": false } },
+                "text_lines_note": { "type": "string", "description": "Present when the frame had more than 40 text lines: lists the first 40 and says how many there were." }
               },
               "required": ["index", "timestamp_sec", "timecode", "file_path", "width", "height", "requested_timestamp", "decoded_timestamp", "timestamp_delta"],
               "additionalProperties": false
@@ -1846,7 +1849,7 @@
     },
     "frame_at": {
       "name": "frame_at",
-      "description": "Use this when you need one exact frame at full size, or a crop to read small text; for many frames use inspect_window or contact_sheet. Returns one PNG of the frame shown at time_sec, at the source's native resolution, with no timestamp drawn on it. An optional crop (x, y, width, height in source pixels) cuts a rectangle out of that frame, and scale (1 to 4, default 1) enlarges the crop with Lanczos so small text is easier to read. frame_time_sec is the start time of the frame actually decoded: the last frame starting at or before time_sec, so on variable-frame-rate video it can be well before time_sec. A repeat call with the same source, time_sec, crop and scale returns the saved file.",
+      "description": "Use this when you need one exact frame at full size, or a crop to read small text; for many frames use inspect_window or contact_sheet. Returns one PNG of the frame shown at time_sec, at the source's native resolution, with no timestamp drawn on it. An optional crop (x, y, width, height in source pixels) cuts a rectangle out of that frame, and scale (1 to 4, default 1) enlarges the crop with Lanczos so small text is easier to read. frame_time_sec is the start time of the frame actually decoded: the last frame starting at or before time_sec, so on variable-frame-rate video it can be well before time_sec. A repeat call with the same source, time_sec, crop and scale returns the saved file. With read_text true it also returns the on-screen text read from that frame (Apple Vision, macOS only).",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1872,6 +1875,7 @@
             "required": ["x", "y", "width", "height"],
             "additionalProperties": false
           },
+          "read_text": { "type": "boolean", "default": false, "description": "Also read the on-screen text in each returned frame with Apple Vision OCR (macOS only). Each frame then lists text_lines: the text, confidence and box (x, y, width, height; 0 to 1, top-left origin) of each line, top to bottom then left to right. Default false: no text is read. When true and Apple Vision is unavailable, the call fails before extracting any frame." },
           "scale": {
             "type": "number",
             "minimum": 1,
@@ -1929,7 +1933,9 @@
               "height": { "type": "integer" }
             }
           },
-          "scale": { "type": "number", "description": "The enlargement applied (1 when none was asked for)." }
+          "scale": { "type": "number", "description": "The enlargement applied (1 when none was asked for)." },
+          "text_lines": { "type": "array", "description": "Lines of on-screen text read from this frame by Apple Vision, top to bottom then left to right. Present only when read_text was true. An empty list means OCR found no text in the frame.", "items": { "type": "object", "properties": { "text": { "type": "string" }, "confidence": { "type": "number", "minimum": 0, "maximum": 1 }, "box": { "type": "object", "properties": { "x": { "type": "number", "minimum": 0, "maximum": 1 }, "y": { "type": "number", "minimum": 0, "maximum": 1 }, "width": { "type": "number", "minimum": 0, "maximum": 1 }, "height": { "type": "number", "minimum": 0, "maximum": 1 } }, "required": ["x", "y", "width", "height"], "additionalProperties": false } }, "required": ["text", "confidence", "box"], "additionalProperties": false } },
+          "text_lines_note": { "type": "string", "description": "Present when the frame had more than 40 text lines: lists the first 40 and says how many there were." }
         }
       }
     },
