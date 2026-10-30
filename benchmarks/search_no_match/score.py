@@ -31,6 +31,7 @@ from src.executor.mcp_server import handle_call  # noqa: E402
 QUESTIONS = Path(__file__).with_name("questions.json")
 EXPECTED_HIT_FIELDS = {"segment_id", "start_sec", "end_sec", "text", "score",
                        "start_timecode", "end_timecode", "context", "match"}
+OPTIONAL_HIT_FIELDS = {"suspect"}  # present only on lines flagged as repeated or invented at run time
 EXPECTED_HIT_LABELS = {"exact", "all_terms", "semantic"}
 EXPECTED_TOP_KEYS = {"hits", "total", "note", "requested_model_size", "cached_model_size",
                      "requested_model_cached", "transcription_status", "retry_after_seconds",
@@ -79,7 +80,8 @@ def measure(questions):
             "lexical_labelled": sorted([h["segment_id"], h["match"]] for h in hits if h["match"] in ("exact", "all_terms")),
             "lexical_top": sorted(h["segment_id"] for h in lexical["hits"]),
             "top_keys": sorted(hybrid.keys()),
-            "hit_keys_ok": all(set(h) == EXPECTED_HIT_FIELDS and h["match"] in EXPECTED_HIT_LABELS for h in hits),
+            "hit_keys_ok": all(set(h) - OPTIONAL_HIT_FIELDS == EXPECTED_HIT_FIELDS and h["match"] in EXPECTED_HIT_LABELS
+                               for h in hits),
             "top_keys_ok": set(hybrid) <= EXPECTED_TOP_KEYS,
         }
         if item is not None:
