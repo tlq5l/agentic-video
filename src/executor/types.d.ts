@@ -431,6 +431,8 @@ export interface CountOccurrencesOutput {
   gaps_merged?: number;
   /** The count if the joined pairs were kept apart. */
   count_without_merges?: number;
+  /** Appearances that cross the frame, by direction; only set when some do. The count includes every direction: count only the asked-for one if the question names a direction. */
+  travel_counts?: Record<string, number>;
   spans?: OccurrenceSpan[];
   spans_returned?: number;
   spans_omitted?: number;

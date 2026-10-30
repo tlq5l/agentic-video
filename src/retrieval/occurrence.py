@@ -32,7 +32,7 @@ from src.core.config import Config
 from src.core.errors import as_dependency_error
 from src.retrieval import ocr
 
-ALGORITHM_VERSION = "occurrences-v5"
+ALGORITHM_VERSION = "occurrences-v6"
 MAX_FRAMES = 2400
 MAX_SPANS_LIMIT = 100
 DEFAULT_MIN_GAP = 0.3
@@ -763,6 +763,13 @@ def count_video(engine, progress=lambda done, total: None, **args):
         result["note"] += (f" min_gap_sec={min_gap:g} joined {len(builder.bridged)} pair(s) of appearances that the default "
                            f"{DEFAULT_MIN_GAP:g} s keeps apart (gaps at {joined}); without merging the count is "
                            f"{len(spans) + len(builder.bridged)}. Lower min_gap_sec if those were separate appearances.")
+    travel = collections.Counter(_direction(span["points"]) for span in spans)
+    moving = {direction: n for direction, n in travel.items() if direction != "stationary"}
+    if moving:
+        result["travel_counts"] = moving
+        result["note"] += (f" {sum(moving.values())} appearance(s) cross the frame ("
+                           f"{', '.join(f'{n} {d}' for d, n in moving.items())}); the count includes every direction, "
+                           f"so if the question asks for one direction, count only those.")
     if shown and not capped:
         result["note"] += TILE_NOTE
     if len(shown) > SHEET_TILES:

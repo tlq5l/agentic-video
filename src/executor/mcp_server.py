@@ -822,6 +822,9 @@ def _dispatch(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         elif data.get("gaps_merged"):
             data["verify"] += (" min_gap_sec joined separate appearances here; a tile can show only one of them, so "
                                "check the gaps listed in note and use count_without_merges if they were separate.")
+        if data.get("travel_counts") and not data.get("capped") and "verify" in data:
+            data["verify"] += (" Some appearances cross the frame; travel_counts shows each direction, and the count "
+                               "includes all of them.")
         sheet = data.get("contact_sheet")
         if isinstance(sheet, dict) and sheet.get("file_path"):
             sheet = dict(sheet)
