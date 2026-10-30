@@ -1,8 +1,12 @@
 """End to end: search_transcript through the MCP entry point, hybrid by default, on the fixture video."""
+import math
 import shutil
+import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 from src.core.config import Config
@@ -92,3 +96,33 @@ def test_exact_phrase_is_listed_first_even_after_five_partial_matches(video, tmp
     video.with_suffix(".srt").write_text(srt, encoding="utf-8")
     hits = _call(video, "the dog")["hits"]
     assert hits[0]["match"] == "exact" and hits[0]["text"] == "the dog ate the bone"
+
+
+def test_semantic_cut_does_not_push_out_keyword_hits(video, tmp_path, monkeypatch):
+    """Only the Core ML model's outputs are stubbed (the box has no Core ML); the subtitles, handle_call, fusion and the cut run for real.
+
+    Two keyword lines at 0 s and 30 s; chunk 50 scores 0.80 (kept) and chunk 20 scores 0.69 (below the cut). The chunk
+    at 20 s lies near the keyword line at 30 s, so its presence in the fusion raises that line. Keyword hits must match
+    what the fusion gives before the cut: both lines, and no semantic hit.
+    """
+    model = tmp_path / "model"
+    (model / "EmbeddingGemma2Text.mlpackage").mkdir(parents=True)
+    monkeypatch.setenv("AGENTIC_VIDEO_EG2_DIR", str(model))
+    monkeypatch.setattr(semantic, "sys", SimpleNamespace(platform="darwin", executable=sys.executable))
+    video.with_suffix(".srt").write_text(
+        "1\n00:00:00,000 --> 00:00:02,000\nsensor reading from the moon\n\n"
+        "2\n00:00:30,000 --> 00:00:32,000\nmoon crater next to a sensor array\n\n"
+        "3\n00:00:54,000 --> 00:00:56,000\nclosing remarks\n\n", encoding="utf-8")
+    scores = {20.0: 0.69, 50.0: 0.80}
+
+    def chunk_vector(score):
+        return [score, math.sqrt(1.0 - score * score)]
+
+    monkeypatch.setattr(semantic, "_chunk_vectors", lambda fingerprint, chunks: np.array(
+        [chunk_vector(scores.get(chunk["start"], 0.10)) for chunk in chunks]))
+    monkeypatch.setattr(semantic._WORKER, "embed", lambda texts, prompt, timeout: np.array([[1.0, 0.0]]))
+
+    hits = _call(video, "moon sensor", top_k=2)["hits"]
+    keyword = sorted(hit["start_sec"] for hit in hits if hit["match"] in ("exact", "all_terms"))
+    assert keyword == [0.0, 30.0], hits
+    assert not any(hit["match"] == "semantic" for hit in hits), hits

@@ -107,9 +107,10 @@ def _fuse(lexical: List[SearchResult], chunks: List[dict], query: str, last_end:
 
     Each candidate scores the sum of 1/(60 + rank) over the lists with a hit within 15 s of it
     (the best rank in that list); places closer than 20 s to one already chosen are dropped.
+    A semantic pick below MIN_SCORE takes its place in the fusion but is not returned.
     """
     keyword = [(h.start_sec, h.end_sec, h) for h in lexical[:top_k]]
-    related = [(c["start"], c["end"], _semantic_result(c, last_end)) for c in chunks]
+    related = [(c["start"], c["end"], _semantic_result(c, last_end), c["score"]) for c in chunks]
     out = [hit for _, _, hit in keyword if _is_exact(query, hit.text)]
     for hit in out:
         hit.match = "exact"
@@ -128,16 +129,16 @@ def _fuse(lexical: List[SearchResult], chunks: List[dict], query: str, last_end:
                     score += 1.0 / (RRF_K + rank + 1)
             scored.append((-score, source, item[0], item))
     scored.sort(key=lambda row: row[:3])
+    picked = []
     for _, source, _, item in scored:
-        if len(out) >= top_k:
+        if len(out) + len(picked) >= top_k:
             break
         if all(abs(centre(item) - c) >= GAP_SEC for c in chosen):
-            hit = item[2]
             if source == 0:
-                hit.match = "all_terms"
-            out.append(hit)
+                item[2].match = "all_terms"
+            picked.append((source, item))
             chosen.append(centre(item))
-    return out[:top_k]
+    return out + [item[2] for source, item in picked if source == 0 or item[3] >= semantic.MIN_SCORE]
 
 
 def search_transcript(

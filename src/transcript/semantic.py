@@ -307,6 +307,7 @@ def search(fingerprint: str, segments: List[dict], query: str, top_k: int,
            time_range: Optional[Tuple[float, float]] = None) -> List[dict]:
     """Closest chunks to the query: dicts with start, end, text, segment_id, suspect, score (cosine).
 
+    Chunks below MIN_SCORE are returned too; search.py leaves them out of the answer after fusion.
     Raises SemanticUnavailable when semantic search cannot answer right now.
     """
     global _PERMANENT
@@ -337,8 +338,6 @@ def search(fingerprint: str, segments: List[dict], query: str, top_k: int,
     picked: List[int] = []
     for i in np.argsort(-scores)[:200]:
         chunk = chunks[i]
-        if scores[i] < MIN_SCORE:
-            break
         if chunk["end"] < t_start or chunk["start"] > t_end:
             continue
         if all(abs(chunk["start"] - chunks[j]["start"]) >= GAP_SEC for j in picked):
