@@ -15,7 +15,6 @@ Clip paths are the source files named in build_v2.FILES; the scorer looks for
 each clip in the set folder first, so a copy there takes precedence.
 """
 import json
-from pathlib import Path
 
 from build import BENCH_ROOT, run
 from build_v2 import FILES

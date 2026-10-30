@@ -22,7 +22,6 @@ Each clip is the window plus MARGIN seconds on each side, re-encoded at the
 source size and frame rate. The margins are ignore zones.
 """
 import json
-from pathlib import Path
 
 from build import BENCH_ROOT, run
 from build_v2 import FILES
