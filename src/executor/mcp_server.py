@@ -63,7 +63,7 @@ _INLINE_MANIFEST_FALLBACK = [
     },
     {
         "name": "search_visual",
-        "description": "Find when a visible object, person, action, or scene appears. Searches the local visual index; build it first if needed. Returns ranked timestamps, merged intervals (the one holding rank 1 is at least 15 seconds long, or the whole searched range when that is shorter; a shorter one is widened evenly around its middle and kept inside the searched range; overlapping intervals are merged into it), and a contact sheet for visual verification.",
+        "description": "Find when a visible object, person, action, or scene appears. Searches the local visual index; build it first if needed. Returns ranked timestamps, merged intervals (the one holding rank 1 grows from its best frames only over neighbouring frames that score close to the best, up to 8 seconds, so it can be shorter; overlapping intervals are merged into it), and a contact sheet for visual verification.",
         "inputSchema": {"type": "object", "properties": {"source": {"type": "string"}, "query": {"type": "string"}, "top_k": {"type": "integer", "minimum": 1, "maximum": 20, "default": 5}, "start_sec": {"type": "number", "minimum": 0, "default": 0}, "end_sec": {"type": ["number", "null"], "minimum": 0}}, "required": ["source", "query"]}
     },
     {
