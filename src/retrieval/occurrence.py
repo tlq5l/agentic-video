@@ -32,7 +32,7 @@ from src.core.config import Config
 from src.core.errors import as_dependency_error
 from src.retrieval import ocr
 
-ALGORITHM_VERSION = "occurrences-v6"
+ALGORITHM_VERSION = "occurrences-v7"
 MAX_FRAMES = 2400
 MAX_SPANS_LIMIT = 100
 DEFAULT_MIN_GAP = 0.3
@@ -767,9 +767,10 @@ def count_video(engine, progress=lambda done, total: None, **args):
     moving = {direction: n for direction, n in travel.items() if direction != "stationary"}
     if moving:
         result["travel_counts"] = moving
-        result["note"] += (f" {sum(moving.values())} appearance(s) cross the frame ("
-                           f"{', '.join(f'{n} {d}' for d, n in moving.items())}); the count includes every direction, "
-                           f"so if the question asks for one direction, count only those.")
+        result["note"] += (f" {sum(moving.values())} appearance(s) show net motion across the frame ("
+                           f"{', '.join(f'{n} {d}' for d, n in moving.items())}), estimated from each span's first and last "
+                           f"positions; these are not verified crossings. The count includes every direction. Directional "
+                           f"counting is unsupported: verify each span with inspect_window before answering a directional question.")
     if shown and not capped:
         result["note"] += TILE_NOTE
     if len(shown) > SHEET_TILES:
