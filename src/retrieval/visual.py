@@ -302,8 +302,10 @@ def widen_top_interval(intervals, lower, upper, frames, margin, maximum=MAX_WIND
 
     `frames` is [(timestamp_sec, end_sec, score)] for every indexed frame in [lower, upper], in time order.
     It stops at the first neighbour that falls below the margin on both sides, so a window can stay shorter than
-    `maximum`. Other intervals that overlap the grown one are merged into it (union, ranks and scores combined),
-    repeatedly, so the returned intervals never overlap.
+    `maximum`. Growth never goes past `maximum`, but a seed already longer than `maximum` (a held frame, or hits
+    merged together) is kept whole. Other intervals that overlap the grown one are merged into it (union, ranks and
+    scores combined), repeatedly, so the returned intervals never overlap; that merge can make the result longer
+    than `maximum`.
     """
     top = next(item for item in intervals if 1 in item["ranks"])
     others = [item for item in intervals if item is not top]
@@ -315,10 +317,10 @@ def widen_top_interval(intervals, lower, upper, frames, margin, maximum=MAX_WIND
         grew = False
         if left > 0 and frames[left - 1][2] >= floor:
             left -= 1
-            start = frames[left][0]
+            start = max(frames[left][0], end - maximum)
             grew = True
         if end - start < maximum and right < len(frames) and frames[right][2] >= floor:
-            end = min(upper, frames[right][1])
+            end = min(upper, frames[right][1], start + maximum)
             right += 1
             grew = True
         if not grew:
@@ -448,7 +450,7 @@ def search_index(engine, query, top_k=5, start_sec=0.0, end_sec=None):
         _check_source(engine, stamp)
         return {"status": state, "hits": hits, "intervals": intervals, "contact_sheet": sheet, **pending,
                 "index_complete": progress["indexed_until_sec"] >= duration, **progress,
-                "note": "Cosine similarity is not confidence. Sample-based intervals are approximate; the interval holding rank 1 grows from its best frames only over frames that score close to the best, up to 8 s, so it can be shorter. Verify badges and inspect_window. Empty results do not establish absence."}
+                "note": "Cosine similarity is not confidence. Sample-based intervals are approximate; the interval holding rank 1 grows from its best frames only over frames that score close to the best, up to 8 s, so it can be shorter; a span already longer than 8 s, such as a held frame or hits merged together, is kept whole, so it can be longer. Verify badges and inspect_window. Empty results do not establish absence."}
     finally:
         conn.close()
 
