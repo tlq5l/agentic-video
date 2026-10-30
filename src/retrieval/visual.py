@@ -289,27 +289,39 @@ def _build_locked(engine, stamp, duration, report):
 
 
 MIN_WINDOW_SEC = 15.0
+WIDEN_MARGIN = 0.02  # cosine points below the top score that a neighbouring frame may have and still join the rank-1 window
 
 
 def _overlaps(a, b):
     return a["start_sec"] < b["end_sec"] and b["start_sec"] < a["end_sec"]
 
 
-def widen_top_interval(intervals, lower, upper, minimum=MIN_WINDOW_SEC):
-    """Give the interval holding rank 1 a window of at least `minimum` seconds, then merge overlapping intervals into it.
+def widen_top_interval(intervals, lower, upper, frames, margin, minimum=MIN_WINDOW_SEC):
+    """Grow the interval holding rank 1 toward `minimum` seconds, one indexed frame at a time, but only over
+    neighbouring frames whose score is within `margin` of the top score; then merge overlapping intervals into it.
 
-    A shorter interval is widened evenly around its centre and slid back inside [lower, upper] when it passes an edge.
-    If the video (or the searched range) is shorter than `minimum`, the window is all of [lower, upper].
+    `frames` is [(timestamp_sec, end_sec, score)] for every indexed frame in [lower, upper], in time order.
     An interval already that long is unchanged. Other intervals that overlap the widened one are merged into it
     (union, ranks and scores combined), repeatedly, so the returned intervals never overlap.
     """
     top = next(item for item in intervals if 1 in item["ranks"])
     others = [item for item in intervals if item is not top]
     start, end = top["start_sec"], top["end_sec"]
-    if end - start < minimum:
-        length = min(minimum, upper - lower)
-        start = min(max((start + end) / 2 - length / 2, lower), upper - length)
-        end = start + length
+    floor = top["score"] - margin
+    left = next((i for i, frame in enumerate(frames) if frame[0] >= start), len(frames))
+    right = next((i for i, frame in enumerate(frames) if frame[0] >= end), len(frames))
+    while end - start < minimum:
+        grew = False
+        if left > 0 and frames[left - 1][2] >= floor:
+            left -= 1
+            start = frames[left][0]
+            grew = True
+        if end - start < minimum and right < len(frames) and frames[right][2] >= floor:
+            end = min(upper, frames[right][1])
+            right += 1
+            grew = True
+        if not grew:
+            break
     top = {**top, "start_sec": start, "end_sec": end}
     while others:
         for other in others:
@@ -387,6 +399,7 @@ def search_index(engine, query, top_k=5, start_sec=0.0, end_sec=None):
         covered_end = min(end, progress["indexed_until_sec"])
         vector = get_encoder().text(query)
         best = []
+        window = []
         cursor = conn.execute("SELECT timestamp,end_sec,width,height,embedding FROM frames WHERE timestamp>=? AND timestamp<? ORDER BY timestamp", (start_sec, covered_end))
         while True:
             rows = cursor.fetchmany(256)
@@ -395,6 +408,7 @@ def search_index(engine, query, top_k=5, start_sec=0.0, end_sec=None):
             matrix = np.stack([np.frombuffer(row[4], dtype=np.float32) for row in rows])
             scores = matrix @ vector
             for row, score in zip(rows, scores):
+                window.append((row[0], row[1], float(score)))
                 item = (float(score), -row[0], row[:4])
                 if len(best) < top_k:
                     heapq.heappush(best, item)
@@ -419,7 +433,7 @@ def search_index(engine, query, top_k=5, start_sec=0.0, end_sec=None):
                                   "score": hit["score"], "ranks": [hit["rank"]]})
         sheet = None
         if ranked:
-            intervals = widen_top_interval(intervals, start_sec, covered_end)
+            intervals = widen_top_interval(intervals, start_sec, covered_end, window, WIDEN_MARGIN)
             import hashlib
             tag = hashlib.sha256(repr((query, top_k, start_sec, end, progress["indexed_until_sec"])).encode()).hexdigest()[:20]
             path = engine._cache.get_sheets_dir(engine.metadata.fingerprint) / f"visual_{tag}.jpg"
