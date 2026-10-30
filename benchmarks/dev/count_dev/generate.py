@@ -55,6 +55,9 @@ LIFE_COLORS = {"cyan": "0x77b7c5", "orange": "0xc59b77", "yellow": "0xc5b877", "
                "purple": "0xb777c5", "magenta": "0xc577b0", "pink": "0xc59aa8", "red": "0xc5777f", "white": "0xbdbdbd"}
 
 TRAP_ARGS = {"close": {}, "crowd": {"max_spans": 100}}  # arguments an agent passed in the observed failures
+# trap2 layouts: "passes" = left-to-right passes beside right-to-left ones, "rtl" = only right-to-left passes,
+# "cap" = 101 short appearances (the 100-span limit); asked with the default arguments
+TRAP_ARGS.update({"passes": {}, "rtl": {}, "cap": {}})
 
 # id, split, motion blur, tint alpha (0 = no scene tints, so no cuts and a bright background), groups of (kind, layout)
 VIDEOS = [
@@ -80,6 +83,13 @@ VIDEOS = [
     ("occ18", "train", True, .5, [("glyph", "crowd"), ("glyph", "crowd")]),
     ("occ19", "test", False, .5, [("glyph", "close"), ("glyph", "crowd")]),
     ("occ20", "test", False, .6, [("text", "close"), ("glyph", "crowd"), ("glyph", "close")]),
+    # trap2 (climb set, split train2): left-to-right passes beside right-to-left ones (the tool counts every pass),
+    # right-to-left passes only, close appearances with a long min_gap_sec, and 101 appearances (the span cap)
+    ("trap2_occ21", "train2", False, .5, [("cross", "passes"), ("cross", "passes"), ("cross", "rtl")]),
+    ("trap2_occ22", "train2", False, .6, [("glyph", "close"), ("glyph", "close"), ("text", "close")]),
+    ("trap2_occ23", "train2", False, 0, [("glyph", "close"), ("glyph", "close"), ("glyph", "close")]),
+    ("trap2_occ24", "train2", False, .5, [("glyph", "cap"), ("cross", "passes")]),
+    ("trap2_occ25", "train2", True, .5, [("glyph", "cap"), ("glyph", "crowd")]),
 ]
 
 # id, split, motion, reps, period sec, tempo drift (fraction), sensor noise, background, camera drift, pose shape
@@ -96,6 +106,9 @@ REPS = [
     ("rep10", "test", "orbit", 5, 1.4, .3, .02, "texture", 0, "cos"),
     ("rep11", "test", "jack", 18, .45, -.2, .03, "clutter", 1, "cos"),
     ("rep12", "test", "bounce", 2, 3.2, 0, .02, "plain", 0, "cos"),
+    # trap2: the periodic count ran one cycle over on train (rep03, rep05, rep07)
+    ("trap2_rep13", "train2", "sway", 5, 1.5, 0, .02, "plain", 0, "cos"),
+    ("trap2_rep14", "train2", "bounce", 7, 1.1, .2, .03, "texture", 1, "skew"),
 ]
 
 
@@ -220,7 +233,7 @@ class _Plan:
         return getattr(self, f"_{kind}")(layout, qid)
 
     def _count(self, layout):
-        fixed = {"zero": 0, "single": 1, "long": 1, "one": 1}
+        fixed = {"zero": 0, "single": 1, "long": 1, "one": 1, "rtl": 0, "cap": 101}
         if layout in fixed:
             return fixed[layout]
         if layout == "crowd":
@@ -236,6 +249,10 @@ class _Plan:
             spans.append((t, t + rng.uniform(5.5, 8.0)))
         elif layout in ("single", "one"):
             spans.append((t, t + rng.uniform(.9, 2.0)))
+        elif layout == "cap":  # short appearances, each gap longer than the default min_gap_sec keeps apart
+            for _ in range(n):
+                spans.append((t, t + rng.uniform(.5, .8)))
+                t = spans[-1][1] + rng.uniform(.4, .6)
         elif layout == "cut_jump":  # the marker is replaced at once, at a cut, by itself in another slot
             for i in range(n):
                 spans.append((t, t + rng.uniform(1.0, 1.6)))
@@ -359,9 +376,11 @@ class _Plan:
             f"How many times does the {label} marker travel left to right across the screen? Ignore right-to-left passes and other colors.",
             f"Count the left-to-right crossings of the {label} across the display. Passes in the other direction do not count.",
             f"How many times does the {label} cross the screen from left to right?"])
-        return ({"id": qid, "tool": "count_occurrences", "target": label, "target_kind": "description",
-                 "mode": "left_to_right", "question": question},
-                {"id": qid, "count": n, "intervals": truth, "layout": layout})
+        row = {"id": qid, "tool": "count_occurrences", "target": label, "target_kind": "description",
+               "mode": "left_to_right", "question": question}
+        if layout in TRAP_ARGS:
+            row["args"] = self._trap_args(layout)
+        return (row, {"id": qid, "count": n, "intervals": truth, "layout": layout})
 
 
 def _glyph_question(rng, label):
@@ -451,7 +470,7 @@ def _draw_pose(d, motion, phase, pose, cx, cy):
 
 def render_rep(path: Path, spec, seed):
     rid, _split, motion, count, period, drift, noise, background, camera, pace = spec
-    rng = np.random.default_rng([seed, int(rid[3:])])
+    rng = np.random.default_rng([seed, int(rid.rsplit("rep", 1)[1])])
     periods = np.linspace(period, period * (1 + drift), count)
     lead, tail = 1.0 + rng.uniform(0, .6), 1.0 + rng.uniform(0, .6)
     ends = lead + np.cumsum(periods)
