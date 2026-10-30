@@ -124,7 +124,7 @@ def main():
                 f"{k}={data[k]}" for k in ("confidence", "count_reliable", "method_used", "spans_omitted", "capped", "gaps_merged",
                                    "count_without_merges", "min_gap_sec_clamped_from") if k in data)
             results["real_rep" if row.get("real") else name][row["split"]].append((expected, answer))
-            # With a direction passed, travel_counts only lists the other directions, so it does not flag the count.
+            # With a direction passed, the count is already narrowed to that direction, so only a count made without one is flagged by travel_counts.
             flagged = bool((answer is None and data.get("status") == "complete")
                            or data.get("capped") or data.get("gaps_merged")
                            or (data.get("travel_counts") and "direction" not in call))

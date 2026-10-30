@@ -389,7 +389,7 @@ export interface CountOccurrencesInput {
   end_sec?: number | string | null;
   /** Sampling rate (default 5, maximum 15; larger values are clamped and the result says so); lowered automatically on long windows. */
   fps?: number;
-  /** Absence of at least this long starts a new span (default 0.3). A larger value JOINS separate appearances whose gap is shorter than it; the result then sets gaps_merged and count_without_merges. Also accepts a timecode string in MM:SS.mmm form. */
+  /** Absence of at least this long starts a new span (default 0.3). A larger value JOINS separate appearances whose gap is shorter than it; the result then sets gaps_merged, and count_without_merges too when no direction is passed. Also accepts a timecode string in MM:SS.mmm form. */
   min_gap_sec?: number | string;
   /** Maximum spans listed (default 20, maximum 100; larger values are clamped and the result says so); count always includes omitted spans. */
   max_spans?: number;
@@ -432,9 +432,9 @@ export interface CountOccurrencesOutput {
   spans_found?: number;
   /** Appearance pairs joined because min_gap_sec is above the default 0.3; only set when it joined some. */
   gaps_merged?: number;
-  /** The count if the joined pairs were kept apart. */
+  /** The count if the joined pairs were kept apart; set only when no direction was passed. */
   count_without_merges?: number;
-  /** Net motion of appearances across the frame, by direction; only set when some move. Each value is an estimate from a span's first and last positions, not a verified crossing or direction count. Without `direction`, the count includes every direction and directional counting is unsupported, so verify any directional answer visually before reporting it. With `direction`, these are the appearances left out of count and spans. */
+  /** Net motion of moving appearances across the frame, by direction; only set when some move. Each value is an estimate from a span's first and last positions, not a verified crossing or direction count. Without `direction`, the count includes every direction and directional counting is unsupported, so verify any directional answer visually before reporting it. With `direction`, this lists every moving appearance, including the ones the count keeps; stationary ones are not listed (the note says how many stayed still). */
   travel_counts?: Record<string, number>;
   spans?: OccurrenceSpan[];
   spans_returned?: number;
