@@ -13,8 +13,6 @@ from src.core.config import Config
 from src.executor.mcp_server import handle_call
 from src.transcript import semantic
 
-pytestmark = pytest.mark.model
-
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
 PARAPHRASE = "a very bright explosion of a star"  # the speech says "Supernova optical flash detected"
 
@@ -75,6 +73,7 @@ def test_an_unknown_mode_is_rejected_with_a_clear_error(video):
         handle_call("search_transcript", {"source": str(video), "query": "Supernova", "mode": "semantic"})
 
 
+@pytest.mark.model
 @pytest.mark.skipif(not (semantic.model_dir() / "EmbeddingGemma2Text.mlpackage").exists(),
                     reason="EmbeddingGemma 2 Core ML model not set up (AGENTIC_VIDEO_EG2_DIR)")
 def test_hybrid_finds_a_paraphrase_and_pins_exact_hits_first(video):
