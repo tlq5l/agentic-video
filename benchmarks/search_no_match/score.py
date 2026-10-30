@@ -9,10 +9,12 @@ semantic half is off and the script stops, because the climb metric would read z
 
 --source is the local copy of the bench-v1 clip named by its public id in questions.json.
 
-Splits: list position in questions.json, even = train, odd = test. Every run measures only train; the test
-split is measured only with --final, once per commit, for the final comparison. Queries of the split not
-asked for are never run and never written to --out. The test split was already printed during the
-0.70 tuning on 2026-10-30, so it is no longer untouched: a clean final comparison needs new held-out items.
+Splits: list position in questions.json, even = train (used for tuning), odd = test (held out). Every run
+measures only train; the test split is measured only with --final, once per commit, for the final comparison.
+Queries of the split not asked for are never run and never written to --out. The odd items were replaced on
+2026-10-30 before any run of them; the first odd set was printed during the 0.70 tuning and is retired.
+The 0.70 cut (MIN_SCORE in src/transcript/semantic.py) was frozen before the replacement and is not tuned on
+the test split.
 
 Metrics (METRIC lines):
   climb_nomatch_semantic_share   share of no-match queries that return any match=semantic hit (lower is better)

@@ -1,57 +1,57 @@
 {
- "about": "Queries for benchmarks/search_no_match/score.py. Source: a public bench-v1 clip (transcript cached by the turbo ASR). Train/test: list position, even = train, odd = test. no_match: subjects absent from the speech; positive: a reworded line, target segment_id and start_sec.",
+ "about": "Queries for benchmarks/search_no_match/score.py. Source: a public bench-v1 clip (transcript cached by the turbo ASR). Train/test: list position, even = train, odd = test. no_match: subjects absent from the speech; positive: a reworded line, target segment_id and start_sec. Odd list positions were replaced on 2026-10-30 with items no run had scored before; the earlier odd items (the first held-out set) are retired.",
  "source": "bench-v1/extreme-when-uusf1qG_uZ4",
  "no_match": [
   "quantum entanglement experiment results",
-  "stock market crash in 1929",
+  "Mars rover soil sample analysis",
   "annual income tax return deadline",
-  "lasagna recipe with ricotta",
+  "pancreatic cancer treatment trial",
   "car engine oil change interval",
-  "hurricane landfall forecast",
+  "medieval Japanese tea ceremony",
   "python list comprehension syntax",
-  "heart surgery recovery time",
+  "bitcoin mining electricity bills",
   "airplane landing gear failure",
-  "wedding vows at the cathedral",
+  "Olympic javelin record",
   "space shuttle launch countdown",
-  "submarine torpedo drill",
+  "ocean tide prediction tables",
   "mountain climbing oxygen tanks",
-  "gold mine collapse rescue",
+  "cathedral stained glass restoration",
   "Shakespeare sonnet analysis",
-  "violin concert in the concert hall",
+  "solar panel installation cost",
   "wine tasting notes on tannins",
-  "insurance claim for flood damage",
+  "ballet pointe shoe fitting",
   "passport renewal fee",
-  "chess opening Sicilian defense",
+  "Roman aqueduct construction history",
   "volcano eruption evacuation",
-  "nuclear reactor cooling system",
+  "dinosaur fossil discovery in Montana",
   "tennis serve speed record",
-  "medieval castle siege",
+  "electric scooter battery recycling",
   "bank loan interest rate",
-  "daycare tuition invoice payment",
+  "triathlon ironman bike leg",
   "teacher salary negotiation union",
-  "birthday cake recipe with frosting",
+  "arctic sea ice melting",
   "phone battery replacement cost",
-  "soccer championship final score",
+  "pirate treasure map buried island",
   "fire truck engine maintenance manual",
-  "pool chemical balance levels",
+  "jazz saxophone improvisation",
   "monkey species in the rainforest",
-  "cockroach extermination company",
+  "mortgage refinancing paperwork",
   "dog license renewal city hall",
-  "turtle shell cracks",
+  "clinic nurse rota",
   "lawyer fees for divorce",
-  "wolf attack in Yellowstone",
+  "earbuds charging dock",
   "aliens landed in Roswell",
-  "Robux prices in the game store",
+  "orchestra conductor baton technique",
   "preschool nap schedule for toddlers",
-  "kindergarten graduation ceremony speech",
+  "ancient Egyptian pyramid construction",
   "babysitter hiring agency background checks",
-  "playground equipment safety inspection",
+  "tax audit by the revenue agency",
   "school bus route changes",
-  "childhood vaccination records",
+  "trawler diesel engine overhaul",
   "toddler potty training tips",
-  "elementary school homework policy",
+  "cryptocurrency exchange hack",
   "after school tutoring rates",
-  "nursery rhyme songbook for babies"
+  "earthquake aftershock frequency"
  ],
  "positive": [
   {
@@ -60,9 +60,9 @@
    "query": "they are heading out to get hamburgers"
   },
   {
-   "segment_id": 959,
-   "start_sec": 3421.54,
-   "query": "a police officer says she sped through the traffic signal"
+   "segment_id": 2243,
+   "start_sec": 6885.34,
+   "query": "the creature is just a harmless little hopping animal, everyone calm down"
   },
   {
    "segment_id": 796,
@@ -70,9 +70,9 @@
    "query": "rumor that extraterrestrials plan to kidnap everyone"
   },
   {
-   "segment_id": 495,
-   "start_sec": 1933.64,
-   "query": "the group visits another nursery today"
+   "segment_id": 821,
+   "start_sec": 2947.98,
+   "query": "the person thanks the others and promises to arrive at exactly ten o'clock"
   },
   {
    "segment_id": 1048,
@@ -80,9 +80,9 @@
    "query": "get in the vehicle so I can take you to childcare"
   },
   {
-   "segment_id": 1778,
-   "start_sec": 5536.9,
-   "query": "a girl introducing herself by name for the first time"
+   "segment_id": 2298,
+   "start_sec": 7104.74,
+   "query": "the reason is that he signed up to a gaming channel run by a guy named JJ"
   },
   {
    "segment_id": 661,
@@ -90,9 +90,9 @@
    "query": "JJ left without returning the handset he took"
   },
   {
-   "segment_id": 1657,
-   "start_sec": 5266.52,
-   "query": "the child insists he had nothing to do with it"
+   "segment_id": 1399,
+   "start_sec": 4531.28,
+   "query": "has anyone seen how cruel the infant executive got once Janice became kind"
   },
   {
    "segment_id": 2080,
@@ -100,9 +100,9 @@
    "query": "did an insect crawl into your satchel"
   },
   {
-   "segment_id": 2093,
-   "start_sec": 6525.02,
-   "query": "Bobby stole my pastry and I am shocked"
+   "segment_id": 1727,
+   "start_sec": 5434.44,
+   "query": "so you'd like both of these, and I'm off to bake it now"
   },
   {
    "segment_id": 1680,
@@ -110,9 +110,9 @@
    "query": "a kid wants to become an attorney to get Boss Baby locked up"
   },
   {
-   "segment_id": 1443,
-   "start_sec": 4624.96,
-   "query": "you have grown up so you are no longer eligible for the nursery"
+   "segment_id": 47,
+   "start_sec": 270.14,
+   "query": "once I catch the culprit, there will be trouble for them"
   },
   {
    "segment_id": 1062,
@@ -120,9 +120,9 @@
    "query": "you resemble the woman who abducted JJ and me"
   },
   {
-   "segment_id": 1206,
-   "start_sec": 4088.36,
-   "query": "the wolf threatens to blow the house down"
+   "segment_id": 2110,
+   "start_sec": 6562.4,
+   "query": "I brought the items with me, plus some sugary ring pastries for the whole group"
   },
   {
    "segment_id": 66,
@@ -130,9 +130,9 @@
    "query": "my pet primate can speak and is strong enough to raise a home"
   },
   {
-   "segment_id": 1583,
-   "start_sec": 5042.54,
-   "query": "the children rescued the instructor and she thanks them"
+   "segment_id": 2397,
+   "start_sec": 7399.46,
+   "query": "I want to lift a glass to my sweetheart, the person I adore most on earth"
   },
   {
    "segment_id": 1321,
@@ -140,9 +140,9 @@
    "query": "after I lifted the reptile it released gas"
   },
   {
-   "segment_id": 333,
-   "start_sec": 1392.08,
-   "query": "a meeting about a cruel classmate"
+   "segment_id": 1021,
+   "start_sec": 3575.52,
+   "query": "the only route to pleasing the instructor was signing up for that gaming channel"
   },
   {
    "segment_id": 896,
@@ -150,9 +150,9 @@
    "query": "the cupboards are locked since you kept taking things from them"
   },
   {
-   "segment_id": 519,
-   "start_sec": 2044.56,
-   "query": "a plea for help: a teddy is stuck on top of the house"
+   "segment_id": 2535,
+   "start_sec": 7772.24,
+   "query": "you have a point, let's start the meal without the roast bird"
   },
   {
    "segment_id": 227,
@@ -160,9 +160,9 @@
    "query": "wait in the swimming pool while you take turns sliding down"
   },
   {
-   "segment_id": 278,
-   "start_sec": 1154.54,
-   "query": "wander around while the teacher answers a call"
+   "segment_id": 1045,
+   "start_sec": 3634.88,
+   "query": "no trouble at all, thanks, and I'm sorry for causing you a hassle"
   },
   {
    "segment_id": 1020,
@@ -170,9 +170,9 @@
    "query": "she was miserable all day after being forced to spend a million virtual coins"
   },
   {
-   "segment_id": 1036,
-   "start_sec": 3610.4,
-   "query": "still parched, that is exactly what I wanted"
+   "segment_id": 454,
+   "start_sec": 1796.38,
+   "query": "alright children, the performance begins shortly"
   },
   {
    "segment_id": 1900,
@@ -180,9 +180,9 @@
    "query": "time to walk to the football pitch and swap clothes"
   },
   {
-   "segment_id": 1947,
-   "start_sec": 6138.42,
-   "query": "each of you choose a buddy and pitch your shelters"
+   "segment_id": 1441,
+   "start_sec": 4620.38,
+   "query": "I'm here to tell you that you've reached adulthood now"
   },
   {
    "segment_id": 831,
@@ -190,9 +190,9 @@
    "query": "hopefully you have brought along your gaming pals"
   },
   {
-   "segment_id": 2289,
-   "start_sec": 7075.92,
-   "query": "a visitor from the investigation bureau will teach us to solve crimes"
+   "segment_id": 1126,
+   "start_sec": 3866.96,
+   "query": "sure am excited, though I expect this performance to be silly"
   },
   {
    "segment_id": 120,
@@ -200,9 +200,9 @@
    "query": "cheer for JJ because today is his special day"
   },
   {
-   "segment_id": 2189,
-   "start_sec": 6772.0,
-   "query": "Masha, you will forever be the first pal I made at nursery"
+   "segment_id": 1729,
+   "start_sec": 5439.98,
+   "query": "this is dragging on, so I'll turn up the burner"
   },
   {
    "segment_id": 1196,
@@ -210,9 +210,9 @@
    "query": "the performance is about to resume"
   },
   {
-   "segment_id": 358,
-   "start_sec": 1490.06,
-   "query": "call emergency medics for the teacher"
+   "segment_id": 499,
+   "start_sec": 1952.88,
+   "query": "the visitors arrived, so greet them and invite them to use the facilities"
   },
   {
    "segment_id": 684,
@@ -220,9 +220,9 @@
    "query": "tell everyone to stop poking into my private business"
   },
   {
-   "segment_id": 1130,
-   "start_sec": 3880.34,
-   "query": "the baby plays the wolf and the others are the piglets"
+   "segment_id": 509,
+   "start_sec": 1996.2,
+   "query": "groaning, warning someone not to bother me or I'll give a kick"
   }
  ]
 }
