@@ -549,7 +549,7 @@ def test_frame_at_reads_a_stream_that_starts_before_time_zero(tmp_path, monkeypa
     from src.core.config import Config
 
     monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
-    base = _render_burned_clip(tmp_path / "base.mp4")
+    base = _render_burned_clip(tmp_path / "base.mp4", duration=4.0)
     early = str(tmp_path / "early.ts")
     subprocess.run(
         ["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", base, "-c", "copy",
@@ -564,7 +564,8 @@ def test_frame_at_reads_a_stream_that_starts_before_time_zero(tmp_path, monkeypa
     frames = _frames_by_pts(early)
 
     # Times count from the stream start, so the frame at time_sec t has source time t + start.
-    for time_sec, shown in [(0.0, 0.0), (0.5, 0.48), (1.0, 1.0)]:
+    # The requests after the first second need a seek into the stream, not only a decode from its start.
+    for time_sec, shown in [(0.0, 0.0), (0.5, 0.48), (1.0, 1.0), (2.0, 2.0), (2.5, 2.48), (3.5, 3.48)]:
         outcome = mcp_server.handle_call("frame_at", {"source": early, "time_sec": time_sec})
         assert outcome["ok"] is True
         assert outcome["data"]["frame_time_sec"] == pytest.approx(shown, abs=1e-6), time_sec

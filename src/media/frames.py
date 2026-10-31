@@ -44,7 +44,7 @@ VIDEO_TAIL_READ_SEC = 10.0
 FRAME_DECODE_LEAD_SEC = 1.0
 END_TOLERANCE_SEC = 0.001
 # Bump when the frame_at selection or decode chain changes, so saved PNGs made by the old chain are not reused.
-FRAME_AT_CACHE_VERSION = 5
+FRAME_AT_CACHE_VERSION = 6
 
 
 def _fps_if_within_media(vpath: Path, timestamp_sec: float, cache: MediaCache) -> Optional[float]:
@@ -222,20 +222,13 @@ def _shown_frame_pts(vpath: Path, time_sec: float, request: Fraction, clock: Str
     )
 
 
-def _decode_frame_shown_at(vpath: Path, pts: int, clock: StreamClock, tmp_file: Path, vf: str) -> float:
-    """Write the frame whose presentation pts is pts (ticks) to tmp_file, filtered by vf, and
-    return its start on the origin clock (the stream-start clock inspect_window counts from).
-
-    The select keeps frames with exactly that pts; when a container gives several frames the
-    same pts, the last one written stays, the one on screen last. The showinfo receipt must
-    report pts, or the frame is refused."""
-    frame_start = float(pts * clock.time_base) - float(clock.origin)
-    start_sec = max(0.0, frame_start - FRAME_DECODE_LEAD_SEC)
-    read_sec = frame_start - start_sec + FRAME_DECODE_LEAD_SEC
-    proc = _run_ffmpeg_command(
+def _write_selected_frame(
+    vpath: Path, pts: int, seek_args: List[str], read_sec: float, tmp_file: Path, vf: str, frame_start: float,
+) -> "subprocess.CompletedProcess[str]":
+    return _run_ffmpeg_command(
         [
             "ffmpeg", "-y", "-copyts",
-            "-ss", f"{start_sec:.6f}",
+            *seek_args,
             "-t", f"{read_sec:.6f}",
             "-i", str(vpath),
             "-map", "0:v:0",
@@ -245,6 +238,27 @@ def _decode_frame_shown_at(vpath: Path, pts: int, clock: StreamClock, tmp_file: 
         ],
         vpath, frame_start, tmp_file,
     )
+
+
+def _decode_frame_shown_at(vpath: Path, pts: int, clock: StreamClock, tmp_file: Path, vf: str) -> float:
+    """Write the frame whose presentation pts is pts (ticks) to tmp_file, filtered by vf, and
+    return its start on the origin clock (the stream-start clock inspect_window counts from).
+
+    The select keeps frames with exactly that pts; when a container gives several frames the
+    same pts, the last one written stays, the one on screen last. The showinfo receipt must
+    report pts, or the frame is refused. A seek that writes no frame is followed by a decode
+    from the start of the stream, read up to the frame."""
+    frame_sec = float(pts * clock.time_base)
+    frame_start = frame_sec - float(clock.origin)
+    start_sec = max(float(clock.origin), frame_sec - FRAME_DECODE_LEAD_SEC)
+    read_sec = frame_sec - start_sec + FRAME_DECODE_LEAD_SEC
+    proc = _write_selected_frame(
+        vpath, pts, ["-ss", f"{start_sec:.6f}"], read_sec, tmp_file, vf, frame_start,
+    )
+    if not tmp_file.exists():
+        proc = _write_selected_frame(
+            vpath, pts, [], frame_start + FRAME_DECODE_LEAD_SEC, tmp_file, vf, frame_start,
+        )
     if proc.returncode != 0 or not tmp_file.exists():
         _discard_file(tmp_file)
         raise MediaCorruptError(
