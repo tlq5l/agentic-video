@@ -728,7 +728,11 @@ os._exit(7)
 
     assert completed.returncode == 7
     assert completed.stdout.strip().isdigit()
-    time.sleep(2.8)
+    child_pid = int(completed.stdout.strip())
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and asr._process_rss_bytes(child_pid):
+        time.sleep(0.05)
+    assert not asr._process_rss_bytes(child_pid), "the child outlived its crashed worker"
     assert not marker.exists()
 
 

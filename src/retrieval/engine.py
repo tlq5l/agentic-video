@@ -35,6 +35,7 @@ from src.media.audio import (
 )
 from src.media.watch import watch_for as watch_frames
 from src.media.sound_labels import label_sounds as name_sounds
+from src.retrieval import ocr
 
 # Most windows one inspect_windows call extracts side by side.
 WINDOW_WORKERS = 4
@@ -1065,9 +1066,12 @@ class AgenticVideoEngine:
         start_sec: float,
         end_sec: float,
         fps: float = Config.DEFAULT_DENSE_FPS,
-        create_sheet: bool = True
+        create_sheet: bool = True,
+        read_text: bool = False,
     ) -> InspectionWindowResult:
         """Densify inspection over a target time window [start_sec, end_sec]."""
+        if read_text:
+            ocr.ensure_available(ocr.READ_TEXT_UNAVAILABLE)
         frames = extract_window_frames(
             self.source_path,
             start_sec=start_sec,
@@ -1076,6 +1080,9 @@ class AgenticVideoEngine:
             burn_timestamps=True,
             cache=self._cache,
         )
+        if read_text:
+            for frame in frames:
+                frame.text = ocr.frame_text(frame.file_path)
         sheet_path = None
         if create_sheet and frames:
             # Reuse the dense frames: seeking each one again with its own
@@ -1107,9 +1114,18 @@ class AgenticVideoEngine:
         time_sec: float,
         crop: Optional[Dict[str, Any]] = None,
         scale: Optional[float] = None,
+        read_text: bool = False,
     ) -> Dict[str, Any]:
-        """One frame at native resolution, optionally cropped and upscaled, as a PNG."""
-        return extract_frame_at(self.source_path, time_sec, crop=crop, scale=scale, cache=self._cache)
+        """One frame at native resolution, optionally cropped and upscaled, as a PNG.
+
+        With read_text, OCR reads the saved PNG itself, so the text matches the returned pixels.
+        """
+        if read_text:
+            ocr.ensure_available(ocr.READ_TEXT_UNAVAILABLE)
+        data = extract_frame_at(self.source_path, time_sec, crop=crop, scale=scale, cache=self._cache)
+        if read_text:
+            data.update(ocr.frame_text(data["file_path"]))
+        return data
 
     def detect_cuts(
         self,

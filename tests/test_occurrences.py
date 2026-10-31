@@ -240,6 +240,7 @@ def test_async_call_polls_then_returns_a_cached_result(clips, tmp_path):
 
 
 @needs_ffmpeg
+@pytest.mark.model
 def test_clip_described_symbol_uses_contrast_prompts(clips, tmp_path):
     from src.retrieval import visual
     try:
