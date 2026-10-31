@@ -225,6 +225,18 @@ class _BackgroundTranscriptionSlot:
             process_lock, owner, lock_error = _acquire_background_process_lock(
                 Config.BASE_CACHE_DIR, key[0], key[1]
             )
+            if process_lock is None and lock_error is None and owner:
+                exited = _owner_server_exited(owner)
+                if exited is None:
+                    return "unverified", None
+                if exited:
+                    process_lock, owner, lock_error = _wait_for_released_lock(Config.BASE_CACHE_DIR, key)
+                    if process_lock is None and lock_error is None and owner:
+                        exited = _owner_server_exited(owner)
+                        if exited is None:
+                            return "unverified", None
+                        if exited:
+                            return "orphaned", None
             if process_lock is None:
                 if lock_error:
                     return "start_failed", lock_error
@@ -358,9 +370,55 @@ def _release_background_process_lock(lock_file: Any) -> None:
         lock_file.close()
 
 
+def _process_state(pid: int) -> Optional[str]:
+    """The first letter of the process state from ps ("Z" is a zombie); None when ps fails, is denied or prints nothing."""
+    try:
+        completed = subprocess.run(
+            ["ps", "-o", "stat=", "-p", str(pid)],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    return completed.stdout.strip()[:1] or None
+
+
+def _owner_server_exited(owner: dict) -> Optional[bool]:
+    """Whether the server that wrote this lock record has exited: True when it is gone or an unreaped zombie, False while it runs, None when ps cannot say (POSIX; other platforms report False)."""
+    if os.name != "posix":
+        return False
+    pid = owner.get("pid")
+    if not isinstance(pid, int) or pid <= 0:
+        return None
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    except PermissionError:
+        pass
+    state = _process_state(pid)
+    if state is None:
+        return None
+    return state == "Z"
+
+
+def _wait_for_released_lock(
+    cache_dir: Path, key: Tuple[str, str]
+) -> Tuple[Optional[Any], Optional[dict], Optional[str]]:
+    """Retry the slot lock until it frees or the wait bound passes."""
+    deadline = time.monotonic() + ORPHANED_WORKER_WAIT_SECONDS
+    while True:
+        lock, owner, error = _acquire_background_process_lock(cache_dir, key[0], key[1])
+        if lock is not None or error is not None or time.monotonic() >= deadline:
+            return lock, owner, error
+        time.sleep(0.1)
+
+
 _BACKGROUND_TRANSCRIPTION_SLOT = _BackgroundTranscriptionSlot()
 _ASR_WORKER_LOCK = threading.local()
 TRANSCRIPTION_RETRY_AFTER_SECONDS = 15
+ORPHANED_WORKER_WAIT_SECONDS = 3
 ASR_CHUNK_SECONDS = 60
 # "turbo" runs whisper.cpp (large-v3-turbo) on the GPU through whisper-cli: ~50x real time on Apple silicon.
 WHISPER_CPP_MODEL = Path(os.environ.get(
@@ -994,20 +1052,24 @@ def default_model_size() -> str:
 _ASR_SPEED_VS_AUDIO = {"turbo": 0.05, "tiny": 0.04, "base": 0.08, "small": 0.2}
 
 
-def _transcription_progress(duration_sec: float, model_size: str) -> Dict[str, Any]:
-    """Elapsed time, an estimated total and a percent for the running worker (empty if unknown)."""
+def _transcription_progress(duration_sec: float) -> Tuple[Dict[str, Any], Optional[str]]:
+    """Elapsed time, an estimated total and a percent for the running worker, and the model it runs.
+
+    The estimate uses the model in the lock record, which can differ from the one requested.
+    Empty progress and no model when the lock record is unreadable.
+    """
     try:
         with open(Path(Config.BASE_CACHE_DIR) / "asr-worker.lock", "rb") as handle:
             owner = _read_background_lock_owner(handle) or {}
         elapsed = max(0.0, time.time() - float(owner["started_at"]))
+        running_model = str(owner["model_size"])
     except (OSError, ValueError, KeyError, TypeError):
-        return {}
-    total = max(10.0, duration_sec * _ASR_SPEED_VS_AUDIO.get(model_size, 0.2))
-    return {
-        "elapsed_sec": round(elapsed),
-        "estimated_total_sec": round(total),
-        "estimated_percent": min(99, int(100 * elapsed / total)),
-    }
+        return {}, None
+    total = max(10.0, duration_sec * _ASR_SPEED_VS_AUDIO.get(running_model, 0.2))
+    progress = {"elapsed_sec": round(elapsed), "estimated_total_sec": round(total)}
+    if elapsed < total:
+        progress["estimated_percent"] = min(99, int(100 * elapsed / total))
+    return progress, running_model
 
 
 def request_transcription(source_path: str, model_size: str) -> Dict[str, Any]:
@@ -1036,6 +1098,9 @@ def request_transcription(source_path: str, model_size: str) -> Dict[str, Any]:
         cached_model = None
 
     state, error = _BACKGROUND_TRANSCRIPTION_SLOT.start(source_path, model_size)
+    # An orphaned attempt is still reported as failed; its retry note says the slot is held.
+    # An attempt whose owner could not be checked is reported as start_failed, retryable.
+    wire_state = {"orphaned": "failed", "unverified": "start_failed"}.get(state, state)
     retry_after = 0 if state == "failed" else TRANSCRIPTION_RETRY_AFTER_SECONDS
     message_by_state = {
         "started": f"The {model_size} transcription started in the background.",
@@ -1046,40 +1111,64 @@ def request_transcription(source_path: str, model_size: str) -> Dict[str, Any]:
             f"The previous {model_size} transcription failed: {error or 'unknown error'}. "
             "Retry this request to start another attempt."
         ),
+        "orphaned": (
+            f"The server that started the {model_size} transcription exited before it finished, "
+            "and its worker still holds the transcription slot, so no new attempt has started."
+        ),
+        "unverified": (
+            "The server that holds the transcription slot could not be checked, "
+            "so no new attempt has started."
+        ),
     }
     message = message_by_state[state]
+    retry_note = ""
+    if state != "failed":
+        retry_note = f" Call this tool again after about {retry_after} seconds"
+        if state == "orphaned":
+            retry_note += "; a new attempt starts once that worker has stopped."
+        elif state == "unverified":
+            retry_note += "."
+        else:
+            retry_note += " to get the transcript."
     if result is not None:
         data = result.to_dict()
         data.update({
             "requested_model_size": model_size,
             "cached_model_size": cached_model,
             "requested_model_cached": False,
-            "transcription_status": state,
+            "transcription_status": wire_state,
             "retry_after_seconds": retry_after,
             "transcription_message": (
                 f"Returning the cached {cached_model} transcript because the requested "
-                f"{model_size} transcript is not cached. {message}"
+                f"{model_size} transcript is not cached. {message}{retry_note}"
             ),
         })
         return data
 
     running = state in {"started", "in_progress"}
-    progress = _transcription_progress(meta.duration_sec, model_size) if running else {}
-    if progress:
+    progress, running_model = _transcription_progress(meta.duration_sec) if running else ({}, None)
+    if running_model is not None and running_model != model_size:
+        message = (
+            f"A {running_model} transcription for this video is already running, "
+            f"not the requested {model_size} one."
+        )
+    if "estimated_percent" in progress:
         message += (
             f" About {progress['estimated_percent']}% done (estimate): {progress['elapsed_sec']} s elapsed "
             f"of roughly {progress['estimated_total_sec']} s."
         )
+    elif progress:
+        message += (
+            f" It is taking longer than estimated: {progress['elapsed_sec']} s elapsed, "
+            f"estimate was roughly {progress['estimated_total_sec']} s."
+        )
     return {
-        "status": "in_progress" if running else state,
+        "status": "in_progress" if running else wire_state,
         "requested_model_size": model_size,
         "requested_model_cached": False,
-        "transcription_status": state,
+        "transcription_status": wire_state,
         "retry_after_seconds": retry_after,
-        "transcription_message": (
-            message if state == "failed"
-            else f"{message} Retry in about {retry_after} seconds."
-        ),
+        "transcription_message": f"{message}{retry_note}",
         **progress,
     }
 
