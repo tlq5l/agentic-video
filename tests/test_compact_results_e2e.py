@@ -34,6 +34,11 @@ def _write_counter_clip(path, seconds=3.0):
     return str(path)
 
 
+def _without_candidate_lists(cues):
+    """The cue reports minus the per-cue onset fields, which differ between the two modes."""
+    return [{key: value for key, value in cue.items() if not key.startswith("candidate_onsets")} for cue in cues]
+
+
 def test_sync_check_candidate_onsets_are_opt_in_end_to_end(tmp_path, monkeypatch):
     monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
     clip = _write_counter_clip(tmp_path / "clicks.mkv")
@@ -51,3 +56,6 @@ def test_sync_check_candidate_onsets_are_opt_in_end_to_end(tmp_path, monkeypatch
     for cue in verbose["data"]["cues"]:
         assert isinstance(cue["candidate_onsets"], list)
         assert "candidate_onsets_count" not in cue
+    for default_cue, verbose_cue in zip(default["data"]["cues"], verbose["data"]["cues"]):
+        assert default_cue["candidate_onsets_count"] == len(verbose_cue["candidate_onsets"])
+    assert _without_candidate_lists(default["data"]["cues"]) == _without_candidate_lists(verbose["data"]["cues"])

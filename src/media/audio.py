@@ -3069,7 +3069,7 @@ def sync_check(
     bpm: Optional[float] = None,
     beats_per_bar: float = 4.0,
     coincidence_ms: float = 5.0,
-    verbose: bool = True,
+    verbose: bool = False,
 ) -> Dict[str, Any]:
     """Compare cuts and cues, learning cue-group signatures to separate overlaps.
 
@@ -3077,8 +3077,8 @@ def sync_check(
     a cue find its own early/late sound beyond the in-tolerance match window.
     When `bpm` is known, candidate spectra are compared with uncued bars at the
     same beat phase so steady backing percussion does not mask a missing layer.
-    With `verbose` false each cue reports `candidate_onsets_count` instead of
-    its `candidate_onsets` list.
+    With `verbose` false each cue reports `candidate_onsets_count`; with `verbose`
+    true it reports the `candidate_onsets` list instead of the count.
     """
     tolerance = _finite_number(tolerance_ms, "tolerance_ms")
     if tolerance < 0.0 or tolerance > 5000.0:
