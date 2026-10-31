@@ -15,6 +15,7 @@ from src.retrieval.engine import AgenticVideoEngine
 from src.core.config import Config
 from src.core.errors import AgenticVideoError, MediaNotFoundError, as_dependency_error
 from src.media import fetch, visual_timing
+from src.media.audio import DEFAULT_ONSET_MIN_GAP_SEC
 from src.transcript import asr
 
 # Readable fallback kept for source compatibility; runtime discovery below is
@@ -1146,6 +1147,7 @@ def _dispatch(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
             min_strength=float(args.get("min_strength", 0.12)),
             band_hz=args.get("band_hz"),
             compare_to=args.get("compare_to"),
+            min_gap_sec=args.get("min_gap_sec", DEFAULT_ONSET_MIN_GAP_SEC),
         )
         data = dict(data)
         _bound_list(data, "onsets", MAX_ONSETS, "Raise min_strength (up to 1) to keep only stronger onsets, or pass start_sec/end_sec to list a later range.")
@@ -1183,6 +1185,7 @@ def _dispatch(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
             cues=args.get("cues"),
             tolerance_ms=float(args.get("tolerance_ms", 80.0)),
             bpm=None if bpm_raw is None else float(bpm_raw),
+            verbose=args.get("verbose", False),
         )
         data = dict(data)
         for key in ("cuts", "unmatched_strong_onsets"):

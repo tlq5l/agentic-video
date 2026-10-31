@@ -1009,6 +1009,8 @@ export interface AudioOnsetsInput {
   end_sec?: number | string;
   /** Minimum normalized spectral-flux strength, from 0 to 1 (default 0.12); raise it to keep only stronger onsets. */
   min_strength?: number;
+  /** Onsets closer than this many seconds to a group's first onset are merged into one; 0 keeps every raw onset (default 0.035). */
+  min_gap_sec?: number | string;
   /** Restrict onset detection to a named band or [low_hz, high_hz]. */
   band_hz?: AudioBandSelection;
   /** Return only source onsets that are new or materially louder in-band than this source (a path or video URL). */
@@ -1037,6 +1039,8 @@ export interface AudioOnsetsOutput {
   compare_min_delta_db: number | null;
   onsets: AudioOnset[];
   total: number;
+  /** How many detected onsets min_gap_sec merged into a neighbouring onset. */
+  merged_count: number;
   /** Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument. */
   note?: string;
   /** How many `onsets` entries were left out of the list; `note` says how to see them. */
@@ -1250,6 +1254,8 @@ export interface SyncCheckInput {
   tolerance_ms?: number;
   /** Tempo of the music, 20-300: compares cues with uncued moments at the same beat phase. */
   bpm?: number;
+  /** false (default): each cue gives candidate_onsets_count; true gives its candidate_onsets list instead. */
+  verbose?: boolean;
 }
 
 export interface SyncCutMatch {
@@ -1309,7 +1315,10 @@ export interface SyncCueResult {
   search_window_ms: number;
   match_method: string;
   ambiguous_reason: string | null;
-  candidate_onsets: { time_sec: number; offset_ms: number; strength: number }[];
+  /** Only with verbose true. */
+  candidate_onsets?: { time_sec: number; offset_ms: number; strength: number }[];
+  /** Number of onsets near this cue; reported unless verbose is true. */
+  candidate_onsets_count?: number;
   /** Only for a cue with a gradual build (a swell, not a hit). */
   soft_attack_build?: SyncSoftAttackBuild;
   band_hz?: AudioBandSelection;

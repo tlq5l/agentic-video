@@ -28,6 +28,7 @@ from src.media.scene import detect_scenes, detect_soft_transitions, scan_scene_c
 from src.transcript.asr import transcribe_video, request_transcription
 from src.transcript.search import search_transcript
 from src.media.audio import (
+    DEFAULT_ONSET_MIN_GAP_SEC,
     audio_onsets as measure_audio_onsets,
     loudness_timeline as measure_loudness_timeline,
     spectrogram_window as render_spectrogram_window,
@@ -1206,6 +1207,7 @@ class AgenticVideoEngine:
         min_strength: float = 0.12,
         band_hz: Any = None,
         compare_to: Optional[str] = None,
+        min_gap_sec: float = DEFAULT_ONSET_MIN_GAP_SEC,
     ) -> Dict[str, Any]:
         """Detect non-speech attacks in a selected band and compare optional media."""
         return measure_audio_onsets(
@@ -1216,6 +1218,7 @@ class AgenticVideoEngine:
             cache=self._cache,
             band_hz=band_hz,
             compare_to=compare_to,
+            min_gap_sec=min_gap_sec,
         )
 
     def loudness_timeline(
@@ -1257,6 +1260,7 @@ class AgenticVideoEngine:
         cues: Optional[List[Dict[str, Any]]] = None,
         tolerance_ms: float = 80.0,
         bpm: Optional[float] = None,
+        verbose: bool = False,
     ) -> Dict[str, Any]:
         """Compare detected visual cuts and audio onsets to intended cues."""
         return compare_audio_video_sync(
@@ -1268,6 +1272,7 @@ class AgenticVideoEngine:
             # The search window must be at least the tolerance; 500 ms is the default.
             search_window_ms=max(500.0, float(tolerance_ms)),
             bpm=bpm,
+            verbose=verbose,
         )
 
     def watch_for(
