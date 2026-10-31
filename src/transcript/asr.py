@@ -18,6 +18,7 @@ from src.core.types import TranscriptSegment, TranscriptResult, VideoMetadata
 from src.core.cache import MediaCache
 from src.media.probe import probe_video
 from src.transcript.repeats import flag_repeated_segments
+from src.transcript import shadow_cf_asr
 
 def parse_srt_or_vtt(subtitle_path: Path) -> List[TranscriptSegment]:
     """Parse SRT or WebVTT file into TranscriptSegments."""
@@ -246,6 +247,8 @@ class _BackgroundTranscriptionSlot:
 
         def run() -> None:
             _ASR_WORKER_LOCK.lock_file = process_lock
+            _ASR_WORKER_LOCK.fresh_run = None
+            succeeded = False
             try:
                 result = transcribe_video(
                     key[0], model_size=key[1], allow_long_run=True
@@ -255,6 +258,7 @@ class _BackgroundTranscriptionSlot:
                         ASR_WORKER_FAILURE_NOTICE,
                         {"source_path": key[0], "model_size": key[1]},
                     )
+                succeeded = True
             except Exception as exc:
                 with self._lock:
                     failure = as_dependency_error(exc)
@@ -262,11 +266,16 @@ class _BackgroundTranscriptionSlot:
                     while len(self._failures) > 16:
                         del self._failures[next(iter(self._failures))]
             finally:
+                fresh_run = _ASR_WORKER_LOCK.fresh_run if succeeded else None
                 _ASR_WORKER_LOCK.lock_file = None
+                _ASR_WORKER_LOCK.fresh_run = None
                 _release_background_process_lock(process_lock)
                 with self._lock:
                     if self._active == key:
                         self._active = None
+            if fresh_run is not None:
+                # The cache is saved and the slot is free; the shadow trial (a detached child) never raises here.
+                shadow_cf_asr.start_after_fresh_run(**fresh_run)
 
         worker = threading.Thread(
             target=run,
@@ -1240,6 +1249,7 @@ def transcribe_video(
     reserved for the MCP background worker to disable its short wall timeout.
     All isolated workers are RSS-supervised and decode bounded audio chunks.
     """
+    began = time.monotonic()
     p = Path(source_path).resolve()
     if not p.exists():
         raise MediaNotFoundError(f"Source media not found: {source_path}")
@@ -1522,7 +1532,21 @@ finally:
                         "ASR completed but its transcript could not be cached.",
                         {"source_path": str(p), "model_size": model_size},
                     )
-                return _with_repeat_flags(res)
+                # A fresh run (not a cache hit). The shadow trial never raises and starts a detached child.
+                # A background run hands it to the thread in request_transcription, which starts it after
+                # releasing the slot; a synchronous caller has no slot, so its preparation runs on a daemon
+                # thread and the transcript below is returned without waiting for it. The repeat flags are set
+                # first (they change segments in place), so the child reads the same segments the caller returns.
+                flagged = _with_repeat_flags(res)
+                fresh_run = {
+                    "source_path": str(p), "model_size": model_size, "result": flagged,
+                    "fingerprint": meta.fingerprint, "local_wall_sec": time.monotonic() - began,
+                }
+                if allow_long_run:
+                    _ASR_WORKER_LOCK.fresh_run = fresh_run
+                else:
+                    shadow_cf_asr.start_in_background(**fresh_run)
+                return flagged
             # Worker ran but reported a clean, actionable failure (e.g. invalid model
             # name): surface it instead of masking it as "no speech".
             raise ASRModelError(

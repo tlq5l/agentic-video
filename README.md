@@ -112,6 +112,8 @@ This installs PyTorch, Transformers and (on macOS) the Apple Vision bindings, an
 
 Without them the two tools fail with a message naming what is missing, and nothing is sent.
 
+Trial switch (maintainer only): `AGENTIC_VIDEO_SHADOW_CF_ASR` set to this machine's hostname **SENDS AUDIO TO CLOUDFLARE** after every fresh local transcription, to compare it with the local result in a log. The user's transcript never changes. It is off unless that variable names the machine, and it stops by itself after 14 days or 200 uses. Details: [docs/features/shadow-cf-asr.md](docs/features/shadow-cf-asr.md).
+
 ### Optional: hybrid transcript search (macOS, EmbeddingGemma 2)
 
 `search_transcript` answers with exact keyword hits first, then passages that match by meaning. The meaning part needs the EmbeddingGemma 2 Core ML model folder and an interpreter with `coremltools`, `tokenizers` and `numpy`. Set `AGENTIC_VIDEO_EG2_DIR` to the model folder and `AGENTIC_VIDEO_EG2_PYTHON` to that interpreter, then restart the server. Without them the tool answers with keyword hits only and a `note` says why. Details: `docs/features/transcribe.md`.
