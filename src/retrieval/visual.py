@@ -288,28 +288,44 @@ def _build_locked(engine, stamp, duration, report):
         conn.close()
 
 
-MIN_WINDOW_SEC = 15.0
+MAX_WINDOW_SEC = 8.0
+WIDEN_MARGIN = 0.02  # cosine points below the top score that a neighbouring frame may have and still join the rank-1 window
 
 
 def _overlaps(a, b):
     return a["start_sec"] < b["end_sec"] and b["start_sec"] < a["end_sec"]
 
 
-def widen_top_interval(intervals, lower, upper, minimum=MIN_WINDOW_SEC):
-    """Give the interval holding rank 1 a window of at least `minimum` seconds, then merge overlapping intervals into it.
+def widen_top_interval(intervals, lower, upper, frames, margin, maximum=MAX_WINDOW_SEC):
+    """Grow the interval holding rank 1 one indexed frame at a time, up to `maximum` seconds, adding only
+    neighbouring frames whose score is within `margin` of the top score; then merge overlapping intervals into it.
 
-    A shorter interval is widened evenly around its centre and slid back inside [lower, upper] when it passes an edge.
-    If the video (or the searched range) is shorter than `minimum`, the window is all of [lower, upper].
-    An interval already that long is unchanged. Other intervals that overlap the widened one are merged into it
-    (union, ranks and scores combined), repeatedly, so the returned intervals never overlap.
+    `frames` is [(timestamp_sec, end_sec, score)] for every indexed frame in [lower, upper], in time order.
+    It stops at the first neighbour that falls below the margin on both sides, so a window can stay shorter than
+    `maximum`. Growth never goes past `maximum`, but a seed already longer than `maximum` (a held frame, or hits
+    merged together) is kept whole. Other intervals that overlap the grown one are merged into it (union, ranks and
+    scores combined), repeatedly, so the returned intervals never overlap; that merge can make the result longer
+    than `maximum` and pull in lower-scoring hits.
     """
     top = next(item for item in intervals if 1 in item["ranks"])
     others = [item for item in intervals if item is not top]
     start, end = top["start_sec"], top["end_sec"]
-    if end - start < minimum:
-        length = min(minimum, upper - lower)
-        start = min(max((start + end) / 2 - length / 2, lower), upper - length)
-        end = start + length
+    floor = top["score"] - margin
+    from bisect import bisect_left
+    left = bisect_left(frames, (start,))
+    right = bisect_left(frames, (end,))
+    while end - start < maximum:
+        grew = False
+        if left > 0 and frames[left - 1][2] >= floor:
+            left -= 1
+            start = max(frames[left][0], end - maximum)
+            grew = True
+        if end - start < maximum and right < len(frames) and frames[right][2] >= floor:
+            end = min(upper, frames[right][1], start + maximum)
+            right += 1
+            grew = True
+        if not grew:
+            break
     top = {**top, "start_sec": start, "end_sec": end}
     while others:
         for other in others:
@@ -387,6 +403,7 @@ def search_index(engine, query, top_k=5, start_sec=0.0, end_sec=None):
         covered_end = min(end, progress["indexed_until_sec"])
         vector = get_encoder().text(query)
         best = []
+        window = []
         cursor = conn.execute("SELECT timestamp,end_sec,width,height,embedding FROM frames WHERE timestamp>=? AND timestamp<? ORDER BY timestamp", (start_sec, covered_end))
         while True:
             rows = cursor.fetchmany(256)
@@ -396,6 +413,7 @@ def search_index(engine, query, top_k=5, start_sec=0.0, end_sec=None):
             scores = matrix @ vector
             for row, score in zip(rows, scores):
                 item = (float(score), -row[0], row[:4])
+                window.append((row[0], row[1], item[0]))
                 if len(best) < top_k:
                     heapq.heappush(best, item)
                 elif item[:2] > best[0][:2]:
@@ -419,7 +437,7 @@ def search_index(engine, query, top_k=5, start_sec=0.0, end_sec=None):
                                   "score": hit["score"], "ranks": [hit["rank"]]})
         sheet = None
         if ranked:
-            intervals = widen_top_interval(intervals, start_sec, covered_end)
+            intervals = widen_top_interval(intervals, start_sec, covered_end, window, WIDEN_MARGIN)
             import hashlib
             tag = hashlib.sha256(repr((query, top_k, start_sec, end, progress["indexed_until_sec"])).encode()).hexdigest()[:20]
             path = engine._cache.get_sheets_dir(engine.metadata.fingerprint) / f"visual_{tag}.jpg"
@@ -433,7 +451,7 @@ def search_index(engine, query, top_k=5, start_sec=0.0, end_sec=None):
         _check_source(engine, stamp)
         return {"status": state, "hits": hits, "intervals": intervals, "contact_sheet": sheet, **pending,
                 "index_complete": progress["indexed_until_sec"] >= duration, **progress,
-                "note": "Cosine similarity is not confidence. Sample-based intervals are approximate; the interval holding rank 1 is at least 15 s long (or the whole searched range if shorter). Verify badges and inspect_window. Empty results do not establish absence."}
+                "note": "Cosine similarity is not confidence. Sample-based intervals are approximate; the interval holding rank 1 grows from its best frames only over frames that score close to the best, up to 8 s, so it can be shorter; a span already longer than 8 s, such as a held frame or hits merged together, is kept whole, so it can be longer and can include lower-scoring hits. Verify badges and inspect_window. Empty results do not establish absence."}
     finally:
         conn.close()
 

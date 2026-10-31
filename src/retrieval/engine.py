@@ -28,6 +28,7 @@ from src.media.scene import detect_scenes, detect_soft_transitions, scan_scene_c
 from src.transcript.asr import transcribe_video, request_transcription
 from src.transcript.search import search_transcript
 from src.media.audio import (
+    DEFAULT_ONSET_MIN_GAP_SEC,
     audio_onsets as measure_audio_onsets,
     loudness_timeline as measure_loudness_timeline,
     spectrogram_window as render_spectrogram_window,
@@ -35,6 +36,7 @@ from src.media.audio import (
 )
 from src.media.watch import watch_for as watch_frames
 from src.media.sound_labels import label_sounds as name_sounds
+from src.retrieval import ocr
 
 # Most windows one inspect_windows call extracts side by side.
 WINDOW_WORKERS = 4
@@ -1065,9 +1067,12 @@ class AgenticVideoEngine:
         start_sec: float,
         end_sec: float,
         fps: float = Config.DEFAULT_DENSE_FPS,
-        create_sheet: bool = True
+        create_sheet: bool = True,
+        read_text: bool = False,
     ) -> InspectionWindowResult:
         """Densify inspection over a target time window [start_sec, end_sec]."""
+        if read_text:
+            ocr.ensure_available(ocr.READ_TEXT_UNAVAILABLE)
         frames = extract_window_frames(
             self.source_path,
             start_sec=start_sec,
@@ -1076,6 +1081,9 @@ class AgenticVideoEngine:
             burn_timestamps=True,
             cache=self._cache,
         )
+        if read_text:
+            for frame in frames:
+                frame.text = ocr.frame_text(frame.file_path)
         sheet_path = None
         if create_sheet and frames:
             # Reuse the dense frames: seeking each one again with its own
@@ -1107,9 +1115,18 @@ class AgenticVideoEngine:
         time_sec: float,
         crop: Optional[Dict[str, Any]] = None,
         scale: Optional[float] = None,
+        read_text: bool = False,
     ) -> Dict[str, Any]:
-        """One frame at native resolution, optionally cropped and upscaled, as a PNG."""
-        return extract_frame_at(self.source_path, time_sec, crop=crop, scale=scale, cache=self._cache)
+        """One frame at native resolution, optionally cropped and upscaled, as a PNG.
+
+        With read_text, OCR reads the saved PNG itself, so the text matches the returned pixels.
+        """
+        if read_text:
+            ocr.ensure_available(ocr.READ_TEXT_UNAVAILABLE)
+        data = extract_frame_at(self.source_path, time_sec, crop=crop, scale=scale, cache=self._cache)
+        if read_text:
+            data.update(ocr.frame_text(data["file_path"]))
+        return data
 
     def detect_cuts(
         self,
@@ -1190,6 +1207,7 @@ class AgenticVideoEngine:
         min_strength: float = 0.12,
         band_hz: Any = None,
         compare_to: Optional[str] = None,
+        min_gap_sec: float = DEFAULT_ONSET_MIN_GAP_SEC,
     ) -> Dict[str, Any]:
         """Detect non-speech attacks in a selected band and compare optional media."""
         return measure_audio_onsets(
@@ -1200,6 +1218,7 @@ class AgenticVideoEngine:
             cache=self._cache,
             band_hz=band_hz,
             compare_to=compare_to,
+            min_gap_sec=min_gap_sec,
         )
 
     def loudness_timeline(
@@ -1241,6 +1260,7 @@ class AgenticVideoEngine:
         cues: Optional[List[Dict[str, Any]]] = None,
         tolerance_ms: float = 80.0,
         bpm: Optional[float] = None,
+        verbose: bool = False,
     ) -> Dict[str, Any]:
         """Compare detected visual cuts and audio onsets to intended cues."""
         return compare_audio_video_sync(
@@ -1252,6 +1272,7 @@ class AgenticVideoEngine:
             # The search window must be at least the tolerance; 500 ms is the default.
             search_window_ms=max(500.0, float(tolerance_ms)),
             bpm=bpm,
+            verbose=verbose,
         )
 
     def watch_for(

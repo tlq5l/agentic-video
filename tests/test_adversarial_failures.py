@@ -3,6 +3,8 @@
 import pytest
 from evals.adversarial_runner import AdversarialFailureHarness, SANDBOX_DIR
 
+pytestmark = pytest.mark.slow  # the module-scoped harness builds its fixtures in about 24 s
+
 @pytest.fixture(scope="module")
 def harness():
     h = AdversarialFailureHarness(SANDBOX_DIR)

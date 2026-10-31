@@ -1,8 +1,10 @@
 # agentic-video
 
+<!-- mcp-name: io.github.tlq5l/agentic-video -->
+
 agentic-video lets an AI agent that reads text and images, but not video, work with video files on your own machine. It is a Python library plus a stdio MCP server. The agent asks small, targeted questions ("show me 12 frames from 0:40 to 1:10", "when is 'launch' spoken?") and gets back measurements, transcripts and contact sheets: grids of frames, each with its timestamp burned into the pixels. Everything runs locally with FFmpeg, Whisper and optional local models, except two optional cloud tools (`watch_for`, `label_sounds`), which send frames or audio to Cloudflare Workers AI only when you set credentials and call them.
 
-**Install:** `brew install ffmpeg`, then add it to Claude Code with `claude mcp add -s user agentic-video -- uvx agentic-video` (or `pipx install agentic-video`). Other clients: [Run the MCP server](#run-the-mcp-server).
+**Install:** `brew install ffmpeg` on macOS, or `sudo apt-get install -y ffmpeg` on Debian or Ubuntu (see [Install](#install-macos-or-linux) for the uv line). Then add it to Claude Code with `claude mcp add -s user agentic-video -- uvx agentic-video` (or `pipx install agentic-video`). Other clients: [Run the MCP server](#run-the-mcp-server).
 
 **Claude Desktop (one click):** download `agentic-video-<version>.mcpb` from the latest [GitHub release](https://github.com/tlq5l/agentic-video/releases/latest) and double-click it. It still needs `brew install ffmpeg`. The first start takes about a minute while Claude Desktop installs the Python packages. macOS only. The bundle does not include local visual search or on-screen text counting; for those, use the git install in the "Optional: visual search (CLIP) and on-screen text" section below. Details: [docs/features/desktop-bundle.md](docs/features/desktop-bundle.md).
 
@@ -19,6 +21,8 @@ uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r requi
 claude mcp add -s user agentic-video -e PYTHONPATH="$PWD" -- "$PWD/.venv/bin/python" -m src.executor.mcp_server
 ```
 
+On Debian or Ubuntu, run `sudo apt-get install -y ffmpeg git` and `curl -LsSf https://astral.sh/uv/install.sh | sh` in place of the first line, then open a new shell so `uv` is on your PATH.
+
 Then ask: "Use agentic-video to review `/path/to/video.mp4`." Other clients and details: [Run the MCP server](#run-the-mcp-server).
 
 **Status:** experimental. The author uses it every day; support is best-effort. Issues and pull requests are welcome, but expect slow replies.
@@ -27,22 +31,38 @@ Then ask: "Use agentic-video to review `/path/to/video.mp4`." Other clients and 
 
 The MCP server exposes 25 tools (full schemas in `src/adapters/mcp_schemas.json`):
 
-- **Look:** `review_video` (first look in one call: metadata, contact sheet, cuts, near-black stretches and a loudness summary), `probe_video` (duration, fps, size, codecs, audio), `contact_sheet`, `overview_chunks` (consecutive sheets across a long video), `inspect_window` / `inspect_windows` (dense frames for short ranges), `frame_at` (one exact frame at full size, optionally cropped and enlarged to read small text), `inspect_moments` (frames around given instants), `refine_temporal_beam` (zoom into candidate windows).
-- **Listen:** `transcribe` (timestamped speech, cached), `search_transcript` (find when words are spoken: exact words first, then passages that match by meaning when the optional on-device EmbeddingGemma 2 model is set up; keyword-only without it).
-- **Find:** `detect_cuts` (hard cuts and animated scene changes), `check_frame_cadence` (stretches where frames repeat so the picture updates less often than the frame rate, such as 30 fps padded to 60), `build_visual_index` + `search_visual` (local CLIP search for things that are visible, optional; the interval holding the top hit is at least 15 seconds long, or the whole searched range when shorter). `watch_for` (cloud: wakes when yes/no questions about the picture start to hold, from sampled frames).
+- **Look:** `review_video` (first look in one call: metadata, contact sheet, cuts, near-black stretches and a loudness summary), `probe_video` (duration, fps, size, codecs, audio), `contact_sheet`, `overview_chunks` (consecutive sheets across a long video), `inspect_window` / `inspect_windows` (dense frames for short ranges; `read_text` on `inspect_window` adds each frame's on-screen text), `frame_at` (one exact frame at full size, optionally cropped and enlarged to read small text; `read_text: true` also returns the on-screen text it reads, Apple Vision on macOS), `inspect_moments` (frames around given instants), `refine_temporal_beam` (zoom into candidate windows).
+- **Listen:** `transcribe` (timestamped speech, cached; a video with no cached transcript starts a background job, so the first call returns `status: in_progress` and `retry_after_seconds`: call the same tool again after that many seconds), `search_transcript` (find when words are spoken: exact words first, then passages that match by meaning when the optional on-device EmbeddingGemma 2 model is set up; keyword-only without it).
+- **Find:** `detect_cuts` (hard cuts and animated scene changes), `check_frame_cadence` (stretches where frames repeat so the picture updates less often than the frame rate, such as 30 fps padded to 60), `build_visual_index` + `search_visual` (local CLIP search for things that are visible, optional; the interval holding the top hit grows from its best frames only over neighbouring frames that score close to the best, up to 8 seconds, so it can be shorter; a span already longer than 8 seconds, such as a held frame or hits merged together, is kept whole, so it can be longer and can include lower-scoring hits). `watch_for` (cloud: wakes when yes/no questions about the picture start to hold, from sampled frames).
 - **Count and track:** `count_occurrences` (separate appearances of an object or on-screen text), `count_repetitions` (cycles of a repeated action), `track_region_changes` / `track_region_events` (changes inside one fixed rectangle).
-- **Audio and sync:** `audio_onsets`, `loudness_timeline`, `spectrogram_window`, `sync_check` (cuts and sound cues against measured audio). `label_sounds` (cloud: names the sounds in a stretch of audio).
+- **Audio and sync:** `audio_onsets` (merges hits closer than `min_gap_sec`, default 0.035 s), `loudness_timeline`, `spectrogram_window`, `sync_check` (cuts and sound cues against measured audio; each cue gives `candidate_onsets_count`; `verbose: true` gives each cue its full `candidate_onsets` list instead of the count). `label_sounds` (cloud: names the sounds in a stretch of audio).
+
+Which tools need a Mac, Apple Vision, torch with the CLIP model or Cloudflare credentials, and where each one ran: [docs/capabilities.md](docs/capabilities.md). Agents may pass `inspect_moments` moments as bare numbers or `{"time": 12.5}`, and `region` as `[x, y, width, height]`; both are read as the documented form. See [docs/features/argument-shapes.md](docs/features/argument-shapes.md).
 
 There is also a command-line checker for rendered videos: `python -m src.loop check <video>` measures sync, loudness, onsets, cuts and some picture faults, then writes `report.md` plus evidence images. `python -m src.loop cadence <video>` prints the `check_frame_cadence` result as JSON.
 
 `AGENTS.md` is a guide for agents on which tool to use when. `FEATURES.md` maps each feature to its code and tests.
 
-## Install (macOS)
+## Install (macOS or Linux)
 
-You need Homebrew, FFmpeg, Git and [uv](https://docs.astral.sh/uv/). Tested with Python 3.12 on Apple silicon.
+You need FFmpeg, Git and [uv](https://docs.astral.sh/uv/). Tested with Python 3.12 on Apple silicon (macOS) and on Debian 12 (x86_64).
+
+macOS (Homebrew):
 
 ```sh
 brew install ffmpeg uv
+git clone https://github.com/tlq5l/agentic-video.git
+cd agentic-video
+uv venv --python 3.12 .venv
+uv pip install --python .venv/bin/python -r requirements.txt pytest jsonschema
+.venv/bin/python -m pytest -q   # optional: about 3 minutes
+```
+
+Debian or Ubuntu (apt and the uv installer; open a new shell after the uv line so `uv` is on your PATH):
+
+```sh
+sudo apt-get install -y ffmpeg git
+curl -LsSf https://astral.sh/uv/install.sh | sh
 git clone https://github.com/tlq5l/agentic-video.git
 cd agentic-video
 uv venv --python 3.12 .venv
@@ -59,7 +79,7 @@ What is macOS-only:
 - On-screen text matching in `count_occurrences` (`text=`) uses Apple Vision through pyobjc.
 - The bench-v1 harness uses `sandbox-exec`; some tests and generators use `say`. Tests that need a missing tool skip themselves.
 
-The core tools should also work on Linux with FFmpeg installed, but the author has not tested that.
+The core tools run on Linux. A fresh install of 0.3.1 on Debian 12 (x86_64, ffmpeg 5.1) passed the probe, frame and speech-to-text checks; other distributions and CPUs are untested.
 
 ### Optional: faster, more accurate speech (whisper.cpp turbo)
 
@@ -128,7 +148,7 @@ Run this from the cloned folder (it uses the current folder's path). `-s user` m
 claude mcp add -s user agentic-video -e PYTHONPATH="$PWD" -- "$PWD/.venv/bin/python" -m src.executor.mcp_server
 ```
 
-By default results stay small enough for Claude Code: images are saved as JPEG files and the result gives their `file_path` (the agent opens the file), and a long `transcribe` result lists the first part of the transcript plus a `transcript_path` file for the rest. A client that renders images from the result itself can add `-e AGENTIC_VIDEO_INLINE_IMAGES=1`; results then carry base64 images and can pass 1 MB. Changed: earlier versions included base64 images by default; if you relied on that, set `AGENTIC_VIDEO_INLINE_IMAGES=1` to restore it.
+By default results stay small enough for Claude Code: images are saved as files and the result gives their `file_path` (the agent opens the file). `frame_at` and `spectrogram_window` write PNG; contact sheets and frame grids (`contact_sheet`, `review_video`, `overview_chunks`, `inspect_window`, `inspect_windows`, `inspect_moments`) write JPEG; and a long `transcribe` result lists the first part of the transcript plus a `transcript_path` file for the rest. A client that renders images from the result itself can add `-e AGENTIC_VIDEO_INLINE_IMAGES=1`; results then carry base64 images and can pass 1 MB. Changed: earlier versions included base64 images by default; if you relied on that, set `AGENTIC_VIDEO_INLINE_IMAGES=1` to restore it.
 
 ### Tell your agent to use it (paste into your AGENTS.md or CLAUDE.md)
 
@@ -177,7 +197,7 @@ It does not beat Gemini's video understanding in general.
 
 ## Limits
 
-- **Images come back as files.** Image tools return `file_path`, not an MCP image content block; the base64 copy in `structuredContent` is off by default (set `AGENTIC_VIDEO_INLINE_IMAGES=1` to include it). Many clients show the agent only the JSON text, so the agent has to open the JPEG at `file_path` itself (for example with its file-reading tool).
+- **Images come back as files.** Image tools return `file_path`, not an MCP image content block; the base64 copy in `structuredContent` is off by default (set `AGENTIC_VIDEO_INLINE_IMAGES=1` to include it). Many clients show the agent only the JSON text, so the agent has to open the image at `file_path` itself (for example with its file-reading tool).
 - **Sampling can miss things.** Contact sheets and visual search look at sampled frames; something brief between samples can be missed, and a missing hit does not prove absence. Visual search runs CLIP on the CPU and is slow on long videos.
 - **Transcripts can invent lines.** Whisper (especially turbo) can invent lines over music or silence. A line repeated 3 or more times in a row is flagged `suspect`; a single invented line is not.
 - **Cuts can be missed.** A hard cut between two similar pictures that scores under the 0.25 threshold can be missed.
