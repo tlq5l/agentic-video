@@ -379,10 +379,9 @@ def _process_state(pid: int) -> Optional[str]:
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    state = completed.stdout.strip()[:1]
-    if completed.returncode != 0 or not state:
+    if completed.returncode != 0:
         return None
-    return state
+    return completed.stdout.strip()[:1] or None
 
 
 def _owner_server_exited(owner: dict) -> Optional[bool]:
@@ -1122,17 +1121,15 @@ def request_transcription(source_path: str, model_size: str) -> Dict[str, Any]:
         ),
     }
     message = message_by_state[state]
-    if state == "failed":
-        retry_note = ""
-    elif state == "orphaned":
-        retry_note = (
-            f" Call this tool again after about {retry_after} seconds; a new attempt starts "
-            "once that worker has stopped."
-        )
-    elif state == "unverified":
-        retry_note = f" Call this tool again after about {retry_after} seconds."
-    else:
-        retry_note = f" Call this tool again after about {retry_after} seconds to get the transcript."
+    retry_note = ""
+    if state != "failed":
+        retry_note = f" Call this tool again after about {retry_after} seconds"
+        if state == "orphaned":
+            retry_note += "; a new attempt starts once that worker has stopped."
+        elif state == "unverified":
+            retry_note += "."
+        else:
+            retry_note += " to get the transcript."
     if result is not None:
         data = result.to_dict()
         data.update({

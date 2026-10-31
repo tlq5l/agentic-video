@@ -505,9 +505,9 @@ def test_transcribe_after_server_exit_is_not_reported_running(tmp_path):
             server.wait(timeout=10)
         server.stdout.close()
         server.stderr.close()
-        if marker.exists() and marker.read_text():
+        if marker.exists() and (worker_pid := marker.read_text()):
             try:
-                os.killpg(int(marker.read_text()), signal.SIGKILL)
+                os.killpg(int(worker_pid), signal.SIGKILL)
             except ProcessLookupError:
                 pass
 
