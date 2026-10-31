@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 from typing import Dict, Any, Iterator, List, Optional, Tuple
 
+from src.retrieval import ocr
 from src.retrieval.engine import AgenticVideoEngine
 from src.core.config import Config
 from src.core.errors import AgenticVideoError, MediaNotFoundError, as_dependency_error
@@ -548,7 +549,19 @@ def _expected(schema: Dict[str, Any], key: str = "") -> str:
         bounds.append(f"at most {schema['maximum']:g}")
     if "minLength" in schema:
         bounds.append(f"at least {schema['minLength']} character(s)")
+    fixed_length = schema.get("minItems") is not None and schema.get("minItems") == schema.get("maxItems")
+    if "minItems" in schema:
+        bounds.append(f"{'exactly' if fixed_length else 'at least'} {schema['minItems']} item(s)")
+    if "maxItems" in schema and not fixed_length:
+        bounds.append(f"at most {schema['maxItems']} item(s)")
     return f"{words}, {' and '.join(bounds)}" if bounds else words
+
+
+def _fields_expected(schema: Dict[str, Any]) -> str:
+    """The keys an object accepts, and which of them it needs."""
+    text = f"an object with fields {', '.join(schema.get('properties', {}))}"
+    required = schema.get("required", [])
+    return f"{text}; {', '.join(required)} required" if required else text
 
 
 def _describe_alternative(schema: Dict[str, Any], key: str) -> str:
@@ -586,6 +599,11 @@ def _argument_problem(schema: Dict[str, Any], value: Any, key: str, check_range:
         return "", f"must be {_KIND_WORDS.get(kinds[0], 'a value')} (got {_show(value)})", _expected(schema, key)
     if "enum" in schema and value not in schema["enum"]:
         return "", f"is not one of the allowed values (got {_show(value)})", _expected(schema, key)
+    if isinstance(value, list):
+        if len(value) < schema.get("minItems", 0):
+            return "", f"has {len(value)} item(s) (needs at least {schema['minItems']})", _expected(schema, key)
+        if check_range and len(value) > schema.get("maxItems", len(value)):
+            return "", f"has {len(value)} item(s) (allows at most {schema['maxItems']})", _expected(schema, key)
     if check_range and _is_kind(value, "number"):
         if "minimum" in schema and value < schema["minimum"]:
             return "", f"is below the minimum {schema['minimum']:g} (got {_show(value)})", _expected(schema, key)
@@ -597,6 +615,10 @@ def _argument_problem(schema: Dict[str, Any], value: Any, key: str, check_range:
         missing = [item for item in schema.get("required", []) if item not in value]
         if missing:
             return "", f"is missing required key(s): {', '.join(missing)}", _expected(schema, key)
+        if schema.get("additionalProperties") is False:
+            unknown = [field for field in value if field not in schema.get("properties", {})]
+            if unknown:
+                return f".{unknown[0]}", "is not an accepted field", _fields_expected(schema)
         for field, sub in schema.get("properties", {}).items():
             if field in value:
                 problem = _argument_problem(sub, value[field], field, check_range)
@@ -635,11 +657,97 @@ def _region_in_tool_keys(name: str, region: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+# One example value per argument whose shape is easy to guess wrong. Arguments with a default or an enum use those.
+_CALL_EXAMPLES = {
+    "moments": [{"timestamp_sec": 12.5}],
+    "windows": [{"start_sec": 10, "end_sec": 14}],
+    "cues": [{"time_sec": 12.5, "label": "hit"}],
+    "marks": [{"time_sec": 12.5, "label": "kick"}],
+    "ignore_ranges": [{"start_sec": 1, "end_sec": 2, "reason": "title card"}],
+    "source": "/path/to/video.mp4",
+    "query": "launch date",
+    "description": "yellow outlined circle",
+    "text": "RELEASE",
+    "time_sec": 12.5,
+}
+_MOMENT_TIME_KEYS = ("timestamp_sec", "time_sec", "time", "t")
+
+
+def _example_value(name: str, key: str, schema: Dict[str, Any]) -> Any:
+    """A value the schema accepts for `key`: its default, its first enum value, or a known example."""
+    if key == "region":
+        return {"x": 0.25, "y": 0.1, "w": 0.5, "h": 0.6} if name == "count_repetitions" \
+            else {"x": 0.25, "y": 0.1, "width": 0.5, "height": 0.6}
+    if "default" in schema:
+        return schema["default"]
+    if "enum" in schema:
+        return schema["enum"][0]
+    if key in _CALL_EXAMPLES:
+        return _CALL_EXAMPLES[key]
+    for combinator in ("anyOf", "oneOf"):
+        if schema.get(combinator):
+            return _example_value(name, key, schema[combinator][0])
+    kinds = _schema_types(schema)
+    if "number" in kinds or "integer" in kinds:
+        value = min(1, schema.get("maximum", 1))
+        return max(value, schema.get("minimum", value))
+    if "string" in kinds:
+        return "text"
+    if "boolean" in kinds:
+        return True
+    if "object" in kinds:
+        properties = schema.get("properties", {})
+        return {field: _example_value(name, field, properties.get(field, {})) for field in schema.get("required", [])}
+    if "array" in kinds:
+        return [_example_value(name, key, schema.get("items", {}))]
+    return None
+
+
+def _argument_error(name: str, key: str, path: str, reason: str, expected: str) -> str:
+    """Where the argument is wrong, what it must be, and one correct call fragment to copy."""
+    example = f'"{key}": {json.dumps(_example_value(name, key, _TOOL_SCHEMAS[name].get("properties", {}).get(key, {})))}'
+    return f"{name}: argument '{key}{path}' {reason}; expected {expected}. Example: {example}."
+
+
+def _moment_shape(name: str, item: Any, index: int) -> Any:
+    """A bare number, or an object with one time key, becomes {"timestamp_sec": t}. Two time keys are ambiguous."""
+    if _is_kind(item, "number"):
+        return {"timestamp_sec": item}
+    if isinstance(item, dict):
+        found = [key for key in _MOMENT_TIME_KEYS if key in item]
+        if len(found) > 1:
+            raise ValueError(_argument_error(name, "moments", f"[{index}]",
+                                             f"has more than one time key ({', '.join(found)})",
+                                             "exactly one of timestamp_sec, time_sec, time, t"))
+        if found and found[0] != "timestamp_sec":
+            rest = {key: value for key, value in item.items() if key != found[0]}
+            return {"timestamp_sec": item[found[0]], **rest}
+    return item
+
+
+def _accepted_shapes(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+    """Rewrite the wrong shapes whose meaning is certain: bare or time-keyed moments, and a four-number region list.
+    Anything else is left for the schema check to refuse."""
+    properties = _TOOL_SCHEMAS[name].get("properties", {})
+    out = dict(args)
+    if "moments" in properties and isinstance(out.get("moments"), list):
+        out["moments"] = [_moment_shape(name, item, index) for index, item in enumerate(out["moments"])]
+    region = out.get("region")
+    if "region" in properties and isinstance(region, list):
+        if len(region) != 4 or not all(_is_kind(value, "number") for value in region):
+            keys = "x, y, w, h" if name == "count_repetitions" else "x, y, width, height"
+            raise ValueError(_argument_error(name, "region", "", "is a list that is not four numbers",
+                                             f"an object with {keys}, or a list of four numbers [{keys}]"))
+        x, y, width, height = region
+        out["region"] = {"x": x, "y": y, "width": width, "height": height}
+    return out
+
+
 def _checked_arguments(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
-    """Read timecodes and region keys, and reject any value that breaks the tool's schema (nulls included)."""
+    """Read shapes and timecodes, and reject any value that breaks the tool's schema (nulls included)."""
     schema = _TOOL_SCHEMAS[name]
     properties = schema.get("properties", {})
-    kept = _read_timecodes(schema, args)
+    kept = _read_timecodes(schema, _accepted_shapes(name, args))
     if isinstance(kept.get("region"), dict) and "region" in properties:
         kept["region"] = _region_in_tool_keys(name, kept["region"])
     clamped = CLAMPED_ARGS.get(name, {})
@@ -649,8 +757,12 @@ def _checked_arguments(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         problem = _argument_problem(properties[key], value, key, check_range=key not in clamped)
         if problem:
             path, reason, expected = problem
-            raise ValueError(f"{name}: argument '{key}{path}' {reason}; expected {expected}.")
+            raise ValueError(_argument_error(name, key, path, reason, expected))
     return kept
+
+
+# Tools whose read_text argument runs Apple Vision OCR on the returned frames.
+READ_TEXT_TOOLS = ("frame_at", "inspect_window")
 
 
 def handle_call(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -665,9 +777,18 @@ def handle_call(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
     if missing:
         hint = (" `source` is a local video file path or a video URL (X post, YouTube, direct link)."
                 if "source" in missing else "")
-        raise ValueError(f"{name} is missing required argument(s): {', '.join(missing)}. Required: {', '.join(required)}.{hint}")
+        properties = schema.get("properties", {})
+        problems = " ".join(_argument_error(name, key, "", "is missing or empty", _expected(properties.get(key, {}), key))
+                            for key in missing)
+        raise ValueError(f"{name} is missing required argument(s): {', '.join(missing)}. Required: {', '.join(required)}. "
+                         f"{problems}{hint}")
     unknown = sorted(set(args) - set(schema.get("properties", {})))
     args = _checked_arguments(name, args)
+    if name in READ_TEXT_TOOLS and args.get("read_text"):
+        try:
+            ocr.ensure_available(ocr.READ_TEXT_UNAVAILABLE)
+        except RuntimeError as exc:
+            raise ValueError(str(exc)) from exc
     url_args = {key: args[key] for key in ("source", "compare_to")
                 if isinstance(args.get(key), str) and fetch.is_url(args[key])}
     if url_args:
@@ -986,14 +1107,16 @@ def _dispatch(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         start_sec = float(args.get("start_sec", 0.0))
         end_sec = float(args.get("end_sec", 0.0))
         fps = float(args.get("fps", 4.0))
-        res = engine.inspect_window(start_sec=start_sec, end_sec=end_sec, fps=fps)
+        res = engine.inspect_window(start_sec=start_sec, end_sec=end_sec, fps=fps,
+                                    read_text=bool(args.get("read_text", False)))
         d = res.to_dict()
         if res.contact_sheet_path:
             d["tool_file"] = make_tool_file(res.contact_sheet_path)
         return {"ok": True, "data": d}
         
     elif name == "frame_at":
-        data = engine.frame_at(time_sec=args.get("time_sec"), crop=args.get("crop"), scale=args.get("scale"))
+        data = engine.frame_at(time_sec=args.get("time_sec"), crop=args.get("crop"), scale=args.get("scale"),
+                               read_text=bool(args.get("read_text", False)))
         data["tool_file"] = make_tool_file(data["file_path"])
         return {"ok": True, "data": data}
 
@@ -1216,6 +1339,27 @@ def _package_version():
         return "dev"
 
 
+def _cli(argv):
+    """`list [--schemas]` prints tool names or full schemas; `call <tool> '<json>'` prints the tools/call result the server returns."""
+    if argv == ["list"]:
+        print("\n".join(tool["name"] for tool in TOOLS_MANIFEST))
+        return 0
+    if argv == ["list", "--schemas"]:
+        print(json.dumps(TOOLS_MANIFEST, indent=2))
+        return 0
+    if len(argv) == 3 and argv[0] == "call":
+        try:
+            arguments = json.loads(argv[2])
+        except json.JSONDecodeError as exc:
+            print(f"arguments must be a JSON object: {exc}", file=sys.stderr)
+            return 2
+        result = json.loads(tool_call_response(None, argv[1], arguments))["result"]
+        print(json.dumps(result))
+        return 1 if result.get("isError") else 0
+    print("usage: python -m src.executor.mcp_server [list [--schemas] | call <tool> '<json arguments>']", file=sys.stderr)
+    return 2
+
+
 def main(argv=None):
     """Console-script entry point: `agentic-video` starts the stdio MCP server."""
     args = sys.argv[1:] if argv is None else list(argv)
@@ -1234,4 +1378,6 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        sys.exit(_cli(sys.argv[1:]))
     run_stdio_server()
