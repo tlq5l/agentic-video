@@ -176,6 +176,7 @@ def test_token_is_never_echoed_from_a_bad_reply(siren_video, stand_in, reply):
     assert SECRET not in json.dumps(result)
 
 
+@pytest.mark.slow
 def test_slow_cloud_returns_finished_windows_within_the_limit(minute_tone, stand_in):
     """Every reply takes 10 s, so the 60 one-second windows cannot all finish in time; the call must stop and say where to resume."""
     base = stand_in(well_formed, delay_sec=10.0)
