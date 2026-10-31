@@ -3,10 +3,12 @@
 import itertools
 import json
 import math
+import os
 import re
 import shutil
 import struct
 import subprocess
+import sys
 import time
 import wave
 from pathlib import Path
@@ -497,3 +499,17 @@ def test_every_sec_input_takes_the_timecode_string_in_schema_and_declarations():
             scope = None
     assert len(inputs) > 20 and declared > 0
     assert problems == []
+
+
+def test_cli_call_prints_the_same_result_as_handle_call(clips, tmp_path):
+    arguments = {"source": clips.video}
+    env = {**os.environ, "AGENTIC_VIDEO_CACHE_DIR": str(tmp_path / "cache")}
+    completed = subprocess.run(
+        [sys.executable, "-m", "src.executor.mcp_server", "call", "probe_video", json.dumps(arguments)],
+        cwd=ROOT, env=env, capture_output=True, text=True, check=True, timeout=120,
+    )
+    expected = handle_call("probe_video", arguments)
+    assert expected["ok"], expected
+    cli_result = json.loads(completed.stdout)
+    assert not cli_result.get("isError")
+    assert json.loads(cli_result["content"][0]["text"]) == expected["data"]

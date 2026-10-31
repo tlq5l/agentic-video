@@ -21,6 +21,21 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - run: uv build
       - uses: pypa/gh-action-pypi-publish@release/v1
+      # MCP Registry (release only). These steps run after the PyPI upload, because the
+      # registry checks the mcp-name marker in the PyPI description and the package version.
+      # Docs: https://modelcontextprotocol.io/registry/github-actions.md (OIDC steps) and
+      # https://modelcontextprotocol.io/registry/package-types.md (PyPI ownership marker).
+      # Pinned to mcp-publisher v1.8.7, the latest release on 2026-10-31; the docs use
+      # releases/latest. Bump server.json together with pyproject.toml.
+      - name: Install mcp-publisher
+        if: github.event_name == 'release'
+        run: curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/download/v1.8.7/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
+      - name: Authenticate to MCP Registry
+        if: github.event_name == 'release'
+        run: ./mcp-publisher login github-oidc
+      - name: Publish server to MCP Registry
+        if: github.event_name == 'release'
+        run: ./mcp-publisher publish
 
   # Attaches the Claude Desktop bundle (dist/agentic-video-<version>.mcpb) to the GitHub release.
   mcpb:
