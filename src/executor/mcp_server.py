@@ -647,8 +647,7 @@ def _object_properties(schema: Dict[str, Any]) -> Dict[str, Any]:
 
 def _read_timecodes(schema: Dict[str, Any], value: Any, key: str = "") -> Any:
     """Turn timecode strings in *_sec number fields into seconds, at any depth the schema describes."""
-    properties = _object_properties(schema)
-    if isinstance(value, dict) and properties:
+    if isinstance(value, dict) and (properties := _object_properties(schema)):
         return {field: _read_timecodes(properties[field], item, field) if field in properties else item
                 for field, item in value.items()}
     if isinstance(value, list) and isinstance(schema.get("items"), dict):

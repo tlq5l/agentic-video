@@ -8,7 +8,7 @@ import uuid
 import subprocess
 from fractions import Fraction
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union, cast
 
 from src.core.config import Config
 from src.core.errors import SubprocessTimeoutError, MediaCorruptError, DependencyNotFoundError, ExtractionBoundsError
@@ -186,7 +186,7 @@ def _frame_ticks(vpath: Path, clock: StreamClock, start: Fraction, end_sec: Opti
     seek = None if from_origin else float(start)
     packets = probe_packet_ticks(vpath, seek, end_sec)
     if all(pts is not None for pts, _ in packets) and _reaches_back(packets, clock, start, from_origin):
-        return [(pts, duration) for pts, duration in packets]
+        return cast(List[Tuple[int, int]], packets)
     frames = probe_frame_ticks(vpath, seek, end_sec)
     if _reaches_back(frames, clock, start, from_origin):
         return frames

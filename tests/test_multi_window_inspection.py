@@ -554,13 +554,16 @@ def test_frame_at_keeps_avi_b_frames_that_have_no_packet_time(tmp_path, monkeypa
         capture_output=True, text=True, check=True,
     ).stdout.split()
     assert "N/A" in packet_pts  # fixture check: some packets really have no pts
-    raw = subprocess.run(
-        ["ffmpeg", "-nostdin", "-v", "error", "-i", clip, "-fps_mode", "passthrough",
-         "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
-        capture_output=True, check=True,
-    ).stdout
-    size = 160 * 90 * 3
-    frames = [raw[i * size:(i + 1) * size] for i in range(len(raw) // size)]
+    def decode_frames(path):
+        size = 160 * 90 * 3
+        raw = subprocess.run(
+            ["ffmpeg", "-nostdin", "-v", "error", "-i", path, "-fps_mode", "passthrough",
+             "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+            capture_output=True, check=True,
+        ).stdout
+        return [raw[i * size:(i + 1) * size] for i in range(len(raw) // size)]
+
+    frames = decode_frames(clip)
     assert len(frames) == 50
 
     # The first frame starts at 0.04 s (the first packet has no time), so frame k starts at (k + 1) / 25 s.
@@ -578,12 +581,7 @@ def test_frame_at_keeps_avi_b_frames_that_have_no_packet_time(tmp_path, monkeypa
          "-c:v", "mpeg4", "-bf", "2", ntsc],
         check=True,
     )
-    raw = subprocess.run(
-        ["ffmpeg", "-nostdin", "-v", "error", "-i", ntsc, "-fps_mode", "passthrough",
-         "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
-        capture_output=True, check=True,
-    ).stdout
-    frames = [raw[i * size:(i + 1) * size] for i in range(len(raw) // size)]
+    frames = decode_frames(ntsc)
     outcome = mcp_server.handle_call("frame_at", {"source": ntsc, "time_sec": 0.5})
     assert outcome["ok"] is True
     assert outcome["data"]["frame_time_sec"] == pytest.approx(14 * 1001 / 30000, abs=1e-6)
@@ -597,12 +595,7 @@ def test_frame_at_keeps_avi_b_frames_that_have_no_packet_time(tmp_path, monkeypa
          "-c:v", "mpeg4", "-bf", "2", avi24],
         check=True,
     )
-    raw = subprocess.run(
-        ["ffmpeg", "-nostdin", "-v", "error", "-i", avi24, "-fps_mode", "passthrough",
-         "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
-        capture_output=True, check=True,
-    ).stdout
-    frames = [raw[i * size:(i + 1) * size] for i in range(len(raw) // size)]
+    frames = decode_frames(avi24)
     outcome = mcp_server.handle_call("frame_at", {"source": avi24, "time_sec": 2.0208333333333335})
     assert outcome["ok"] is True
     assert outcome["data"]["frame_time_sec"] == pytest.approx(2.0, abs=1e-6)
