@@ -535,6 +535,73 @@ def test_frame_at_finds_the_frame_on_screen_past_b_frame_reordering(tmp_path, mo
         assert _png_rgb(outcome["data"]["file_path"]) == frames[shown], time_sec
 
 
+def test_frame_at_keeps_avi_b_frames_that_have_no_packet_time(tmp_path, monkeypatch):
+    # AVI B-frame packets carry no pts, so a packet-only list drops those frames: 1.00 s then
+    # gave the 0.96 s frame and 0.04 s and 1.99 s found no frame at all.
+    import src.executor.mcp_server as mcp_server
+    from src.core.config import Config
+
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    clip = str(tmp_path / "repro.avi")
+    subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=160x90:r=25:d=2",
+         "-c:v", "mpeg4", "-bf", "2", clip],
+        check=True,
+    )
+    packet_pts = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "packet=pts",
+         "-of", "csv=p=0", clip],
+        capture_output=True, text=True, check=True,
+    ).stdout.split()
+    assert "N/A" in packet_pts  # fixture check: some packets really have no pts
+    def decode_frames(path):
+        size = 160 * 90 * 3
+        raw = subprocess.run(
+            ["ffmpeg", "-nostdin", "-v", "error", "-i", path, "-fps_mode", "passthrough",
+             "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+            capture_output=True, check=True,
+        ).stdout
+        return [raw[i * size:(i + 1) * size] for i in range(len(raw) // size)]
+
+    frames = decode_frames(clip)
+    assert len(frames) == 50
+
+    # The first frame starts at 0.04 s (the first packet has no time), so frame k starts at (k + 1) / 25 s.
+    for time_sec, index in [(0.04, 0), (1.0, 24), (1.99, 48)]:
+        outcome = mcp_server.handle_call("frame_at", {"source": clip, "time_sec": time_sec})
+        assert outcome["ok"] is True, time_sec
+        assert outcome["data"]["frame_time_sec"] == pytest.approx((index + 1) / 25, abs=1e-6), time_sec
+        assert _png_rgb(outcome["data"]["file_path"]) == frames[index], time_sec
+
+    # The same kind of AVI at 30000/1001 fps, where the first frame starts at one frame period (0.0334 s): the
+    # request at 0.5 s is the frame that starts at 14 x 1001 / 30000 s, and a full decode shows it.
+    ntsc = str(tmp_path / "ntsc.avi")
+    subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=160x90:r=30000/1001:d=2",
+         "-c:v", "mpeg4", "-bf", "2", ntsc],
+        check=True,
+    )
+    frames = decode_frames(ntsc)
+    outcome = mcp_server.handle_call("frame_at", {"source": ntsc, "time_sec": 0.5})
+    assert outcome["ok"] is True
+    assert outcome["data"]["frame_time_sec"] == pytest.approx(14 * 1001 / 30000, abs=1e-6)
+    assert _png_rgb(outcome["data"]["file_path"]) == frames[13]
+
+    # At 24 fps the last frame starts at 2.0 s and lasts to 2.0417 s, past the file's rounded duration:
+    # a request at 2.0208 s is that last frame, not the one before it.
+    avi24 = str(tmp_path / "avi24.avi")
+    subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=160x90:r=24:d=2",
+         "-c:v", "mpeg4", "-bf", "2", avi24],
+        check=True,
+    )
+    frames = decode_frames(avi24)
+    outcome = mcp_server.handle_call("frame_at", {"source": avi24, "time_sec": 2.0208333333333335})
+    assert outcome["ok"] is True
+    assert outcome["data"]["frame_time_sec"] == pytest.approx(2.0, abs=1e-6)
+    assert _png_rgb(outcome["data"]["file_path"]) == frames[len(frames) - 1]
+
+
 def test_frame_at_reads_a_stream_that_starts_before_time_zero(tmp_path, monkeypatch):
     import src.executor.mcp_server as mcp_server
     from src.core.config import Config
