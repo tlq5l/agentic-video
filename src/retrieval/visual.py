@@ -311,8 +311,9 @@ def widen_top_interval(intervals, lower, upper, frames, margin, maximum=MAX_WIND
     others = [item for item in intervals if item is not top]
     start, end = top["start_sec"], top["end_sec"]
     floor = top["score"] - margin
-    left = next((i for i, frame in enumerate(frames) if frame[0] >= start), len(frames))
-    right = next((i for i, frame in enumerate(frames) if frame[0] >= end), len(frames))
+    from bisect import bisect_left
+    left = bisect_left(frames, (start,))
+    right = bisect_left(frames, (end,))
     while end - start < maximum:
         grew = False
         if left > 0 and frames[left - 1][2] >= floor:
@@ -411,8 +412,8 @@ def search_index(engine, query, top_k=5, start_sec=0.0, end_sec=None):
             matrix = np.stack([np.frombuffer(row[4], dtype=np.float32) for row in rows])
             scores = matrix @ vector
             for row, score in zip(rows, scores):
-                window.append((row[0], row[1], float(score)))
                 item = (float(score), -row[0], row[:4])
+                window.append((row[0], row[1], item[0]))
                 if len(best) < top_k:
                     heapq.heappush(best, item)
                 elif item[:2] > best[0][:2]:

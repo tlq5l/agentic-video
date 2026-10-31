@@ -95,14 +95,10 @@ def ensure_clip(spec, work):
     return path
 
 
-def rank1_interval(result):
-    return next(item for item in result["intervals"] if 1 in item["ranks"])
-
-
 def score_clip(spec, result):
     shot_start = spec["shot_start_sec"]
     shot_end = shot_start + spec["shot_sec"]
-    top = rank1_interval(result)
+    top = next(item for item in result["intervals"] if 1 in item["ranks"])
     start, end = top["start_sec"], top["end_sec"]
     overlap = max(0.0, min(end, shot_end) - max(start, shot_start))
     union = max(end, shot_end) - min(start, shot_start)
