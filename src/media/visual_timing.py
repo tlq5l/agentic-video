@@ -189,7 +189,9 @@ _BLACK_MIN_SEC = 0.2
 # Each bound is rounded to the millisecond, so a stored duration may differ from end - start by about 1 ms.
 _BLACK_ROUNDING_SEC = 0.002
 # v2: black scans saved before the grid start was pinned to each decode's start are not trusted.
-_BLACK_CACHE_KEY = "black_ranges_v2"
+# v3: v2 scans from before the seek-point check are not trusted either: a timestamp gap across a scan part's
+# seek point left their stretches at the wrong time, and such a stretch still passes the validator.
+_BLACK_CACHE_KEY = "black_ranges_v3"
 
 
 def _is_number(value: Any) -> bool:

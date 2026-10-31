@@ -97,11 +97,11 @@ def test_review_video_replaces_a_damaged_black_cache_entry(tmp_path, monkeypatch
         {"frame_rate": 30.0, "ranges": [{"start_sec": 0.0, "end_sec": 2.0, "duration_sec": 10 ** 400}]},
     ]
     for entry in damaged_entries:
-        cache.save_json(fingerprint, "black_ranges_v2", entry)
+        cache.save_json(fingerprint, "black_ranges_v3", entry)
         result = handle_call("review_video", {"source": clip})
         assert result["ok"] is True, result
         assert [(s["start_sec"], s["end_sec"], s["duration_sec"]) for s in result["data"]["black_ranges"]] == [(0.0, 2.0, 2.0)]
-        assert cache.load_json(fingerprint, "black_ranges_v2")["ranges"] == result["data"]["black_ranges"]
+        assert cache.load_json(fingerprint, "black_ranges_v3")["ranges"] == result["data"]["black_ranges"]
 
 
 def test_review_video_decoder_failure_is_an_error_and_leaves_no_black_result(tmp_path, monkeypatch):
@@ -119,7 +119,7 @@ def test_review_video_decoder_failure_is_an_error_and_leaves_no_black_result(tmp
     failed = json.loads(mcp_server.tool_call_response(1, "review_video", {"source": clip}))["result"]
     assert failed["isError"] is True, failed
     assert "MediaCorruptError" in failed["content"][0]["text"]
-    assert MediaCache(base_dir=tmp_path / "cache").load_json(MediaCache.compute_fingerprint(clip), "black_ranges_v2") is None
+    assert MediaCache(base_dir=tmp_path / "cache").load_json(MediaCache.compute_fingerprint(clip), "black_ranges_v3") is None
 
     monkeypatch.setattr(subprocess, "Popen", real_popen)
     healthy = handle_call("review_video", {"source": clip})
@@ -148,18 +148,20 @@ def test_black_stretch_across_a_scan_part_seam_is_listed_whole(tmp_path, monkeyp
     assert abs(stretch["end_sec"] - 6.4) <= frame + 1e-6
 
 
-@pytest.mark.parametrize("black_start_sec, jump_at_sec, jump_sec", [
+@pytest.mark.parametrize("black_start_sec, jump_at_sec, jump_sec, stored_wrong_start_sec", [
     # The timestamps jump 0.2 s at the 4.0 s seam. The second part seeks to 3.0 s and decodes from there on,
     # so its frames cover the seam without a gap.
-    (5.0, 4.0, 0.2),
+    (5.0, 4.0, 0.2, None),
     # The timestamps jump from 2.5 s to 5.2 s, across the 3.0 s seek point: the second part's first decoded
     # frame is at 5.2 s, after its own stretch starts at the 4.0 s seam. Its grid must not be used.
-    (2.5, 2.5, 2.7),
+    # The stored_wrong_start_sec case is a black scan the old code saved under black_ranges_v2 for this clip:
+    # it passes the cache validator but starts 1.2 s early, so the current code must not return it.
+    (2.5, 2.5, 2.7, 4.0),
 ], ids=["short-gap", "gap-across-the-seek-point"])
 def test_black_stretch_after_a_timestamp_gap_at_a_scan_part_seam_is_timed_the_same_in_both_cache_orders(
-        tmp_path, monkeypatch, black_start_sec, jump_at_sec, jump_sec):
-    # The black stretch (5.2-5.8 s) lies after the jump. Cold review (split scan) and cuts-first review
-    # (one decode) must both list it at its real time.
+        tmp_path, monkeypatch, black_start_sec, jump_at_sec, jump_sec, stored_wrong_start_sec):
+    # The black stretch (5.2-5.8 s) lies after the jump. Cold review (split scan), cuts-first review
+    # (one decode) and review over a cache that holds the old wrong black scan must all list it at its real time.
     from src.media import scene
 
     clip = tmp_path / "gap.mkv"
@@ -180,10 +182,19 @@ def test_black_stretch_after_a_timestamp_gap_at_a_scan_part_seam_is_timed_the_sa
     assert handle_call("detect_cuts", {"source": str(clip)})["ok"] is True
     cuts_first = handle_call("review_video", {"source": str(clip)})
 
+    # An old black scan saved under the v2 key, as the code before the grid fix stored it.
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "stale")
+    if stored_wrong_start_sec is not None:
+        wrong_end = round(stored_wrong_start_sec + 0.6, 3)
+        wrong = {"frame_rate": 30.0, "ranges": [{"start_sec": stored_wrong_start_sec, "end_sec": wrong_end,
+                                                 "duration_sec": 0.6}]}
+        MediaCache(base_dir=tmp_path / "stale").save_json(MediaCache.compute_fingerprint(str(clip)), "black_ranges_v2", wrong)
+    stale = handle_call("review_video", {"source": str(clip)})
+
     frame = 1 / 30
-    for result in (cold, cuts_first):
+    for result in (cold, cuts_first, stale):
         assert result["ok"] is True, result
         [stretch] = result["data"]["black_ranges"]
         assert abs(stretch["start_sec"] - 5.2) <= frame + 1e-6
         assert abs(stretch["end_sec"] - 5.8) <= frame + 1e-6
-    assert cold["data"]["black_ranges"] == cuts_first["data"]["black_ranges"]
+    assert cold["data"]["black_ranges"] == cuts_first["data"]["black_ranges"] == stale["data"]["black_ranges"]
