@@ -6,12 +6,12 @@
     "url": "https://github.com/tlq5l/agentic-video",
     "source": "github"
   },
-  "version": "0.3.2",
+  "version": "0.3.3",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "agentic-video",
-      "version": "0.3.2",
+      "version": "0.3.3",
       "transport": {
         "type": "stdio"
       }

@@ -25,8 +25,8 @@ Cells in the two run columns come from one smoke run per machine on 2026-10-31. 
 | `track_region_events` | not run | ok | ok | no | no | no |
 | `inspect_moments` | not run | ok | ok | no | no | no |
 | `inspect_windows` | not run | ok | ok | no | no | no |
-| `inspect_window` | not run | ok | ok | no | no | no |
-| `frame_at` | not run | ok | ok | no | no | no |
+| `inspect_window` | not run | ok | ok | no | only for `read_text: true` | no |
+| `frame_at` | not run | ok | ok | no | only for `read_text: true` | no |
 | `detect_cuts` | not run | ok | ok | no | no | no |
 | `check_frame_cadence` | not run | ok | ok | no | no | no |
 | `audio_onsets` | not run | ok | ok | no | no | no |
