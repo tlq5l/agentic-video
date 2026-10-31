@@ -327,7 +327,7 @@ def _scan_parts(video_path: str, start_sec: float, duration_sec: Optional[float]
         r"[a]select=gte(scene\,0),metadata=print:key=lavfi.scene_score:file=scene.txt,nullsink;"
         f"[b]fps={SOFT_SAMPLE_FPS}:start_time=0,scale={width}:{height},format=rgb24[soft]"
         + (f";[c]scale={width}:{height},format=gray[native]" if with_gray else "")
-        + (f";[d]fps={Fraction(grid_rate).limit_denominator(1001000)},scale={GRID_SIZE[0]}:{GRID_SIZE[1]}:flags=area,format=gray[grid]" if with_grid else "")
+        + (f";[d]fps={Fraction(grid_rate).limit_denominator(1001000)}:start_time=0,scale={GRID_SIZE[0]}:{GRID_SIZE[1]}:flags=area,format=gray[grid]" if with_grid else "")
     )
     outputs = ["-map", "[soft]", "-fps_mode", "passthrough", "-f", "rawvideo", "soft.raw"]
     if with_gray:
@@ -396,8 +396,8 @@ def _scan_parts(video_path: str, start_sec: float, duration_sec: Optional[float]
                     rgb = rgb[skip:]
                 levels = None
                 if with_grid:
-                    # Grid rows count from this part's first decoded frame. The part's own stretch
-                    # starts after its lead second, so it is rows lead*rate on, for length*rate rows.
+                    # The grid starts at the part's seek point (see the grid filter), so its row lead*rate is
+                    # the first row of the part's own stretch, and it has length*rate rows.
                     area = GRID_SIZE[0] * GRID_SIZE[1]
                     grid = np.fromfile(part_dir / "grid.raw", dtype=np.uint8)
                     grid = grid[: (len(grid) // area) * area].reshape(-1, area)

@@ -79,7 +79,7 @@ def _grid_frames(path: Path, rate: float) -> Iterator[np.ndarray]:
     kept: Optional[bytearray] = bytearray()
     process = subprocess.Popen(
         ["ffmpeg", "-nostdin", "-v", "error", "-filter_threads", "1", "-i", str(path), "-map", "0:v:0", "-an",
-         "-vf", "fps={},scale={}:{}:flags=area,format=gray".format(Fraction(rate).limit_denominator(1001000), width, height), "-f", "rawvideo", "-"],
+         "-vf", "fps={}:start_time=0,scale={}:{}:flags=area,format=gray".format(Fraction(rate).limit_denominator(1001000), width, height), "-f", "rawvideo", "-"],
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
     )
     try:
@@ -186,7 +186,10 @@ def blank_flashes(source: str) -> Dict[str, Any]:
 
 
 _BLACK_MIN_SEC = 0.2
-_BLACK_CACHE_KEY = "black_ranges_v1"
+# Each bound is rounded to the millisecond, so a stored duration may differ from end - start by about 1 ms.
+_BLACK_ROUNDING_SEC = 0.002
+# v2: black scans saved before the grid start was pinned to each decode's start are not trusted.
+_BLACK_CACHE_KEY = "black_ranges_v2"
 
 
 def _is_number(value: Any) -> bool:
@@ -209,7 +212,8 @@ def _cached_black_ranges(cache: MediaCache, fingerprint: str) -> Optional[Dict[s
     for item in ranges:
         if not isinstance(item, dict) or not all(_is_number(item.get(key)) for key in ("start_sec", "end_sec", "duration_sec")):
             return None
-        if item["end_sec"] < item["start_sec"]:
+        start, end, duration = item["start_sec"], item["end_sec"], item["duration_sec"]
+        if start < 0 or duration < _BLACK_MIN_SEC - _BLACK_ROUNDING_SEC or abs(duration - (end - start)) > _BLACK_ROUNDING_SEC:
             return None
     return cached
 
