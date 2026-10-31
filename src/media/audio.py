@@ -435,14 +435,12 @@ def _merge_close_onsets(onsets: List[Dict[str, Any]], min_gap_sec: float) -> Tup
     if min_gap_sec <= 0.0:
         return onsets, 0
     merged: List[Dict[str, Any]] = []
-    merged_count = 0
     for onset in onsets:
         if merged and float(onset["time_sec"]) - float(merged[-1]["time_sec"]) < min_gap_sec:
             merged[-1]["strength"] = max(merged[-1]["strength"], onset["strength"])
-            merged_count += 1
         else:
             merged.append(dict(onset))
-    return merged, merged_count
+    return merged, len(onsets) - len(merged)
 
 
 def _detect_onsets_in_samples(

@@ -193,12 +193,10 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     for label, (band, min_strength) in configs.items():
         result = score(args.split, band, min_strength, args.min_gap_sec, work / label)
         prefix = f"onsets.{args.split}.{label}"
-        print(f"METRIC {prefix}_f1={result['f1']:.4f}")
-        print(f"METRIC {prefix}_precision={result['precision']:.4f}")
-        print(f"METRIC {prefix}_recall={result['recall']:.4f}")
-        print(f"METRIC {prefix}_tp={result['tp']}")
-        print(f"METRIC {prefix}_fp={result['fp']}")
-        print(f"METRIC {prefix}_fn={result['fn']}")
+        for key in ("f1", "precision", "recall"):
+            print(f"METRIC {prefix}_{key}={result[key]:.4f}")
+        for key in ("tp", "fp", "fn"):
+            print(f"METRIC {prefix}_{key}={result[key]}")
         if args.breakdown:
             for name, counts in sorted(result["groups"].items()):
                 print(f"BREAKDOWN {prefix}.{name} f1={counts['f1']:.4f} tp={counts['tp']} fp={counts['fp']} fn={counts['fn']}")
