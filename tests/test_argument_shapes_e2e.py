@@ -3,9 +3,10 @@ import json
 import shutil
 import subprocess
 
+import jsonschema
 import pytest
 
-from src.executor.mcp_server import handle_call
+from src.executor.mcp_server import TOOLS_MANIFEST, handle_call
 
 pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
 
@@ -43,6 +44,24 @@ def test_guessed_argument_shapes_match_the_documented_ones_and_wrong_modes_name_
         return {key: data.get(key) for key in ("region", "event_count", "transitions", "sample_count")}
 
     assert events(REGION_LIST) == events(REGION_OBJECT)
+
+    # The published input schemas take every shortcut the server reads, and refuse the shapes it does not.
+    published = {tool["name"]: tool["inputSchema"] for tool in TOOLS_MANIFEST}
+    shortcuts = [
+        ("inspect_moments", {"source": source, "moments": [1.0]}),
+        ("inspect_moments", {"source": source, "moments": [{"time": 2.5}, {"t": 3}, {"time_sec": "00:02.500"}]}),
+        ("track_region_events", {"source": source, "start_sec": 0, "end_sec": 6, "region": REGION_LIST}),
+        ("count_repetitions", {"source": source, "region": REGION_LIST}),
+    ]
+    for name, args in shortcuts:
+        jsonschema.validate(args, published[name])
+    for name, args in [
+        ("inspect_moments", {"source": source, "moments": ["2.5"]}),
+        ("inspect_moments", {"source": source, "moments": [{"time": 2, "t": 3}]}),
+        ("track_region_events", {"source": source, "start_sec": 0, "end_sec": 6, "region": [0.1, 0.1, 0.5]}),
+    ]:
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(args, published[name])
 
     with pytest.raises(ValueError) as refused:
         handle_call("search_transcript", {"source": source, "query": "hello", "mode": "keyword"})

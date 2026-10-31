@@ -53,6 +53,7 @@ export const CountRepetitionsInputSchema = {
   region: z.union([
     z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1), w: z.number().min(0).max(1), h: z.number().min(0).max(1) }),
     z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1), width: z.number().min(0).max(1), height: z.number().min(0).max(1) }),
+    z.array(z.number().min(0).max(1)).length(4),
   ]).describe("Rectangle that contains the repeating motion, as fractions of the frame: x, y (top-left) and w, h (size), with x+w <= 1 and y+h <= 1. Uses w/h; width/height with the same meaning is also accepted. For example: {\"x\": 0.25, \"y\": 0.1, \"w\": 0.5, \"h\": 0.6}. Omit for the whole frame.").optional(),
   fps: z.number().positive().max(15).describe("Sampling rate, default 10. Larger values than 15 are clamped to 15 and the result says so.").optional(),
   method: z.enum(["auto", "motion", "embedding"]).describe("auto (default) picks between motion, embedding and a periodicity check; motion or embedding forces that amplitude counter alone.").optional(),
@@ -124,6 +125,7 @@ export const TrackRegionChangesInputSchema = {
       w: z.number().positive().max(1),
       h: z.number().positive().max(1),
     }),
+    z.array(z.number().min(0).max(1)).length(4),
   ]).describe("Rectangle to watch, as fractions of the frame: x, y (top-left) and width, height, with x+width <= 1 and y+height <= 1. Uses width/height, not w/h; w/h with the same meaning is also accepted. For example: {\"x\": 0.25, \"y\": 0.1, \"width\": 0.5, \"height\": 0.6}."),
   sample_fps: z.number().positive().max(10).describe("Sampling rate (default 0.25, maximum 10; larger values are clamped and the result says so). Changes shorter than 1/sample_fps can be missed.").optional(),
   frame_width: z.number().int().min(64).max(1920).describe("Decoded frame width in pixels (default 640, maximum 1920; larger values are clamped).").optional(),
@@ -151,6 +153,7 @@ export const TrackRegionEventsInputSchema = {
       w: z.number().positive().max(1),
       h: z.number().positive().max(1),
     }),
+    z.array(z.number().min(0).max(1)).length(4),
   ]).describe("Rectangle to watch, as fractions of the frame: x, y (top-left) and width, height, with x+width <= 1 and y+height <= 1. Uses width/height, not w/h; w/h with the same meaning is also accepted. For example: {\"x\": 0.25, \"y\": 0.1, \"width\": 0.5, \"height\": 0.6}."),
   sample_fps: z.number().positive().max(10).describe("Sampling rate (default 0.25, maximum 10; larger values are clamped and the result says so). Transitions shorter than 1/sample_fps can be missed.").optional(),
   frame_width: z.number().int().min(64).max(1920).describe("Decoded frame width in pixels (default 640, maximum 1920; larger values are clamped).").optional(),
@@ -161,12 +164,18 @@ export const TrackRegionEventsInputSchema = {
   max_total_frames: z.number().int().min(2).max(2000).describe("Frame budget for the whole range (default 600, maximum 2000; larger values are clamped). The call fails when (end_sec - start_sec) x sample_fps exceeds it.").optional(),
 };
 
+const momentTime = seconds(z.number().min(0)).describe("Seconds, or a timecode string in MM:SS.mmm form, e.g. 00:14.250.");
+const momentLabel = z.string().trim().min(1).max(80).optional();
+
 export const InspectMomentsInputSchema = {
   source: SourceSchema,
-  moments: z.array(z.object({
-    timestamp_sec: seconds(z.number().min(0)).describe("Seconds, or a timecode string in MM:SS.mmm form, e.g. 00:14.250."),
-    label: z.string().trim().min(1).max(80).optional(),
-  })).min(1).max(16).describe("Instants to inspect, e.g. [{\"timestamp_sec\": 12.5, \"label\": \"door opens\"}], at most 16, each within the video."),
+  moments: z.array(z.union([
+    z.number().min(0),
+    z.object({ timestamp_sec: momentTime, label: momentLabel }).strict(),
+    z.object({ time_sec: momentTime, label: momentLabel }).strict(),
+    z.object({ time: momentTime, label: momentLabel }).strict(),
+    z.object({ t: momentTime, label: momentLabel }).strict(),
+  ])).min(1).max(16).describe("Instants to inspect, e.g. [{\"timestamp_sec\": 12.5, \"label\": \"door opens\"}], at most 16, each within the video."),
   before_sec: seconds(z.number().min(0)).describe("Seconds of context before each moment (default 4). Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.").optional(),
   after_sec: seconds(z.number().min(0)).describe("Seconds of context after each moment (default 4). Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250.").optional(),
   samples_per_moment: z.number().int().min(3).max(25).describe("Frames per moment, an odd number 3-25 (default 9; larger values are clamped to 25).").optional(),

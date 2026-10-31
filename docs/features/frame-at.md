@@ -2,14 +2,15 @@
 
 How a user reaches it: `frame_at` (source, time_sec, optional crop {x, y, width, height} in source pixels, optional scale 1-4, optional `read_text` boolean, default false).
 
-Code: `src/media/frames.py` (`extract_frame_at`, `_video_end_ticks`, `_packets_through_request`, `_shown_frame_pts`, `_decode_frame_shown_at`), `src/media/timing.py` (`read_stream_clock`, `probe_packet_ticks`, `exact_request_seconds`, `parse_selected_frame_pts`), `src/media/probe.py` (displayed size), `src/retrieval/engine.py` (`frame_at`), `src/executor/mcp_server.py` (`frame_at` branch of `_dispatch`).
+Code: `src/media/frames.py` (`extract_frame_at`, `_video_end_ticks`, `_frame_ticks`, `_frames_through_request`, `_shown_frame_pts`, `_decode_frame_shown_at`), `src/media/timing.py` (`read_stream_clock`, `probe_packet_ticks`, `probe_frame_ticks`, `exact_request_seconds`, `parse_selected_frame_pts`), `src/media/probe.py` (displayed size), `src/retrieval/engine.py` (`frame_at`), `src/executor/mcp_server.py` (`frame_at` branch of `_dispatch`).
 
 How to check it works: `pytest tests/test_multi_window_inspection.py -k frame_at`.
 
 The rule: the frame on screen at `time_sec` is the last frame whose start time is at or before it. Selection is exact integer arithmetic on the container's frame times (pts, in the stream's time base); no tolerance is used.
 - `time_sec` is read as the simplest fraction that rounds to the JSON number, so `n / fps` names frame `n` at 24, 25, 30, 60 and 2000 fps and at 30000/1001.
 - A time equal to a frame's start returns that frame; a time between two starts returns the earlier one.
-- The video ends where its last packet ends. A time up to that end is allowed (it returns the last frame); a time after it is refused with an error naming `time_sec` and the end. A time before the first frame is refused the same way.
+- The frame list comes from the packet times when every packet has one. Some AVI files give B-frame packets no time; then the frame times FFmpeg's decoder reports are used, so every frame keeps its start (a 0.04 s frame in such a file is found, and the last frame is not lost).
+- The video ends where its last frame ends. A time up to that end is allowed (it returns the last frame); a time after it is refused with an error naming `time_sec` and the end. A time before the first frame is refused the same way.
 - A time 1 tick before a frame's start returns the frame before it.
 
 Gotchas:

@@ -24,6 +24,7 @@ from src.core.errors import MediaCorruptError
 _SHOWINFO_PTS_RE = re.compile(r"\bpts_time:(-?(?:\d+(?:\.\d*)?|\.\d+))\b")
 _SHOWINFO_DURATION_RE = re.compile(r"\bduration_time:(\d+(?:\.\d*)?|\.\d+)\b")
 _SHOWINFO_TICKS_RE = re.compile(r"\bpts:\s*(-?\d+)\b")
+_SHOWINFO_TICK_DURATION_RE = re.compile(r"\bduration:\s*(\d+)\b")
 _INTEGER_RE = re.compile(r"-?\d+")
 
 
@@ -238,12 +239,12 @@ def _tick_value(raw: object) -> Optional[int]:
     return None
 
 
-def probe_packet_ticks(video_path: str | Path, start_sec: float, end_sec: Optional[float]) -> List[Tuple[int, int]]:
-    """(pts, duration) in ticks of the first video stream's packets, in decode order, from start_sec
-    up to end_sec (to the end of the file when None). Times are on the container clock, so they may
-    be negative. ffprobe starts at the keyframe before start_sec, so the list holds every packet from
-    start_sec on, plus some earlier ones. A packet without a pts is left out; one without a duration
-    counts as 0."""
+def probe_packet_ticks(video_path: str | Path, start_sec: float, end_sec: Optional[float]) -> List[Tuple[Optional[int], int]]:
+    """(pts, duration) in ticks of the first video stream's packets, in decode order, from start_sec up to
+    end_sec (to the end of the file when None). Times are on the container clock, so they may be negative.
+    ffprobe starts at the keyframe before start_sec, so the list holds every packet from start_sec on, plus
+    some earlier ones. A packet without a pts (some AVI B-frames have none) has None as its pts; one without
+    a duration counts as 0."""
     interval = f"{start_sec:.6f}%" if end_sec is None else f"{start_sec:.6f}%{end_sec:.6f}"
     path = Path(video_path).resolve()
     proc = subprocess.run(
@@ -253,7 +254,7 @@ def probe_packet_ticks(video_path: str | Path, start_sec: float, end_sec: Option
     )
     if proc.returncode != 0:
         raise MediaCorruptError(
-            f"ffprobe could not list the frames of {path}: {proc.stderr.strip()}",
+            f"ffprobe could not list the packets of {path}: {proc.stderr.strip()}",
             {"video": str(path), "stderr": proc.stderr},
         )
     try:
@@ -263,12 +264,37 @@ def probe_packet_ticks(video_path: str | Path, start_sec: float, end_sec: Option
             f"ffprobe printed no packet list for {path}",
             {"video": str(path), "stderr": proc.stderr},
         ) from exc
-    packets: List[Tuple[int, int]] = []
-    for packet in payload.get("packets", []):
-        pts = _tick_value(packet.get("pts"))
-        if pts is not None:
-            packets.append((pts, _tick_value(packet.get("duration")) or 0))
-    return packets
+    return [
+        (_tick_value(packet.get("pts")), _tick_value(packet.get("duration")) or 0)
+        for packet in payload.get("packets", [])
+    ]
+
+
+def probe_frame_ticks(video_path: str | Path, start_sec: float, end_sec: Optional[float]) -> List[Tuple[int, int]]:
+    """(pts, duration) in ticks of the first video stream's decoded frames, in presentation order, over the
+    same window as probe_packet_ticks. These are the timestamps FFmpeg's decoder and filter graph give each
+    frame, the ones the frame extraction selects by (showinfo's pts), so a frame whose packet has no pts
+    (some AVI B-frames, and the last frame of such a file) keeps its own start. Times stay on the container
+    clock (-copyts), and a frame with no reported pts is left out."""
+    path = Path(video_path).resolve()
+    command = ["ffmpeg", "-nostdin", "-v", "info", "-copyts", "-ss", f"{start_sec:.6f}"]
+    if end_sec is not None:
+        command += ["-t", f"{max(0.0, end_sec - start_sec):.6f}"]
+    command += ["-i", str(path), "-map", "0:v:0", "-vf", "showinfo", "-f", "null", "-"]
+    proc = subprocess.run(command, capture_output=True, text=True, timeout=Config.SUBPROCESS_TIMEOUT_SEC, check=False)
+    if proc.returncode != 0:
+        raise MediaCorruptError(
+            f"FFmpeg could not list the frames of {path}: {proc.stderr.strip()}",
+            {"video": str(path), "stderr": proc.stderr},
+        )
+    frames: List[Tuple[int, int]] = []
+    for line in proc.stderr.splitlines():
+        pts = _SHOWINFO_TICKS_RE.search(line)
+        if pts is None:
+            continue
+        duration = _SHOWINFO_TICK_DURATION_RE.search(line)
+        frames.append((int(pts.group(1)), int(duration.group(1)) if duration else 0))
+    return frames
 
 
 def _simplest_between(low: Fraction, high: Fraction) -> Fraction:

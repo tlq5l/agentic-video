@@ -634,10 +634,22 @@ def _argument_problem(schema: Dict[str, Any], value: Any, key: str, check_range:
     return None
 
 
+def _object_properties(schema: Dict[str, Any]) -> Dict[str, Any]:
+    """The fields of an object schema, including the fields of its anyOf/oneOf object alternatives (a moment may
+    name its time as timestamp_sec, time_sec, time or t)."""
+    properties = dict(schema["properties"]) if isinstance(schema.get("properties"), dict) else {}
+    for alternative in (*schema.get("anyOf", []), *schema.get("oneOf", [])):
+        if isinstance(alternative, dict):
+            for field, sub in (alternative.get("properties") or {}).items():
+                properties.setdefault(field, sub)
+    return properties
+
+
 def _read_timecodes(schema: Dict[str, Any], value: Any, key: str = "") -> Any:
     """Turn timecode strings in *_sec number fields into seconds, at any depth the schema describes."""
-    if isinstance(value, dict) and isinstance(schema.get("properties"), dict):
-        return {field: _read_timecodes(schema["properties"][field], item, field) if field in schema["properties"] else item
+    properties = _object_properties(schema)
+    if isinstance(value, dict) and properties:
+        return {field: _read_timecodes(properties[field], item, field) if field in properties else item
                 for field, item in value.items()}
     if isinstance(value, list) and isinstance(schema.get("items"), dict):
         return [_read_timecodes(schema["items"], item) for item in value]
