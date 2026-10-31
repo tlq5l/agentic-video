@@ -547,13 +547,11 @@ def _expected(schema: Dict[str, Any], key: str = "") -> str:
         bounds.append(f"at most {schema['maximum']:g}")
     if "minLength" in schema:
         bounds.append(f"at least {schema['minLength']} character(s)")
-    if schema.get("minItems") is not None and schema.get("minItems") == schema.get("maxItems"):
-        bounds.append(f"exactly {schema['minItems']} item(s)")
-    else:
-        if "minItems" in schema:
-            bounds.append(f"at least {schema['minItems']} item(s)")
-        if "maxItems" in schema:
-            bounds.append(f"at most {schema['maxItems']} item(s)")
+    fixed_length = schema.get("minItems") is not None and schema.get("minItems") == schema.get("maxItems")
+    if "minItems" in schema:
+        bounds.append(f"{'exactly' if fixed_length else 'at least'} {schema['minItems']} item(s)")
+    if "maxItems" in schema and not fixed_length:
+        bounds.append(f"at most {schema['maxItems']} item(s)")
     return f"{words}, {' and '.join(bounds)}" if bounds else words
 
 
@@ -689,12 +687,8 @@ def _example_value(name: str, key: str, schema: Dict[str, Any]) -> Any:
             return _example_value(name, key, schema[combinator][0])
     kinds = _schema_types(schema)
     if "number" in kinds or "integer" in kinds:
-        value = 1
-        if "maximum" in schema:
-            value = min(value, schema["maximum"])
-        if "minimum" in schema:
-            value = max(value, schema["minimum"])
-        return value
+        value = min(1, schema.get("maximum", 1))
+        return max(value, schema.get("minimum", value))
     if "string" in kinds:
         return "text"
     if "boolean" in kinds:
