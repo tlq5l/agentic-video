@@ -1,8 +1,8 @@
-"""End to end: the shadow Cloudflare trial behind handle_call("transcribe") on a generated 20 s clip.
+"""End to end: the shadow Cloudflare trial behind handle_call("transcribe") on a 20 s clip of real speech.
 
 A local stand-in answers for Cloudflare Workers AI (AGENTIC_VIDEO_CF_API_BASE) and records each request, so no audio
-leaves the machine here. The only test that reaches real Cloudflare is the live one at the bottom, which is skipped
-without credentials.
+leaves the machine here. The only test that reaches real Cloudflare is the live one at the bottom, which runs only when
+credentials, this host's switch and an open trial are all present.
 """
 
 import base64
@@ -14,15 +14,19 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from src.core.config import Config
 from src.executor.mcp_server import handle_call
-from src.media import cloudflare
+from src.retrieval.engine import AgenticVideoEngine
 from src.transcript import asr, shadow_cf_asr
 
-FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "synthetic_bench_60s.mp4"
+# 20 s of real spoken English. Made once with macOS say (the same setup as test_transcribe_background's speech test),
+# then padded with silence to 20 s: say -o speech.aiff "<three sentences>"; ffmpeg -i speech.aiff -af apad -t 20 ...
+# The bench fixture is no use here: its audio is tones, and its speech comes from a subtitle sidecar, not from ASR.
+SPEECH_CLIP = Path(__file__).resolve().parents[1] / "fixtures" / "shadow_speech_20s.m4a"
 SECRET = "not-a-real-token-shadow-7c1e"
 WHISPER_PATH = "/ai/run/@cf/openai/whisper-large-v3-turbo"
 PIECE_SEC = 8  # a 20 s clip makes 3 pieces (8, 8 and 4 s), so the stitched offsets are checked
@@ -30,25 +34,24 @@ HOSTNAME = socket.gethostname()
 
 
 @pytest.fixture(scope="module")
-def speech_clip(tmp_path_factory):
-    """A 20 s generated clip cut from the bench fixture's speech; no subtitle sidecar, so ASR runs."""
-    path = tmp_path_factory.mktemp("shadow") / "speech.mp4"
-    subprocess.run(
-        ["ffmpeg", "-nostdin", "-v", "error", "-y", "-ss", "5", "-i", str(FIXTURE), "-t", "20", "-c", "copy", str(path)],
-        check=True,
-    )
-    return path
+def speech_clip():
+    """The committed speech clip; nonempty, so a missing or empty file fails here rather than as a silent empty transcript."""
+    assert SPEECH_CLIP.stat().st_size > 0
+    return SPEECH_CLIP
 
 
 @pytest.fixture
 def stand_in():
-    """Workers AI stand-in: every Whisper request gets the same one-segment reply. Returns (base url, requests seen)."""
-    seen = []
+    """Workers AI stand-in: every Whisper request gets the same one-segment reply. `seen` lists the requests;
+    `on_request(count)`, when set by a test, runs after each request is recorded and before it is answered."""
+    stand = SimpleNamespace(base=None, seen=[], on_request=None)
 
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))) or b"{}")
-            seen.append({"path": self.path, "auth": self.headers.get("Authorization"), "body": body})
+            stand.seen.append({"path": self.path, "auth": self.headers.get("Authorization"), "body": body})
+            if stand.on_request is not None:
+                stand.on_request(len(stand.seen))
             if self.path.endswith(WHISPER_PATH):
                 status = 200
                 reply = {"success": True, "errors": [], "messages": [], "result": {
@@ -71,7 +74,8 @@ def stand_in():
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    yield f"http://127.0.0.1:{server.server_port}", seen
+    stand.base = f"http://127.0.0.1:{server.server_port}"
+    yield stand
     server.shutdown()
     server.server_close()
 
@@ -79,12 +83,12 @@ def stand_in():
 @pytest.fixture
 def trial_env(monkeypatch, tmp_path, stand_in):
     """Fake credentials, the stand-in as Cloudflare, a short piece length, a private state dir, and one cache dir per call."""
-    base, seen = stand_in
-    monkeypatch.setenv("AGENTIC_VIDEO_CF_API_BASE", base)
+    monkeypatch.setenv("AGENTIC_VIDEO_CF_API_BASE", stand_in.base)
     monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "a" * 32)
     monkeypatch.setenv("CLOUDFLARE_API_TOKEN", SECRET)
     monkeypatch.delenv("AGENTIC_VIDEO_CF_TOKEN_COMMAND", raising=False)
     monkeypatch.setenv("AGENTIC_VIDEO_SHADOW_PIECE_SEC", str(PIECE_SEC))
+    monkeypatch.delenv(shadow_cf_asr.PARALLEL_ENV, raising=False)
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     monkeypatch.delenv(shadow_cf_asr.SWITCH_ENV, raising=False)
     monkeypatch.setattr(asr, "_installed_whisper_models", lambda: [])
@@ -94,7 +98,8 @@ def trial_env(monkeypatch, tmp_path, stand_in):
         monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / f"cache-{next(caches)}")
 
     new_cache()
-    return {"seen": seen, "state": tmp_path / "state" / "agentic-video", "new_cache": new_cache}
+    return {"seen": stand_in.seen, "stand": stand_in, "state": tmp_path / "state" / "agentic-video",
+            "new_cache": new_cache}
 
 
 def _transcribe(source):
@@ -136,11 +141,18 @@ def _wait_for_job_record(state: Path):
     raise AssertionError("the shadow job never wrote its log line")
 
 
+def _write_trial_state(state: Path, started_at, count: int, ended: bool = False):
+    state.mkdir(parents=True, exist_ok=True)
+    (state / "shadow-cf-asr-state.json").write_text(
+        json.dumps({"started_at": started_at, "count": count, "ended": ended}), encoding="utf-8")
+
+
 def test_switch_on_sends_three_pieces_logs_both_and_the_reply_matches_switch_off(speech_clip, trial_env, monkeypatch):
     seen, state = trial_env["seen"], trial_env["state"]
     off = _transcribe(speech_clip)
     _wait_for_background_worker()
     assert seen == [] and not state.exists()  # switch unset: nothing sent, nothing logged
+    assert any(seg["text"].strip() for seg in off["segments"])  # the clip has speech, so the comparison means something
 
     trial_env["new_cache"]()  # a fresh local run, not a cache hit
     monkeypatch.setenv(shadow_cf_asr.SWITCH_ENV, HOSTNAME)
@@ -154,6 +166,7 @@ def test_switch_on_sends_three_pieces_logs_both_and_the_reply_matches_switch_off
     assert record["local_model"] == "tiny" and record["local_engine"] == "faster-whisper"
     assert record["cf_model"] == shadow_cf_asr.MODEL and record["source_path"] == str(speech_clip.resolve())
     assert record["source_fingerprint"]
+    assert record["local_has_speech"] is True and record["local_text"].strip()
     assert record["local_text"] == " ".join(s["text"].strip() for s in off["segments"] if s["text"].strip())
     assert record["cf_text"] == "stand-in piece stand-in piece stand-in piece"
     assert [(s["piece_index"], s["start_sec"], s["end_sec"]) for s in record["cf_segments"]] == [
@@ -174,6 +187,18 @@ def test_switch_on_sends_three_pieces_logs_both_and_the_reply_matches_switch_off
     assert trial["count"] == 1 and trial["ended"] is False and trial["started_at"]
 
 
+def test_a_synchronous_fresh_run_is_shadowed_too(speech_clip, trial_env, monkeypatch):
+    """AgenticVideoEngine.transcribe with an explicit timeout is a fresh run with no background slot; it is shadowed."""
+    seen, state = trial_env["seen"], trial_env["state"]
+    monkeypatch.setenv(shadow_cf_asr.SWITCH_ENV, HOSTNAME)
+    result = AgenticVideoEngine(str(speech_clip)).transcribe(model_size="tiny", timeout_sec=240)
+    assert result.has_speech is True
+    (record,) = _wait_for_job_record(state)
+    assert record["status"] == "ok" and record["pieces"] == 3
+    assert record["local_text"] == " ".join(s.text.strip() for s in result.segments if s.text.strip())
+    assert len(seen) == 3
+
+
 @pytest.mark.parametrize("switch", ["1", "some-other-host"])
 def test_a_switch_that_does_not_name_this_host_sends_nothing(speech_clip, trial_env, monkeypatch, switch):
     monkeypatch.setenv(shadow_cf_asr.SWITCH_ENV, switch)
@@ -185,10 +210,8 @@ def test_a_switch_that_does_not_name_this_host_sends_nothing(speech_clip, trial_
 
 def test_an_expired_trial_sends_nothing_and_writes_trial_ended_once(speech_clip, trial_env, monkeypatch):
     state = trial_env["state"]
-    state.mkdir(parents=True, exist_ok=True)
     expired_at = time.time() - (shadow_cf_asr.TRIAL_DAYS + 1) * 86400
-    (state / "shadow-cf-asr-state.json").write_text(
-        json.dumps({"started_at": expired_at, "count": 3, "ended": False}), encoding="utf-8")
+    _write_trial_state(state, expired_at, count=3)
     monkeypatch.setenv(shadow_cf_asr.SWITCH_ENV, HOSTNAME)
 
     _transcribe(speech_clip)
@@ -205,20 +228,48 @@ def test_an_expired_trial_sends_nothing_and_writes_trial_ended_once(speech_clip,
     assert trial["ended"] is True and trial["count"] == 3
 
 
-def _has_live_credentials():
-    return bool(os.environ.get("CLOUDFLARE_ACCOUNT_ID")) and bool(
+def test_an_expiry_during_a_job_stops_its_remaining_pieces(speech_clip, trial_env, monkeypatch):
+    """Pieces run one at a time here, so the trial can expire after the first piece is sent. The later pieces and
+    their retries are refused, the job still logs once, and trial_ended is written once."""
+    stand, state = trial_env["stand"], trial_env["state"]
+
+    def expire_after_the_first_request(count):
+        if count == 1:
+            _write_trial_state(state, time.time() - (shadow_cf_asr.TRIAL_DAYS + 1) * 86400, count=1)
+
+    stand.on_request = expire_after_the_first_request
+    monkeypatch.setenv(shadow_cf_asr.PARALLEL_ENV, "1")
+    monkeypatch.setenv(shadow_cf_asr.SWITCH_ENV, HOSTNAME)
+    _transcribe(speech_clip)
+    _wait_for_background_worker()
+    (record,) = _wait_for_job_record(state)
+
+    assert len(trial_env["seen"]) == 1  # only the first piece reached the stand-in
+    assert record["status"] == "partial" and [e["piece_index"] for e in record["piece_errors"]] == [1, 2]
+    assert [r["status"] for r in _log_records(state)].count("trial_ended") == 1
+
+
+def _live_allowed():
+    """Live test gate: credentials, this host named by the switch, and an open trial. Read-only."""
+    has_credentials = bool(os.environ.get("CLOUDFLARE_ACCOUNT_ID")) and bool(
         os.environ.get("CLOUDFLARE_API_TOKEN") or os.environ.get("AGENTIC_VIDEO_CF_TOKEN_COMMAND"))
+    return has_credentials and shadow_cf_asr._switch_names_this_host() and shadow_cf_asr.trial_open_now()
 
 
-@pytest.mark.skipif(not _has_live_credentials(), reason="needs Cloudflare credentials; the test box has none")
-def test_live_whisper_turbo_answers_for_a_short_clip(speech_clip, monkeypatch, tmp_path):
-    """Live: sends 2 s of real audio to Cloudflare Workers AI. Skipped without credentials, so the test box never sends it."""
+@pytest.mark.skipif(not _live_allowed(), reason="needs Cloudflare credentials, this host in AGENTIC_VIDEO_SHADOW_CF_ASR "
+                    "and an open trial; the test box has none, so it never sends audio there")
+def test_live_shadow_job_reaches_real_whisper_turbo_for_a_short_clip(speech_clip, monkeypatch, tmp_path):
+    """Live: sends 2 s of real speech to Cloudflare Workers AI through run_job, the guarded path (switch, credentials,
+    trial). Skipped unless all of those are set, so the test box never sends audio."""
     monkeypatch.delenv("AGENTIC_VIDEO_CF_API_BASE", raising=False)
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     clip = tmp_path / "two-seconds.mp3"
     subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(speech_clip), "-t", "2", "-vn", "-ac", "1",
                     "-ar", "16000", "-c:a", "libmp3lame", str(clip)], check=True)
-    account, token = cloudflare.credentials("Shadow ASR test", "audio")
-    body = json.dumps({"audio": base64.b64encode(clip.read_bytes()).decode("ascii"), "vad_filter": False}).encode()
-    reply = json.loads(cloudflare.run_model(shadow_cf_asr.MODEL, account, token, body, 120.0))
-    assert reply["success"] is True and isinstance(reply["result"]["text"], str)
-    assert token not in json.dumps(reply)
+    job = {"source_path": str(clip), "fingerprint": "live-test", "duration_sec": 2.0, "language": "en",
+           "model_size": "tiny", "engine": "faster-whisper", "local_has_speech": True, "local_wall_sec": 0.0,
+           "local_segments": []}
+    record = shadow_cf_asr.run_job(job)
+    assert record is not None and record["status"] == "ok", record
+    token = os.environ.get("CLOUDFLARE_API_TOKEN", "")
+    assert not (token and token in json.dumps(record))

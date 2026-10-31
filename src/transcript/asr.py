@@ -249,7 +249,6 @@ class _BackgroundTranscriptionSlot:
             _ASR_WORKER_LOCK.lock_file = process_lock
             _ASR_WORKER_LOCK.fresh_run = None
             succeeded = False
-            began = time.monotonic()
             try:
                 result = transcribe_video(
                     key[0], model_size=key[1], allow_long_run=True
@@ -276,9 +275,7 @@ class _BackgroundTranscriptionSlot:
                         self._active = None
             if fresh_run is not None:
                 # The cache is saved and the slot is free; the shadow trial (a detached child) never raises here.
-                shadow_cf_asr.start_after_fresh_run(
-                    key[0], key[1], fresh_run["result"], fresh_run["fingerprint"], time.monotonic() - began,
-                )
+                shadow_cf_asr.start_after_fresh_run(**fresh_run)
 
         worker = threading.Thread(
             target=run,
@@ -1252,6 +1249,7 @@ def transcribe_video(
     reserved for the MCP background worker to disable its short wall timeout.
     All isolated workers are RSS-supervised and decode bounded audio chunks.
     """
+    began = time.monotonic()
     p = Path(source_path).resolve()
     if not p.exists():
         raise MediaNotFoundError(f"Source media not found: {source_path}")
@@ -1534,9 +1532,17 @@ finally:
                         "ASR completed but its transcript could not be cached.",
                         {"source_path": str(p), "model_size": model_size},
                     )
-                # A fresh run (not a cache hit): the background thread in request_transcription reads this
-                # after it releases the slot and then starts the shadow trial.
-                _ASR_WORKER_LOCK.fresh_run = {"result": res, "fingerprint": meta.fingerprint}
+                # A fresh run (not a cache hit). The shadow trial never raises and starts a detached child.
+                # A background run hands it to the thread in request_transcription, which starts it after
+                # releasing the slot; a synchronous caller has no slot, so it starts here.
+                fresh_run = {
+                    "source_path": str(p), "model_size": model_size, "result": res,
+                    "fingerprint": meta.fingerprint, "local_wall_sec": time.monotonic() - began,
+                }
+                if allow_long_run:
+                    _ASR_WORKER_LOCK.fresh_run = fresh_run
+                else:
+                    shadow_cf_asr.start_after_fresh_run(**fresh_run)
                 return _with_repeat_flags(res)
             # Worker ran but reported a clean, actionable failure (e.g. invalid model
             # name): surface it instead of masking it as "no speech".

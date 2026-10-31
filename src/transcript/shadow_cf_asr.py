@@ -8,9 +8,10 @@ This SENDS AUDIO TO CLOUDFLARE. It is a trial switch for the maintainer only: it
 AGENTIC_VIDEO_SHADOW_CF_ASR names this machine's hostname, and it stops by itself after 14 days or 200 uses.
 The user never gets its output; the local transcript is returned unchanged.
 
-Flow: asr.py calls start_after_fresh_run() once a fresh local run has saved its cache and released the
-background slot. That starts a detached, low-priority child (python -m src.transcript.shadow_cf_asr <job file>).
-The child cuts the audio into MP3 pieces, sends up to four at a time, and appends one JSON line to the log.
+Flow: asr.py calls start_after_fresh_run() once a fresh local run has saved its cache: after the background slot
+is released for a background run, or right after the save for a synchronous engine call. That starts a detached,
+low-priority child (python -m src.transcript.shadow_cf_asr <job file>). The child checks the switch again, cuts the
+audio into MP3 pieces, sends up to four at a time, and appends one JSON line to the log.
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional
 
 from src.media import cloudflare
 
@@ -45,6 +46,7 @@ SENDS = "audio"
 SWITCH_ENV = "AGENTIC_VIDEO_SHADOW_CF_ASR"
 PIECE_ENV = "AGENTIC_VIDEO_SHADOW_PIECE_SEC"  # tests shorten the piece length; the owner never sets it
 PIECE_SEC = 600
+PARALLEL_ENV = "AGENTIC_VIDEO_SHADOW_PARALLEL"  # tests set 1 for a fixed piece order; the owner never sets it
 PARALLEL_PIECES = 4
 PIECE_TIMEOUT_SEC = 120.0
 TRIAL_DAYS = 14
@@ -136,31 +138,42 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def _trial_open(count_use: bool) -> bool:
-    """Whether a use may start now. With count_use, the use is counted (the child calls this right before it
-    sends). The first refusal writes one trial_ended line; after that the trial stays off without writing."""
-    now = time.time()
+def _trial_refusal(state: Dict[str, Any], now: float, admit: bool) -> Optional[str]:
+    """Why the trial may not run, or None. admit=True is the job's admission and also applies the use limit;
+    admit=False is the check before each piece and retry, which must not count again."""
+    started = state.get("started_at")
+    if state.get("broken"):
+        return "state file unreadable"
+    if started is not None and now > started + TRIAL_DAYS * 86400:
+        return f"more than {TRIAL_DAYS} days after the first use"
+    if admit and state.get("count", 0) >= TRIAL_MAX_USES:
+        return f"{TRIAL_MAX_USES} uses reached"
+    return None
+
+
+def _trial_open(admit: bool) -> bool:
+    """Whether the trial may send now. The first refusal writes one trial_ended line and the trial stays off."""
     with _state_lock():
         state = _read_trial()
         if state.get("ended"):
             return False
-        started = state.get("started_at")
-        count = state.get("count", 0)
-        reason = None
-        if state.get("broken"):
-            reason = "state file unreadable"
-        elif started is not None and now > started + TRIAL_DAYS * 86400:
-            reason = f"more than {TRIAL_DAYS} days after the first use"
-        elif count >= TRIAL_MAX_USES:
-            reason = f"{TRIAL_MAX_USES} uses reached"
+        started, count = state.get("started_at"), state.get("count", 0)
+        reason = _trial_refusal(state, time.time(), admit)
         if reason is not None:
             _write_trial({"started_at": started, "count": count, "ended": True, "ended_reason": reason})
             _append_log({"ts": _now_iso(), "status": "trial_ended", "reason": reason,
                          "started_at": started, "count": count})
             return False
-        if count_use:
-            _write_trial({"started_at": started if started is not None else now, "count": count + 1, "ended": False})
+        if admit:
+            _write_trial({"started_at": started if started is not None else time.time(), "count": count + 1,
+                          "ended": False})
         return True
+
+
+def trial_open_now() -> bool:
+    """Read-only: whether a new job would be admitted now. Nothing is counted or written."""
+    state = _read_trial()
+    return not state.get("ended") and _trial_refusal(state, time.time(), admit=True) is None
 
 
 # ---- parent side: called from asr.py ----------------------------------------------------------
@@ -179,7 +192,7 @@ def start_after_fresh_run(source_path: str, model_size: str, result: Any, finger
         if not _switch_names_this_host():
             return False
         cloudflare.credentials(FEATURE, SENDS)  # raises when the credentials are missing; nothing is sent
-        if not _trial_open(count_use=False):
+        if not _trial_open(admit=False):  # the child admits the job itself, right before it sends
             return False
         job = {
             "source_path": source_path,
@@ -215,6 +228,11 @@ def _piece_sec() -> int:
     return int(raw) if raw.isdigit() and int(raw) > 0 else PIECE_SEC
 
 
+def _parallel_pieces() -> int:
+    raw = os.environ.get(PARALLEL_ENV, "").strip()
+    return int(raw) if raw.isdigit() and int(raw) > 0 else PARALLEL_PIECES
+
+
 def _version() -> str:
     try:
         return version("agentic-video")
@@ -236,14 +254,17 @@ def _cut_pieces(source: str, directory: str, piece_sec: int) -> Optional[List[st
     return sorted(glob.glob(os.path.join(directory, "piece_*.mp3"))) or None
 
 
-def _send_piece(index: int, path: str, *, account: str, token: str, language: str, piece_sec: int) -> Dict[str, Any]:
-    """One piece through Workers AI. Returns its segments with offsets added, or its error (token removed)."""
+def _send_piece(index: int, path: str, *, account: str, token: str, language: str, piece_sec: int,
+                allowed: Callable[[], bool]) -> Dict[str, Any]:
+    """One piece through Workers AI. Returns its segments with offsets added, or its error (token removed).
+    `allowed` is asked before each attempt, so an expiry during the job stops the rest of its pieces."""
     try:
         with open(path, "rb") as handle:
             body: Dict[str, Any] = {"audio": base64.b64encode(handle.read()).decode("ascii"), "vad_filter": False}
         if language:
             body["language"] = language
-        raw = cloudflare.run_model(MODEL, account, token, json.dumps(body).encode("utf-8"), PIECE_TIMEOUT_SEC)
+        raw = cloudflare.run_model(MODEL, account, token, json.dumps(body).encode("utf-8"), PIECE_TIMEOUT_SEC,
+                                   allowed=allowed)
         reply = json.loads(raw)
         if not isinstance(reply, dict) or reply.get("success") is not True or not isinstance(reply.get("result"), dict):
             raise ValueError("the reply did not report success")
@@ -264,7 +285,10 @@ def _language_hint(language: str) -> str:
 
 
 def run_job(job: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Send one job's audio and append its log line. Returns the record written, or None when nothing was sent."""
+    """Send one job's audio and append its log line. Returns the record written, or None when nothing was sent.
+    The switch is checked here as well as in the parent, so a child started by hand cannot send either."""
+    if not _switch_names_this_host():
+        return None
     try:
         account, token = cloudflare.credentials(FEATURE, SENDS)
     except cloudflare.CloudCredentialsError:
@@ -285,12 +309,13 @@ def run_job(job: Dict[str, Any]) -> Optional[Dict[str, Any]]:
                       "cf_wall_sec": 0.0, "pieces": 0, "piece_errors": [], **base}
             _append_log(record)
             return record
-        if not _trial_open(count_use=True):
+        if not _trial_open(admit=True):  # one admission per job, right before its first piece is sent
             return None
         began = time.monotonic()
         send = functools.partial(_send_piece, account=account, token=token,
-                                 language=_language_hint(job["language"]), piece_sec=piece_sec)
-        with ThreadPoolExecutor(max_workers=PARALLEL_PIECES) as pool:
+                                 language=_language_hint(job["language"]), piece_sec=piece_sec,
+                                 allowed=lambda: _trial_open(admit=False))
+        with ThreadPoolExecutor(max_workers=_parallel_pieces()) as pool:
             replies = list(pool.map(send, range(len(pieces)), pieces))
         cf_wall = time.monotonic() - began
     good = [reply for reply in replies if "error" not in reply]
