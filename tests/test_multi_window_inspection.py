@@ -3,6 +3,7 @@
 import json
 import math
 import subprocess
+from fractions import Fraction
 from pathlib import Path
 
 import pytest
@@ -370,6 +371,74 @@ def test_frame_at_never_returns_a_frame_after_the_request(tmp_path, monkeypatch)
         assert outcome["ok"] is True
         assert outcome["data"]["frame_time_sec"] == pytest.approx(shown, abs=1e-6), time_sec
         assert _png_rgb(outcome["data"]["file_path"]) == frames[shown], time_sec
+
+
+def _write_lossless_clip(path, rate, frames):
+    """320x240 test pattern at `rate` frames per second, lossless H.264 (qp 0)."""
+    subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi",
+         "-i", f"testsrc2=size=320x240:rate={rate}", "-frames:v", str(frames),
+         "-pix_fmt", "yuv420p", "-c:v", "libx264", "-qp", "0", "-preset", "ultrafast",
+         "-fps_mode", "passthrough", str(path)],
+        check=True,
+    )
+    return str(path)
+
+
+def _timeline(path):
+    """The first video stream's time base, the container start, the frame pts (ticks, in
+    presentation order) and every frame's RGB bytes in that order, from one full decode."""
+    def probe(entries):
+        return subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", entries,
+             "-of", "csv=p=0", path],
+            capture_output=True, text=True, check=True,
+        ).stdout
+
+    time_base = Fraction(probe("stream=time_base").strip())
+    origin = Fraction(probe("format=start_time").strip())
+    pts = sorted(int(line) for line in probe("packet=pts").split())
+    raw = subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-i", path, "-fps_mode", "passthrough",
+         "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+        capture_output=True, check=True,
+    ).stdout
+    size = len(raw) // len(pts)
+    return time_base, origin, pts, [raw[i * size:(i + 1) * size] for i in range(len(pts))]
+
+
+def test_frame_at_picks_the_frame_on_screen_at_exact_frame_times(tmp_path, monkeypatch):
+    import src.executor.mcp_server as mcp_server
+    from src.core.config import Config
+
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    for name, rate in (("fast.mp4", "2000"), ("ntsc.mp4", "30000/1001")):
+        clip = _write_lossless_clip(tmp_path / name, rate, 30)
+        time_base, origin, pts, pixels = _timeline(clip)
+        assert origin == 0 and len(set(pts)) == len(pts) == 30
+
+        def ask(ticks):
+            # The request is a JSON number: the float nearest to the exact time.
+            return mcp_server.handle_call("frame_at", {"source": clip, "time_sec": float(ticks * time_base - origin)})
+
+        def assert_shows(ticks, index):
+            outcome = ask(ticks)
+            assert outcome["ok"] is True
+            assert _png_rgb(outcome["data"]["file_path"]) == pixels[index], (name, float(ticks * time_base))
+            assert outcome["data"]["frame_time_sec"] == pytest.approx(float(pts[index] * time_base), abs=1e-6)
+
+        for index in (0, 1, 2, 17, 28):
+            assert_shows(pts[index], index)
+            assert_shows(Fraction(pts[index]) + Fraction(pts[index + 1] - pts[index], 2), index)
+            if index:
+                assert_shows(pts[index] - 1, index - 1)
+        with pytest.raises(ValueError, match="below the minimum 0"):
+            ask(pts[0] - 1)
+
+        end = pts[-1] + (pts[-1] - pts[-2])
+        assert_shows(end, len(pts) - 1)
+        with pytest.raises(ExtractionBoundsError, match=r"time_sec \S+ is outside the valid range"):
+            ask(end + 1)
 
 
 def test_frame_at_result_does_not_depend_on_earlier_calls(tmp_path, monkeypatch):
