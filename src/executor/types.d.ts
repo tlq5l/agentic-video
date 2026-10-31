@@ -1009,6 +1009,8 @@ export interface AudioOnsetsInput {
   end_sec?: number | string;
   /** Minimum normalized spectral-flux strength, from 0 to 1 (default 0.12); raise it to keep only stronger onsets. */
   min_strength?: number;
+  /** Onsets closer than this many seconds to a group's first onset are merged into one; 0 keeps every raw onset (default 0.035). */
+  min_gap_sec?: number | string;
   /** Restrict onset detection to a named band or [low_hz, high_hz]. */
   band_hz?: AudioBandSelection;
   /** Return only source onsets that are new or materially louder in-band than this source (a path or video URL). */
@@ -1037,6 +1039,8 @@ export interface AudioOnsetsOutput {
   compare_min_delta_db: number | null;
   onsets: AudioOnset[];
   total: number;
+  /** How many detected onsets min_gap_sec merged into a neighbouring onset. */
+  merged_count: number;
   /** Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument. */
   note?: string;
   /** How many `onsets` entries were left out of the list; `note` says how to see them. */

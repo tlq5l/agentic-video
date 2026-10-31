@@ -55,6 +55,63 @@ def test_audio_onsets_locate_synthetic_attacks_within_ten_ms(tmp_path):
     assert result["time_resolution_ms"] < 10.0
 
 
+def _write_click_train(path):
+    # Five decaying 1700 Hz clicks at 0.5, 1.0, ... 2.5 s over silence, written by ffmpeg as lossless PCM.
+    click = "0.3*sin(2*PI*1700*mod(t,0.5))*exp(-110*mod(t,0.5))*gte(t,0.5)"
+    subprocess.run(
+        ["ffmpeg", "-nostdin", "-y", "-v", "error", "-f", "lavfi", "-i", f"aevalsrc='{click}':s=48000:d=3",
+         "-c:a", "pcm_s16le", str(path)],
+        check=True,
+    )
+
+
+def test_audio_onsets_min_gap_cache_keeps_gaps_that_round_alike_apart(monkeypatch, tmp_path):
+    source = tmp_path / "clicks.wav"
+    _write_click_train(source)
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "raw")
+    raw = handle_call("audio_onsets", {"source": str(source), "min_gap_sec": 0})["data"]
+    times = [onset["time_sec"] for onset in raw["onsets"]]
+    # Each click's double hit is about 38 ms apart; take one such pair and put two gaps either side of it.
+    pair = round(next(later - earlier for earlier, later in zip(times, times[1:]) if later - earlier < 0.06), 6)
+    low, high = pair - 4e-7, pair + 4e-7  # both round to `pair` at 6 decimals, so only the exact value tells them apart
+
+    def run(cache_dir, gap):
+        monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / cache_dir)
+        return handle_call("audio_onsets", {"source": str(source), "min_gap_sec": gap})["data"]
+
+    fresh_low = run("fresh-low", low)
+    fresh_high = run("fresh-high", high)
+    assert fresh_low["merged_count"] != fresh_high["merged_count"]
+    assert run("shared-low-first", low) == fresh_low
+    assert run("shared-low-first", high) == fresh_high
+    assert run("shared-high-first", high) == fresh_high
+    assert run("shared-high-first", low) == fresh_low
+
+
+def test_audio_onsets_min_gap_merges_double_hits_through_handle_call(monkeypatch, tmp_path):
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    source = tmp_path / "clicks.wav"
+    # Each click's attack shows as two onsets about 38 ms apart. The default 0.035 s keeps both (the climb set
+    # sets that default), so the test passes 0.05 s, which merges them.
+    _write_click_train(source)
+    clicks = [0.5, 1.0, 1.5, 2.0, 2.5]
+
+    raw = handle_call("audio_onsets", {"source": str(source), "min_gap_sec": 0})
+    merged = handle_call("audio_onsets", {"source": str(source), "min_gap_sec": 0.05})
+
+    assert raw["ok"] is True and merged["ok"] is True
+    assert raw["data"]["merged_count"] == 0
+    assert raw["data"]["total"] > len(clicks)
+    raw_times = [onset["time_sec"] for onset in raw["data"]["onsets"]]
+    assert all(any(abs(hit - target) <= 0.03 for hit in raw_times) for target in clicks)
+    times = [onset["time_sec"] for onset in merged["data"]["onsets"]]
+    assert len(times) == len(clicks)
+    assert times == pytest.approx(clicks, abs=0.03)
+    assert merged["data"]["merged_count"] == raw["data"]["total"] - len(clicks)
+    with pytest.raises(ValueError, match="min_gap_sec"):
+        handle_call("audio_onsets", {"source": str(source), "min_gap_sec": -0.01})
+
+
 def test_loudness_timeline_finds_silence_and_high_band_outlier(tmp_path):
     duration = 3.0
     count = int(duration * RATE)
