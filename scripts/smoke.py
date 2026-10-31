@@ -34,15 +34,15 @@ LOUD_ABOVE_MEDIAN_DB = 6.0
 CONTACT_SHEET_SAMPLES = 12
 
 
-def call(name, arguments):
-    outcome = handle_call(name, arguments)
+def call(name, **arguments):
+    outcome = handle_call(name, {"source": str(CLIP), **arguments})
     if not outcome.get("ok"):
         raise AssertionError(f"{name} returned an error: {outcome.get('error')}")
     return outcome["data"]
 
 
 def check_probe_video():
-    data = call("probe_video", {"source": str(CLIP)})
+    data = call("probe_video")
     problems = []
     if abs(data["duration_sec"] - TRUTH["duration_s"]) > DURATION_TOLERANCE_SEC:
         problems.append(f"duration {data['duration_sec']} s, expected {TRUTH['duration_s']} s")
@@ -56,7 +56,7 @@ def check_probe_video():
 
 
 def check_detect_cuts():
-    cuts = [cut["timestamp_sec"] for cut in call("detect_cuts", {"source": str(CLIP)})["cuts"]]
+    cuts = [cut["timestamp_sec"] for cut in call("detect_cuts")["cuts"]]
     missing = [
         event["name"] for event in TRUTH["events"]
         if not any(abs(time_sec - event["start_s"]) <= CUT_TOLERANCE_SEC for time_sec in cuts)
@@ -67,7 +67,7 @@ def check_detect_cuts():
 
 
 def check_loudness_timeline():
-    data = call("loudness_timeline", {"source": str(CLIP)})
+    data = call("loudness_timeline")
     if abs(data["end_sec"] - TRUTH["duration_s"]) > DURATION_TOLERANCE_SEC:
         raise AssertionError(f"timeline ends at {data['end_sec']} s, expected {TRUTH['duration_s']} s")
     median = statistics.median(window["rms_dbfs"] for window in data["windows"])
@@ -83,7 +83,7 @@ def check_loudness_timeline():
 
 def check_sync_check():
     cues = [{"time_sec": event["start_s"], "label": event["name"].lower()} for event in AUDIO_EVENTS]
-    data = call("sync_check", {"source": str(CLIP), "cues": cues})
+    data = call("sync_check", cues=cues)
     problems = [
         f"{cue['label']} is {cue['status']}" for cue in data["cues"] if cue["status"] != "ok"
     ] + [
@@ -98,7 +98,7 @@ def check_sync_check():
 
 
 def check_contact_sheet():
-    data = call("contact_sheet", {"source": str(CLIP), "samples": CONTACT_SHEET_SAMPLES, "cols": 4})
+    data = call("contact_sheet", samples=CONTACT_SHEET_SAMPLES, cols=4)
     stamps = data["timestamps"]
     if data["sample_count"] != CONTACT_SHEET_SAMPLES or len(stamps) != CONTACT_SHEET_SAMPLES:
         raise AssertionError(f"{len(stamps)} tiles, expected {CONTACT_SHEET_SAMPLES}")
@@ -120,16 +120,16 @@ CHECKS = [
 
 def main():
     started = time.monotonic()
-    failed = []
+    failed = 0
     for name, check in CHECKS:
         begin = time.monotonic()
         try:
             detail, status = check(), "PASS"
         except Exception as exc:  # a tool error or a wrong value is a FAIL line, and the other checks still run
             detail, status = str(exc), "FAIL"
-            failed.append(name)
+            failed += 1
         print(f"{status} {name} ({time.monotonic() - begin:.2f} s): {detail}")
-    print(f"smoke: {len(CHECKS) - len(failed)}/{len(CHECKS)} passed in {time.monotonic() - started:.1f} s")
+    print(f"smoke: {len(CHECKS) - failed}/{len(CHECKS)} passed in {time.monotonic() - started:.1f} s")
     return 1 if failed else 0
 
 

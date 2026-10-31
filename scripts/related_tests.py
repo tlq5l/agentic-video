@@ -49,8 +49,7 @@ def normalize_files(parser, names):
     """Repo-relative posix paths for --files; a path that cannot select a test is an error, not a silent pass."""
     normalized = set()
     for name in names:
-        given = Path(name.replace("\\", "/"))
-        resolved = (given if given.is_absolute() else Path.cwd() / given).resolve()
+        resolved = Path(name.replace("\\", "/")).resolve()
         try:
             relative = resolved.relative_to(ROOT).as_posix()
         except ValueError:
@@ -98,24 +97,13 @@ def select_tests(changed):
 
     modules = {module_of(p.relative_to(ROOT).as_posix()): p for p in SRC.rglob("*.py")}
     changed_modules = {module_of(f) for f in changed if f.startswith("src/") and f.endswith(".py")}
-    importers = {name: src_imports(path) for name, path in modules.items()}
+    affected = changed_modules | {name for name, path in modules.items() if src_imports(path) & changed_modules}
     test_files = sorted(TESTS.glob("test_*.py"))
     chosen = {p for p in test_files if p.relative_to(ROOT).as_posix() in changed}
-
+    named = [Path(f).name for f in changed if f.startswith("src/") and not f.endswith(".py")]
     for test in test_files:
         imports = src_imports(test)
-        if imports & changed_modules:
-            chosen.add(test)
-            continue
-        for name in imports & set(modules):
-            if importers[name] & changed_modules:
-                chosen.add(test)
-                break
-
-    named = [f for f in changed if f.startswith("src/") and not f.endswith(".py")]
-    for test in test_files:
-        text = test.read_text(encoding="utf-8")
-        if any(Path(f).name in text for f in named):
+        if imports & affected or any(name in test.read_text(encoding="utf-8") for name in named):
             chosen.add(test)
     return sorted(chosen)
 
