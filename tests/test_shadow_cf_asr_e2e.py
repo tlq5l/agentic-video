@@ -177,9 +177,8 @@ def test_switch_on_sends_three_pieces_logs_both_and_the_reply_matches_switch_off
     assert (state / "shadow-cf-asr.jsonl").stat().st_mode & 0o777 == 0o600
     assert state.stat().st_mode & 0o777 == 0o700
 
-    requests = trial_env["seen"]
-    assert len(requests) == 3
-    for request in requests:
+    assert len(seen) == 3
+    for request in seen:
         assert request["path"].endswith(WHISPER_PATH) and request["auth"] == f"Bearer {SECRET}"
         assert request["body"]["vad_filter"] is False and request["body"]["language"] == record["language"]
         audio = base64.b64decode(request["body"]["audio"])

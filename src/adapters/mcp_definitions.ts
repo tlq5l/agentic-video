@@ -110,6 +110,22 @@ export const RefineTemporalBeamInputSchema = {
   align_to_cuts: z.boolean().optional(),
   compact_parent_sheet: z.boolean().optional(),
 };
+const extraTrackedRegionForms = () => [
+  z.object({
+    x: z.number().min(0).max(1),
+    y: z.number().min(0).max(1),
+    w: z.number().positive().max(1),
+    height: z.number().positive().max(1),
+  }),
+  z.object({
+    x: z.number().min(0).max(1),
+    y: z.number().min(0).max(1),
+    width: z.number().positive().max(1),
+    h: z.number().positive().max(1),
+  }),
+  z.array(z.number().min(0).max(1)).length(4),
+] as const;
+
 export const TrackRegionChangesInputSchema = {
   source: SourceSchema,
   start_sec: seconds(z.number().min(0)).describe("Start of the range in seconds. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250."),
@@ -127,19 +143,7 @@ export const TrackRegionChangesInputSchema = {
       w: z.number().positive().max(1),
       h: z.number().positive().max(1),
     }),
-    z.object({
-      x: z.number().min(0).max(1),
-      y: z.number().min(0).max(1),
-      w: z.number().positive().max(1),
-      height: z.number().positive().max(1),
-    }),
-    z.object({
-      x: z.number().min(0).max(1),
-      y: z.number().min(0).max(1),
-      width: z.number().positive().max(1),
-      h: z.number().positive().max(1),
-    }),
-    z.array(z.number().min(0).max(1)).length(4),
+    ...extraTrackedRegionForms(),
   ]).describe("Rectangle to watch, as fractions of the frame: x, y (top-left) and width, height, with x+width <= 1 and y+height <= 1. Uses width/height, not w/h; w/h with the same meaning is also accepted. For example: {\"x\": 0.25, \"y\": 0.1, \"width\": 0.5, \"height\": 0.6}."),
   sample_fps: z.number().positive().max(10).describe("Sampling rate (default 0.25, maximum 10; larger values are clamped and the result says so). Changes shorter than 1/sample_fps can be missed.").optional(),
   frame_width: z.number().int().min(64).max(1920).describe("Decoded frame width in pixels (default 640, maximum 1920; larger values are clamped).").optional(),
@@ -167,19 +171,7 @@ export const TrackRegionEventsInputSchema = {
       w: z.number().positive().max(1),
       h: z.number().positive().max(1),
     }),
-    z.object({
-      x: z.number().min(0).max(1),
-      y: z.number().min(0).max(1),
-      w: z.number().positive().max(1),
-      height: z.number().positive().max(1),
-    }),
-    z.object({
-      x: z.number().min(0).max(1),
-      y: z.number().min(0).max(1),
-      width: z.number().positive().max(1),
-      h: z.number().positive().max(1),
-    }),
-    z.array(z.number().min(0).max(1)).length(4),
+    ...extraTrackedRegionForms(),
   ]).describe("Rectangle to watch, as fractions of the frame: x, y (top-left) and width, height, with x+width <= 1 and y+height <= 1. Uses width/height, not w/h; w/h with the same meaning is also accepted. For example: {\"x\": 0.25, \"y\": 0.1, \"width\": 0.5, \"height\": 0.6}."),
   sample_fps: z.number().positive().max(10).describe("Sampling rate (default 0.25, maximum 10; larger values are clamped and the result says so). Transitions shorter than 1/sample_fps can be missed.").optional(),
   frame_width: z.number().int().min(64).max(1920).describe("Decoded frame width in pixels (default 640, maximum 1920; larger values are clamped).").optional(),
