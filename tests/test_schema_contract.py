@@ -337,9 +337,9 @@ def test_search_transcript_in_progress_result_matches_its_output_schema(clips, m
             return "in_progress", None
 
     monkeypatch.setattr(asr, "_BACKGROUND_TRANSCRIPTION_SLOT", _StartedSlot())
-    # The background worker's lock file says the run started 30 s ago, so the progress fields are filled in.
+    # The background worker's lock file says the run started 1 s ago, inside its estimate, so the progress fields include a percent.
     Config.BASE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    (Config.BASE_CACHE_DIR / "asr-worker.lock").write_bytes(json.dumps({"started_at": time.time() - 30}).encode("utf-8"))
+    (Config.BASE_CACHE_DIR / "asr-worker.lock").write_bytes(json.dumps({"started_at": time.time() - 1}).encode("utf-8"))
 
     response = handle_call("search_transcript", {"source": clips.video, "query": "cached phrase"})
 

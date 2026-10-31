@@ -132,7 +132,7 @@ def test_mcp_cache_miss_returns_retry_status(monkeypatch, tmp_path):
             "requested_model_cached": False,
             "transcription_status": "started",
             "retry_after_seconds": 15,
-            "transcription_message": "The small transcription started in the background. Retry in about 15 seconds.",
+            "transcription_message": "The small transcription started in the background. Call this tool again after about 15 seconds to get the transcript.",
         },
     }
     assert slot.calls == [(str(source), "small")]
@@ -404,6 +404,80 @@ asr._run_memory_capped_worker([sys.executable, "-c", worker, sys.argv[2]],
         time.sleep(0.05)
     else:
         pytest.fail("stale worker lock was not released after its process died")
+
+
+_OUTLIVING_WORKER_SERVER = r'''
+import json, sys, threading
+from pathlib import Path
+from src.core.config import Config
+from src.executor.mcp_server import handle_call
+from src.transcript import asr
+
+cache_dir, marker, source, mode = Path(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4]
+Config.BASE_CACHE_DIR = cache_dir
+asr._installed_whisper_models = lambda: []
+WORKER = "import os, pathlib, sys, time; pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(120)"
+
+def worker_that_outlives_its_server(source_path, model_size, allow_long_run):
+    asr._run_memory_capped_worker([sys.executable, "-c", WORKER, marker], timeout=None)
+    raise RuntimeError("stand-in worker exited")
+
+asr.transcribe_video = worker_that_outlives_its_server
+print(json.dumps(handle_call("transcribe", {"source": source, "model_size": "tiny"})), flush=True)
+if mode == "serve":
+    threading.Event().wait()
+'''
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX worker lock: the server is killed with SIGKILL")
+def test_transcribe_after_server_exit_is_not_reported_running(tmp_path):
+    source = tmp_path / "clip.mkv"
+    subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-y",
+         "-f", "lavfi", "-i", "testsrc=size=160x90:rate=5:duration=2",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+         "-c:v", "ffv1", "-c:a", "flac", str(source)],
+        check=True,
+    )
+    cache_dir = tmp_path / "cache"
+    marker = tmp_path / "worker-pid"
+    root = Path(__file__).resolve().parents[1]
+    server = subprocess.Popen(
+        [sys.executable, "-c", _OUTLIVING_WORKER_SERVER, str(cache_dir), str(marker), str(source), "serve"],
+        cwd=root, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    try:
+        first = json.loads(server.stdout.readline())
+        assert first["data"]["transcription_status"] == "started"
+
+        deadline = time.monotonic() + 30
+        while not (marker.exists() and marker.read_text()):
+            assert server.poll() is None, server.stderr.read().decode()
+            assert time.monotonic() < deadline, "the stand-in worker never started"
+            time.sleep(0.05)
+        os.kill(server.pid, signal.SIGKILL)
+        server.wait(timeout=10)
+
+        fresh = subprocess.run(
+            [sys.executable, "-c", _OUTLIVING_WORKER_SERVER, str(cache_dir), str(marker), str(source), "once"],
+            cwd=root, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60,
+        )
+        assert fresh.returncode == 0, fresh.stderr
+        data = json.loads(fresh.stdout.strip().splitlines()[-1])["data"]
+        assert data["status"] != "in_progress"
+        assert data["transcription_status"] == "failed"
+        assert "already running" not in data["transcription_message"]
+    finally:
+        if server.poll() is None:
+            server.kill()
+            server.wait(timeout=10)
+        server.stdout.close()
+        server.stderr.close()
+        if marker.exists() and marker.read_text():
+            try:
+                os.killpg(int(marker.read_text()), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
 
 
 def test_mcp_reports_a_failed_background_attempt(monkeypatch, tmp_path):

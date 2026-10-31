@@ -225,6 +225,10 @@ class _BackgroundTranscriptionSlot:
             process_lock, owner, lock_error = _acquire_background_process_lock(
                 Config.BASE_CACHE_DIR, key[0], key[1]
             )
+            if process_lock is None and lock_error is None and owner and _owner_server_exited(owner):
+                process_lock, owner, lock_error = _wait_for_released_lock(Config.BASE_CACHE_DIR, key)
+                if process_lock is None and lock_error is None and owner and _owner_server_exited(owner):
+                    return "failed", ORPHANED_JOB_ERROR
             if process_lock is None:
                 if lock_error:
                     return "start_failed", lock_error
@@ -358,9 +362,39 @@ def _release_background_process_lock(lock_file: Any) -> None:
         lock_file.close()
 
 
+def _owner_server_exited(owner: dict) -> bool:
+    """True when the server that wrote this lock record is gone (POSIX; unknown counts as running)."""
+    pid = owner.get("pid")
+    if os.name != "posix" or not isinstance(pid, int) or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    except PermissionError:
+        return False
+    return False
+
+
+def _wait_for_released_lock(
+    cache_dir: Path, key: Tuple[str, str]
+) -> Tuple[Optional[Any], Optional[dict], Optional[str]]:
+    """Retry the slot lock until it frees or the wait bound passes."""
+    deadline = time.monotonic() + ORPHANED_WORKER_WAIT_SECONDS
+    while True:
+        lock, owner, error = _acquire_background_process_lock(cache_dir, key[0], key[1])
+        if lock is not None or error is not None or time.monotonic() >= deadline:
+            return lock, owner, error
+        time.sleep(0.1)
+
+
 _BACKGROUND_TRANSCRIPTION_SLOT = _BackgroundTranscriptionSlot()
 _ASR_WORKER_LOCK = threading.local()
 TRANSCRIPTION_RETRY_AFTER_SECONDS = 15
+ORPHANED_WORKER_WAIT_SECONDS = 3
+ORPHANED_JOB_ERROR = (
+    "the server that started it exited before it finished, and its worker has not stopped"
+)
 ASR_CHUNK_SECONDS = 60
 # "turbo" runs whisper.cpp (large-v3-turbo) on the GPU through whisper-cli: ~50x real time on Apple silicon.
 WHISPER_CPP_MODEL = Path(os.environ.get(
@@ -1003,11 +1037,10 @@ def _transcription_progress(duration_sec: float, model_size: str) -> Dict[str, A
     except (OSError, ValueError, KeyError, TypeError):
         return {}
     total = max(10.0, duration_sec * _ASR_SPEED_VS_AUDIO.get(model_size, 0.2))
-    return {
-        "elapsed_sec": round(elapsed),
-        "estimated_total_sec": round(total),
-        "estimated_percent": min(99, int(100 * elapsed / total)),
-    }
+    progress = {"elapsed_sec": round(elapsed), "estimated_total_sec": round(total)}
+    if elapsed < total:
+        progress["estimated_percent"] = min(99, int(100 * elapsed / total))
+    return progress
 
 
 def request_transcription(source_path: str, model_size: str) -> Dict[str, Any]:
@@ -1048,6 +1081,9 @@ def request_transcription(source_path: str, model_size: str) -> Dict[str, Any]:
         ),
     }
     message = message_by_state[state]
+    retry_note = "" if state == "failed" else (
+        f" Call this tool again after about {retry_after} seconds to get the transcript."
+    )
     if result is not None:
         data = result.to_dict()
         data.update({
@@ -1058,17 +1094,22 @@ def request_transcription(source_path: str, model_size: str) -> Dict[str, Any]:
             "retry_after_seconds": retry_after,
             "transcription_message": (
                 f"Returning the cached {cached_model} transcript because the requested "
-                f"{model_size} transcript is not cached. {message}"
+                f"{model_size} transcript is not cached. {message}{retry_note}"
             ),
         })
         return data
 
     running = state in {"started", "in_progress"}
     progress = _transcription_progress(meta.duration_sec, model_size) if running else {}
-    if progress:
+    if "estimated_percent" in progress:
         message += (
             f" About {progress['estimated_percent']}% done (estimate): {progress['elapsed_sec']} s elapsed "
             f"of roughly {progress['estimated_total_sec']} s."
+        )
+    elif progress:
+        message += (
+            f" It is taking longer than estimated: {progress['elapsed_sec']} s elapsed, "
+            f"estimate was roughly {progress['estimated_total_sec']} s."
         )
     return {
         "status": "in_progress" if running else state,
@@ -1076,10 +1117,7 @@ def request_transcription(source_path: str, model_size: str) -> Dict[str, Any]:
         "requested_model_cached": False,
         "transcription_status": state,
         "retry_after_seconds": retry_after,
-        "transcription_message": (
-            message if state == "failed"
-            else f"{message} Retry in about {retry_after} seconds."
-        ),
+        "transcription_message": f"{message}{retry_note}",
         **progress,
     }
 
