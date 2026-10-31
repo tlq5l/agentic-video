@@ -3613,15 +3613,14 @@ def sync_check(
             ),
             "ambiguous_reason": reason,
         }
-        candidates = [
-            {"time_sec": float(item["time_sec"]), "offset_ms": round((float(item["time_sec"]) - cue_time) * 1000.0, 3),
-             "strength": float(item.get("strength", 0.0))}
-            for item in candidates_by_cue[cue_index]
-        ]
         if verbose:
-            report["candidate_onsets"] = candidates
+            report["candidate_onsets"] = [
+                {"time_sec": float(item["time_sec"]), "offset_ms": round((float(item["time_sec"]) - cue_time) * 1000.0, 3),
+                 "strength": float(item.get("strength", 0.0))}
+                for item in candidates_by_cue[cue_index]
+            ]
         else:
-            report["candidate_onsets_count"] = len(candidates)
+            report["candidate_onsets_count"] = len(candidates_by_cue[cue_index])
         if cue_index in soft_attack_build_by_cue:
             report["soft_attack_build"] = soft_attack_build_by_cue[cue_index]
         if cue["band"] is not None:
