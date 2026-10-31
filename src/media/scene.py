@@ -303,7 +303,8 @@ def _scan_frames(video_path: str, start_sec: float, duration_sec: Optional[float
             return _scan_parts(video_path, start_sec, duration_sec, timeout, plan, with_gray, grid_rate, levels_out)
         except MediaCorruptError:
             # A part that cannot be read on its own (a seek the container
-            # does not support): read the whole range in one go instead.
+            # does not support, or a timestamp gap across its seek point):
+            # read the whole range in one go instead.
             pass
     return _scan_parts(video_path, start_sec, duration_sec, timeout, [(0, None)], with_gray, grid_rate, levels_out)
 
@@ -394,10 +395,14 @@ def _scan_parts(video_path: str, start_sec: float, duration_sec: Optional[float]
                     rgb = rgb[skip: skip + length * SOFT_SAMPLE_FPS]
                 else:
                     rgb = rgb[skip:]
+                # The grid and the soft samples start at the seek point (see their filters) and repeat the first
+                # decoded frame back to it. If that frame comes after the seam, the start of the own stretch
+                # would show the wrong picture, so such a part is not used.
+                if lead and len(times) and float(times[0]) > begin + lead + 1e-3:
+                    raise MediaCorruptError("FFmpeg scene-change scan starts after its own stretch", {"video_path": video_path})
                 levels = None
                 if with_grid:
-                    # The grid starts at the part's seek point (see the grid filter), so its row lead*rate is
-                    # the first row of the part's own stretch, and it has length*rate rows.
+                    # Row lead*rate is the first row of the part's own stretch, and it has length*rate rows.
                     area = GRID_SIZE[0] * GRID_SIZE[1]
                     grid = np.fromfile(part_dir / "grid.raw", dtype=np.uint8)
                     grid = grid[: (len(grid) // area) * area].reshape(-1, area)

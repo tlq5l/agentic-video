@@ -5,6 +5,8 @@ import subprocess
 import time
 from pathlib import Path
 
+import pytest
+
 from src.core.cache import MediaCache
 from src.core.config import Config
 from src.executor import mcp_server
@@ -89,6 +91,7 @@ def test_review_video_replaces_a_damaged_black_cache_entry(tmp_path, monkeypatch
         {"frame_rate": 30.0, "ranges": [{"start_sec": 1.0, "end_sec": 0.5, "duration_sec": 0.5}]},
         {"frame_rate": 30.0, "ranges": [{"start_sec": 0.0, "end_sec": 2.0, "duration_sec": -2.0}]},
         {"frame_rate": 30.0, "ranges": [{"start_sec": 0.0, "end_sec": 0.1, "duration_sec": 0.1}]},
+        {"frame_rate": 30.0, "ranges": [{"start_sec": 0.0, "end_sec": 0.199, "duration_sec": 0.199}]},
         {"frame_rate": 30.0, "ranges": [{"start_sec": -1.0, "end_sec": 1.0, "duration_sec": 2.0}]},
         {"frame_rate": 10 ** 400, "ranges": []},
         {"frame_rate": 30.0, "ranges": [{"start_sec": 0.0, "end_sec": 2.0, "duration_sec": 10 ** 400}]},
@@ -145,16 +148,24 @@ def test_black_stretch_across_a_scan_part_seam_is_listed_whole(tmp_path, monkeyp
     assert abs(stretch["end_sec"] - 6.4) <= frame + 1e-6
 
 
-def test_black_stretch_after_a_timestamp_gap_at_a_scan_part_seam_is_timed_the_same_in_both_cache_orders(tmp_path, monkeypatch):
-    # The timestamps jump 0.2 s at 4.0 s, so the part that seeks to 4.0 s first decodes a frame at 4.2 s.
-    # The black stretch (5.2-5.8 s) lies in that part's own stretch. Cold review (split scan) and
-    # cuts-first review (one decode) must both list it at its real time.
+@pytest.mark.parametrize("black_start_sec, jump_at_sec, jump_sec", [
+    # The timestamps jump 0.2 s at the 4.0 s seam. The second part seeks to 3.0 s and decodes from there on,
+    # so its frames cover the seam without a gap.
+    (5.0, 4.0, 0.2),
+    # The timestamps jump from 2.5 s to 5.2 s, across the 3.0 s seek point: the second part's first decoded
+    # frame is at 5.2 s, after its own stretch starts at the 4.0 s seam. Its grid must not be used.
+    (2.5, 2.5, 2.7),
+], ids=["short-gap", "gap-across-the-seek-point"])
+def test_black_stretch_after_a_timestamp_gap_at_a_scan_part_seam_is_timed_the_same_in_both_cache_orders(
+        tmp_path, monkeypatch, black_start_sec, jump_at_sec, jump_sec):
+    # The black stretch (5.2-5.8 s) lies after the jump. Cold review (split scan) and cuts-first review
+    # (one decode) must both list it at its real time.
     from src.media import scene
 
     clip = tmp_path / "gap.mkv"
-    graph = ("color=c=0x3a3a3a:s=320x240:r=30:d=5.0[s0];color=c=black:s=320x240:r=30:d=0.6[s1];"
+    graph = (f"color=c=0x3a3a3a:s=320x240:r=30:d={black_start_sec}[s0];color=c=black:s=320x240:r=30:d=0.6[s1];"
              "color=c=0x3a3a3a:s=320x240:r=30:d=2.4[s2];[s0][s1][s2]concat=n=3:v=1:a=0,"
-             r"setpts=PTS+(0.2/TB)*gte(T\,4)[out]")
+             rf"setpts=PTS+({jump_sec}/TB)*gte(T\,{jump_at_sec})[out]")
     subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-filter_complex", graph, "-map", "[out]",
                     "-c:v", "ffv1", str(clip)], check=True)
     monkeypatch.setattr(scene, "SCAN_SPLIT_MIN_SEC", 4)

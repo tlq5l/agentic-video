@@ -213,7 +213,7 @@ def _cached_black_ranges(cache: MediaCache, fingerprint: str) -> Optional[Dict[s
         if not isinstance(item, dict) or not all(_is_number(item.get(key)) for key in ("start_sec", "end_sec", "duration_sec")):
             return None
         start, end, duration = item["start_sec"], item["end_sec"], item["duration_sec"]
-        if start < 0 or duration < _BLACK_MIN_SEC - _BLACK_ROUNDING_SEC or abs(duration - (end - start)) > _BLACK_ROUNDING_SEC:
+        if start < 0 or duration < _BLACK_MIN_SEC or abs(duration - (end - start)) > _BLACK_ROUNDING_SEC:
             return None
     return cached
 
