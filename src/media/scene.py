@@ -410,7 +410,7 @@ def _scan_parts(video_path: str, start_sec: float, duration_sec: Optional[float]
                     last = len(grid) if length is None else first + int(round(length * grid_rate))
                     if last > len(grid):
                         raise MediaCorruptError("FFmpeg scene-change scan returned too few grid frames", {"video_path": video_path})
-                    levels = brightest_levels(grid[first:last].astype(np.float32))
+                    levels = brightest_levels(frame.astype(np.float32) for frame in grid[first:last])
                 pieces.append((times[own], scores[own], rgb, gray[own], levels))
         except FileNotFoundError as exc:
             raise DependencyNotFoundError(f"ffmpeg binary not found on system PATH: {exc}", {"dependency": "ffmpeg"}) from exc

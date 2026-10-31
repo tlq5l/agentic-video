@@ -142,18 +142,8 @@ _SPLICE_MIN_FRAME_CHANGED_SHARE = 0.20
 
 def _runs(flags: np.ndarray) -> List[tuple]:
     """(first, last) frame index of each run of True values, in time order."""
-    runs: List[tuple] = []
-    index = 0
-    while index < len(flags):
-        if not flags[index]:
-            index += 1
-            continue
-        end = index
-        while end + 1 < len(flags) and flags[end + 1]:
-            end += 1
-        runs.append((index, end))
-        index = end + 1
-    return runs
+    edges = np.flatnonzero(np.diff(np.r_[False, np.asarray(flags, dtype=bool), False])).tolist()
+    return [(start, end - 1) for start, end in zip(edges[::2], edges[1::2])]
 
 
 def _brightest_percent(path: Path, rate: float) -> np.ndarray:
