@@ -5,6 +5,7 @@ import subprocess
 import wave
 
 import numpy as np
+import pytest
 
 import src.executor.mcp_server as mcp_server
 from src.core.config import Config
@@ -59,3 +60,13 @@ def test_sync_check_candidate_onsets_are_opt_in_end_to_end(tmp_path, monkeypatch
     for default_cue, verbose_cue in zip(default["data"]["cues"], verbose["data"]["cues"]):
         assert default_cue["candidate_onsets_count"] == len(verbose_cue["candidate_onsets"])
     assert _without_candidate_lists(default["data"]["cues"]) == _without_candidate_lists(verbose["data"]["cues"])
+
+
+def test_sync_check_rejects_non_boolean_verbose_end_to_end(tmp_path, monkeypatch):
+    """The MCP schema already refuses these values; this pins the rejection and that it names `verbose`."""
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    clip = _write_counter_clip(tmp_path / "clicks.mkv")
+    cues = [{"time_sec": 1.0, "label": "click"}]
+    for bad in ("false", 1, None):
+        with pytest.raises(ValueError, match="verbose"):
+            mcp_server.handle_call("sync_check", {"source": clip, "cues": cues, "verbose": bad})

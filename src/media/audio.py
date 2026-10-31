@@ -3080,6 +3080,8 @@ def sync_check(
     With `verbose` false each cue reports `candidate_onsets_count`; with `verbose`
     true it reports the `candidate_onsets` list instead of the count.
     """
+    if not isinstance(verbose, bool):
+        raise ExtractionBoundsError("verbose must be true or false", {"verbose": verbose})
     tolerance = _finite_number(tolerance_ms, "tolerance_ms")
     if tolerance < 0.0 or tolerance > 5000.0:
         raise ExtractionBoundsError("tolerance_ms must satisfy 0 <= value <= 5000 (default 80)", {"tolerance_ms": tolerance})
