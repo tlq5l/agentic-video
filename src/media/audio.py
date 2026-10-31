@@ -38,6 +38,8 @@ from src.core.types import format_timestamp
 
 SAMPLE_RATE = 48000
 HOP_SAMPLES = 256
+# Chosen on benchmarks/dev/onsets (climb split): the widest gap tried that keeps recall on both settings.
+DEFAULT_ONSET_MIN_GAP_SEC = 0.035
 N_FFT = 2048
 BANDS: Tuple[Tuple[str, float, float], ...] = (
     ("sub", 0.0, 120.0),
@@ -424,6 +426,23 @@ def _onset_spectra(
     return profiles, energies
 
 
+def _merge_close_onsets(onsets: List[Dict[str, Any]], min_gap_sec: float) -> Tuple[List[Dict[str, Any]], int]:
+    """Merge onsets within `min_gap_sec` of a group's first onset into that onset.
+
+    The group keeps its first onset's time and takes the strongest strength of the group.
+    Returns the merged list and how many onsets were merged away.
+    """
+    if min_gap_sec <= 0.0:
+        return onsets, 0
+    merged: List[Dict[str, Any]] = []
+    for onset in onsets:
+        if merged and float(onset["time_sec"]) - float(merged[-1]["time_sec"]) < min_gap_sec:
+            merged[-1]["strength"] = max(merged[-1]["strength"], onset["strength"])
+        else:
+            merged.append(dict(onset))
+    return merged, len(onsets) - len(merged)
+
+
 def _detect_onsets_in_samples(
     samples: np.ndarray,
     start: float,
@@ -498,11 +517,15 @@ def audio_onsets(
     cache: Optional[MediaCache] = None,
     band_hz: Any = None,
     compare_to: Optional[str] = None,
+    min_gap_sec: float = DEFAULT_ONSET_MIN_GAP_SEC,
 ) -> Dict[str, Any]:
     """Detect attacks in broadband or in a named/custom band; compare sources by in-band energy."""
     threshold = _finite_number(min_strength, "min_strength")
     if threshold < 0.0 or threshold > 1.0:
         raise ExtractionBoundsError("min_strength must satisfy 0 <= value <= 1 (default 0.12; raise it to keep only stronger onsets)", {"min_strength": threshold})
+    gap = _finite_number(min_gap_sec, "min_gap_sec")
+    if gap < 0.0:
+        raise ExtractionBoundsError("min_gap_sec must be 0 or more seconds (0 keeps every detected onset; onsets closer than the gap to the first one are merged into it)", {"min_gap_sec": gap})
     band = _normalize_band_hz(band_hz)
     samples, fingerprint, cache = _decode_pcm(source, cache)
     start, end, first_sample, last_sample = _range(samples, start_sec, end_sec)
@@ -512,11 +535,11 @@ def audio_onsets(
         compare_samples, compare_fingerprint, _ = _decode_pcm(compare_to, cache)
         _range(compare_samples, start, end)
     options = {
-        "start_sec": round(start, 6), "end_sec": round(end, 6),
-        "min_strength": round(threshold, 6), "band_hz": band,
-        "compare_fingerprint": compare_fingerprint,
+        "start_sec": start, "end_sec": end,
+        "min_strength": threshold, "band_hz": band,
+        "min_gap_sec": gap, "compare_fingerprint": compare_fingerprint,
     }
-    result_key = _cache_tag("audio_onsets_v7", options)
+    result_key = _cache_tag("audio_onsets_v9", options)
     cached = cache.load_json(fingerprint, result_key)
     if isinstance(cached, dict):
         return cached
@@ -547,6 +570,7 @@ def audio_onsets(
             if all(abs(onset["time_sec"] - other["time_sec"]) > 0.030 for other in selected):
                 selected.append(onset)
         onsets = sorted(selected, key=lambda item: item["time_sec"])
+    onsets, merged_count = _merge_close_onsets(onsets, gap)
 
     result = {
         "source_path": str(Path(source).expanduser().resolve()),
@@ -561,6 +585,7 @@ def audio_onsets(
         "compare_min_delta_db": None if compare_to is None else 2.5,
         "onsets": onsets,
         "total": len(onsets),
+        "merged_count": merged_count,
     }
     cache.save_json(fingerprint, result_key, result)
     return result
@@ -1700,7 +1725,7 @@ def _cue_onset_candidates(
         key = cue["band_key"]
         if key not in onsets_by_band:
             onsets_by_band[key] = audio_onsets(
-                source, min_strength=0.10, cache=cache, band_hz=_band_spec(cue["band"])
+                source, min_strength=0.10, cache=cache, band_hz=_band_spec(cue["band"]), min_gap_sec=0.0,
             )["onsets"]
         pool = list(onsets_by_band[key])
     else:
@@ -1709,7 +1734,7 @@ def _cue_onset_candidates(
             for band_name in model.get("bands", []):
                 if band_name not in onsets_by_band:
                     onsets_by_band[band_name] = audio_onsets(
-                        source, min_strength=0.10, cache=cache, band_hz=band_name
+                        source, min_strength=0.10, cache=cache, band_hz=band_name, min_gap_sec=0.0,
                     )["onsets"]
                 pool.extend(onsets_by_band[band_name])
     pool.sort(key=lambda item: float(item["time_sec"]))
@@ -2709,7 +2734,7 @@ def _simple_dominant_band_check(
         key = "simple:{:.1f}:{:.1f}".format(onset_low, onset_high)
         if key not in onsets_by_band:
             onsets_by_band[key] = audio_onsets(
-                source, min_strength=0.08, cache=cache, band_hz=[onset_low, onset_high],
+                source, min_strength=0.08, cache=cache, band_hz=[onset_low, onset_high], min_gap_sec=0.0,
             )["onsets"]
         band_onsets = onsets_by_band[key]
         if key not in onset_times:
@@ -3139,7 +3164,7 @@ def sync_check(
     cut_scan = cut_pool.submit(cut_detector)
     cut_pool.shutdown(wait=False)
 
-    broad_onsets = audio_onsets(source, min_strength=0.10, cache=cache)["onsets"]
+    broad_onsets = audio_onsets(source, min_strength=0.10, cache=cache, min_gap_sec=0.0)["onsets"]
     all_band_levels = _BandLevels(samples)
     onsets_by_band: Dict[str, List[Dict[str, Any]]] = {}
     control_cache: Dict[float, Optional[np.ndarray]] = {}
@@ -3328,7 +3353,7 @@ def sync_check(
         for band_name, _, _ in BANDS:
             if band_name not in onsets_by_band:
                 onsets_by_band[band_name] = audio_onsets(
-                    source, min_strength=0.10, cache=cache, band_hz=band_name,
+                    source, min_strength=0.10, cache=cache, band_hz=band_name, min_gap_sec=0.0,
                 )["onsets"]
             if any(abs(float(onset["time_sec"]) - at) <= window for onset in onsets_by_band[band_name]):
                 return True
