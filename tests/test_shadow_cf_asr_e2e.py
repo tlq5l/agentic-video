@@ -20,6 +20,7 @@ import pytest
 
 from src.core.config import Config
 from src.executor.mcp_server import handle_call
+from src.media import cloudflare
 from src.retrieval.engine import AgenticVideoEngine
 from src.transcript import asr, shadow_cf_asr
 
@@ -199,6 +200,37 @@ def test_a_synchronous_fresh_run_is_shadowed_too(speech_clip, trial_env, monkeyp
     assert len(seen) == 3
 
 
+def test_a_synchronous_run_returns_before_the_shadow_credentials_resolve(speech_clip, trial_env, monkeypatch, tmp_path):
+    """The shadow token command waits for a gate that this test opens only after the synchronous call has returned.
+    Before the fix the hook ran the command on the caller's thread, so the command had finished (`done` existed) when
+    the call returned; now the call returns while the command is still waiting. The command gives up after about 25 s."""
+    seen, state = trial_env["seen"], trial_env["state"]
+    done, gate = tmp_path / "command-done", tmp_path / "gate"
+    script = tmp_path / "token.sh"
+    script.write_text(
+        "#!/bin/sh\n"
+        "i=0\n"
+        f"while [ ! -f {gate} ] && [ $i -lt 250 ]; do sleep 0.1; i=$((i+1)); done\n"
+        f"touch {done}\n"
+        f"[ -f {gate} ] || exit 1\n"
+        f"echo {SECRET}\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    monkeypatch.delenv("CLOUDFLARE_API_TOKEN")
+    monkeypatch.setenv("AGENTIC_VIDEO_CF_TOKEN_COMMAND", str(script))
+    monkeypatch.setattr(cloudflare, "_command_token", None)  # a token kept by an earlier test would skip the command
+    monkeypatch.setenv(shadow_cf_asr.SWITCH_ENV, HOSTNAME)
+
+    result = AgenticVideoEngine(str(speech_clip)).transcribe(model_size="tiny", timeout_sec=240)
+    assert result.has_speech is True
+    assert not done.exists()  # the transcript came back while the shadow token command was still waiting
+    gate.touch()
+    (record,) = _wait_for_job_record(state)
+    assert record["status"] == "ok" and record["pieces"] == 3
+    assert len(seen) == 3
+
+
 @pytest.mark.parametrize("switch", ["1", "some-other-host"])
 def test_a_switch_that_does_not_name_this_host_sends_nothing(speech_clip, trial_env, monkeypatch, switch):
     monkeypatch.setenv(shadow_cf_asr.SWITCH_ENV, switch)
@@ -261,8 +293,7 @@ def _live_allowed():
 def test_live_shadow_job_reaches_real_whisper_turbo_for_a_short_clip(speech_clip, monkeypatch, tmp_path):
     """Live: sends 2 s of real speech to Cloudflare Workers AI through run_job, the guarded path (switch, credentials,
     trial). Skipped unless all of those are set, so the test box never sends audio."""
-    monkeypatch.delenv("AGENTIC_VIDEO_CF_API_BASE", raising=False)
-    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    monkeypatch.delenv("AGENTIC_VIDEO_CF_API_BASE", raising=False)  # the real state dir, so the count is the one the gate read
     clip = tmp_path / "two-seconds.mp3"
     subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(speech_clip), "-t", "2", "-vn", "-ac", "1",
                     "-ar", "16000", "-c:a", "libmp3lame", str(clip)], check=True)

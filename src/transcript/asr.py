@@ -1534,16 +1534,19 @@ finally:
                     )
                 # A fresh run (not a cache hit). The shadow trial never raises and starts a detached child.
                 # A background run hands it to the thread in request_transcription, which starts it after
-                # releasing the slot; a synchronous caller has no slot, so it starts here.
+                # releasing the slot; a synchronous caller has no slot, so its preparation runs on a daemon
+                # thread and the transcript below is returned without waiting for it. The repeat flags are set
+                # first (they change segments in place), so the child reads the same segments the caller returns.
+                flagged = _with_repeat_flags(res)
                 fresh_run = {
-                    "source_path": str(p), "model_size": model_size, "result": res,
+                    "source_path": str(p), "model_size": model_size, "result": flagged,
                     "fingerprint": meta.fingerprint, "local_wall_sec": time.monotonic() - began,
                 }
                 if allow_long_run:
                     _ASR_WORKER_LOCK.fresh_run = fresh_run
                 else:
-                    shadow_cf_asr.start_after_fresh_run(**fresh_run)
-                return _with_repeat_flags(res)
+                    shadow_cf_asr.start_in_background(**fresh_run)
+                return flagged
             # Worker ran but reported a clean, actionable failure (e.g. invalid model
             # name): surface it instead of masking it as "no speech".
             raise ASRModelError(

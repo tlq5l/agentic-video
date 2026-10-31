@@ -9,9 +9,10 @@ AGENTIC_VIDEO_SHADOW_CF_ASR names this machine's hostname, and it stops by itsel
 The user never gets its output; the local transcript is returned unchanged.
 
 Flow: asr.py calls start_after_fresh_run() once a fresh local run has saved its cache: after the background slot
-is released for a background run, or right after the save for a synchronous engine call. That starts a detached,
-low-priority child (python -m src.transcript.shadow_cf_asr <job file>). The child checks the switch again, cuts the
-audio into MP3 pieces, sends up to four at a time, and appends one JSON line to the log.
+is released for a background run, or, for a synchronous engine call, from a daemon thread (start_in_background) so
+the caller gets its transcript before any credential or state work runs. That starts a detached, low-priority child
+(python -m src.transcript.shadow_cf_asr <job file>). The child checks the switch again, cuts the audio into MP3
+pieces, sends up to four at a time, and appends one JSON line to the log.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -219,6 +221,20 @@ def start_after_fresh_run(source_path: str, model_size: str, result: Any, finger
             with contextlib.suppress(OSError):
                 os.unlink(job_path)
         return False
+
+
+def start_in_background(**fresh_run: Any) -> None:
+    """Run start_after_fresh_run on a daemon thread, so a synchronous caller returns its transcript without waiting for
+    credentials (a token command can take up to its 30 s timeout) or the trial state lock. The switch is read here,
+    so a switch that does not name this host starts no thread. Never raises. A process that exits before the thread
+    has started its child skips that one shadow run; the user's transcript is not affected."""
+    try:
+        if not _switch_names_this_host():
+            return
+        threading.Thread(target=start_after_fresh_run, kwargs=fresh_run, name="agentic-video-shadow-prepare",
+                         daemon=True).start()
+    except Exception:
+        return
 
 
 # ---- child side: one job ----------------------------------------------------------------------

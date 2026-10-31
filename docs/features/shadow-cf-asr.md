@@ -10,7 +10,7 @@ How to turn it on: set `AGENTIC_VIDEO_SHADOW_CF_ASR` in the server's environment
 
 What it does for each fresh local run:
 - Skips cache hits, polls, subtitle sidecars and files with no audio. Only a fresh ASR run starts it.
-- Starts a detached, low-priority child process after the local result is cached: after the background slot is released for a background run, or right after the save for a synchronous call. It never runs inside `request_transcription` or inside the memory-capped worker, and any error in starting it is ignored.
+- Starts a detached, low-priority child process after the local result is cached: after the background slot is released for a background run, or, for a synchronous call, from a daemon thread so the caller gets its transcript without waiting for credentials or the trial state. A synchronous call whose process exits before that thread starts its child skips the shadow run; the transcript is unaffected. It never runs inside `request_transcription` or inside the memory-capped worker, and any error in starting it is ignored.
 - The child cuts the audio into 16 kHz mono MP3 pieces of 600 s with no overlap, and sends up to 4 pieces at a time. Each request has a 120 s timeout. Each returned segment gets `piece_index * 600` added to its start and end.
 - The language is the local result's language. `vad_filter` is false. There is no cutoff; this runs in the background.
 - If the local run found no speech, it still sends and logs `local_has_speech: false`. Cloudflare can make up text on silence; that is trial data.
