@@ -44,9 +44,15 @@ class FrameInfo:
     requested_timestamp: Optional[float] = None
     decoded_timestamp: Optional[float] = None
     timestamp_delta: Optional[float] = None
-    
+    # On-screen text read by OCR (read_text); kept out of the output unless it was asked for.
+    text: Optional[Dict[str, Any]] = None
+
     def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        d = asdict(self)
+        text = d.pop("text")
+        if text:
+            d.update(text)
+        return d
 
 @dataclass
 class TranscriptSegment:

@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 from typing import Dict, Any, Iterator, List, Optional, Tuple
 
+from src.retrieval import ocr
 from src.retrieval.engine import AgenticVideoEngine
 from src.core.config import Config
 from src.core.errors import AgenticVideoError, MediaNotFoundError, as_dependency_error
@@ -759,6 +760,10 @@ def _checked_arguments(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
     return kept
 
 
+# Tools whose read_text argument runs Apple Vision OCR on the returned frames.
+READ_TEXT_TOOLS = ("frame_at", "inspect_window")
+
+
 def handle_call(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
     """Validate the call, download URL sources, clamp over-cap arguments, and dispatch to AgenticVideoEngine."""
     if name not in _TOOL_SCHEMAS:
@@ -778,6 +783,11 @@ def handle_call(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
                          f"{problems}{hint}")
     unknown = sorted(set(args) - set(schema.get("properties", {})))
     args = _checked_arguments(name, args)
+    if name in READ_TEXT_TOOLS and args.get("read_text"):
+        try:
+            ocr.ensure_available(ocr.READ_TEXT_UNAVAILABLE)
+        except RuntimeError as exc:
+            raise ValueError(str(exc)) from exc
     url_args = {key: args[key] for key in ("source", "compare_to")
                 if isinstance(args.get(key), str) and fetch.is_url(args[key])}
     if url_args:
@@ -1096,14 +1106,16 @@ def _dispatch(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         start_sec = float(args.get("start_sec", 0.0))
         end_sec = float(args.get("end_sec", 0.0))
         fps = float(args.get("fps", 4.0))
-        res = engine.inspect_window(start_sec=start_sec, end_sec=end_sec, fps=fps)
+        res = engine.inspect_window(start_sec=start_sec, end_sec=end_sec, fps=fps,
+                                    read_text=bool(args.get("read_text", False)))
         d = res.to_dict()
         if res.contact_sheet_path:
             d["tool_file"] = make_tool_file(res.contact_sheet_path)
         return {"ok": True, "data": d}
         
     elif name == "frame_at":
-        data = engine.frame_at(time_sec=args.get("time_sec"), crop=args.get("crop"), scale=args.get("scale"))
+        data = engine.frame_at(time_sec=args.get("time_sec"), crop=args.get("crop"), scale=args.get("scale"),
+                               read_text=bool(args.get("read_text", False)))
         data["tool_file"] = make_tool_file(data["file_path"])
         return {"ok": True, "data": data}
 
