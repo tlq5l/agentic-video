@@ -1260,6 +1260,7 @@ class AgenticVideoEngine:
         cues: Optional[List[Dict[str, Any]]] = None,
         tolerance_ms: float = 80.0,
         bpm: Optional[float] = None,
+        verbose: bool = False,
     ) -> Dict[str, Any]:
         """Compare detected visual cuts and audio onsets to intended cues."""
         return compare_audio_video_sync(
@@ -1271,6 +1272,7 @@ class AgenticVideoEngine:
             # The search window must be at least the tolerance; 500 ms is the default.
             search_window_ms=max(500.0, float(tolerance_ms)),
             bpm=bpm,
+            verbose=verbose,
         )
 
     def watch_for(

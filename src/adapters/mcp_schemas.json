@@ -2748,7 +2748,7 @@
     },
     "sync_check": {
       "name": "sync_check",
-      "description": "Check audio/video sync: compares visual cuts with measured audio onsets, and optionally with intended sound cues (time_sec, label, optional band_hz), within tolerance_ms (0-5000, default 80). Returns per-cut and per-cue matches and unmatched strong onsets (each list shows at most 500 items; total_cuts and total_cues are the full counts). Needs an audio track. To look at the two signals separately use detect_cuts and audio_onsets.",
+      "description": "Check audio/video sync: compares visual cuts with measured audio onsets, and optionally with intended sound cues (time_sec, label, optional band_hz), within tolerance_ms (0-5000, default 80). Returns per-cut and per-cue matches and unmatched strong onsets (the cuts and unmatched_strong_onsets lists show at most 500 items each; the cues list is never cut short; total_cuts and total_cues are the full counts). Each cue reports candidate_onsets_count, the number of onsets near it; verbose true reports that cue's candidate_onsets list instead of the count. Needs an audio track. To look at the two signals separately use detect_cuts and audio_onsets.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -2819,6 +2819,11 @@
             "type": "number",
             "minimum": 20,
             "maximum": 300
+          },
+          "verbose": {
+            "description": "false (default) gives each cue candidate_onsets_count; true gives each cue candidate_onsets (the onsets near it with time_sec, offset_ms and strength) instead of the count.",
+            "type": "boolean",
+            "default": false
           }
         },
         "required": [
@@ -3215,6 +3220,10 @@
                     "additionalProperties": false
                   }
                 },
+                "candidate_onsets_count": {
+                  "type": "integer",
+                  "minimum": 0
+                },
                 "soft_attack_build": {
                   "type": "object",
                   "properties": {
@@ -3328,8 +3337,7 @@
                 "signature_excess_ratio",
                 "search_window_ms",
                 "match_method",
-                "ambiguous_reason",
-                "candidate_onsets"
+                "ambiguous_reason"
               ],
               "additionalProperties": false
             }

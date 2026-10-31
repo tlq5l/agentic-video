@@ -3094,6 +3094,7 @@ def sync_check(
     bpm: Optional[float] = None,
     beats_per_bar: float = 4.0,
     coincidence_ms: float = 5.0,
+    verbose: bool = False,
 ) -> Dict[str, Any]:
     """Compare cuts and cues, learning cue-group signatures to separate overlaps.
 
@@ -3101,7 +3102,11 @@ def sync_check(
     a cue find its own early/late sound beyond the in-tolerance match window.
     When `bpm` is known, candidate spectra are compared with uncued bars at the
     same beat phase so steady backing percussion does not mask a missing layer.
+    With `verbose` false each cue reports `candidate_onsets_count`; with `verbose`
+    true it reports the `candidate_onsets` list instead of the count.
     """
+    if not isinstance(verbose, bool):
+        raise ExtractionBoundsError("verbose must be true or false", {"verbose": verbose})
     tolerance = _finite_number(tolerance_ms, "tolerance_ms")
     if tolerance < 0.0 or tolerance > 5000.0:
         raise ExtractionBoundsError("tolerance_ms must satisfy 0 <= value <= 5000 (default 80)", {"tolerance_ms": tolerance})
@@ -3632,12 +3637,15 @@ def sync_check(
                 (cue_signatures[cue["group"]]["method"] if cue["group"] in cue_signatures else "broad_onset")
             ),
             "ambiguous_reason": reason,
-            "candidate_onsets": [
+        }
+        if verbose:
+            report["candidate_onsets"] = [
                 {"time_sec": float(item["time_sec"]), "offset_ms": round((float(item["time_sec"]) - cue_time) * 1000.0, 3),
                  "strength": float(item.get("strength", 0.0))}
                 for item in candidates_by_cue[cue_index]
-            ],
-        }
+            ]
+        else:
+            report["candidate_onsets_count"] = len(candidates_by_cue[cue_index])
         if cue_index in soft_attack_build_by_cue:
             report["soft_attack_build"] = soft_attack_build_by_cue[cue_index]
         if cue["band"] is not None:
