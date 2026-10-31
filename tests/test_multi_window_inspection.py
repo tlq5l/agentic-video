@@ -3,6 +3,7 @@
 import json
 import math
 import subprocess
+from fractions import Fraction
 from pathlib import Path
 
 import pytest
@@ -372,6 +373,73 @@ def test_frame_at_never_returns_a_frame_after_the_request(tmp_path, monkeypatch)
         assert _png_rgb(outcome["data"]["file_path"]) == frames[shown], time_sec
 
 
+def _write_h264_clip(path, rate, frames, *encoder_args):
+    subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi",
+         "-i", f"testsrc2=size=320x240:rate={rate}", "-frames:v", str(frames),
+         "-pix_fmt", "yuv420p", "-c:v", "libx264", *encoder_args,
+         "-fps_mode", "passthrough", str(path)],
+        check=True,
+    )
+    return str(path)
+
+
+def _timeline(path):
+    """The first video stream's time base, the container start, the frame pts (ticks, in
+    presentation order) and every frame's RGB bytes in that order, from one full decode."""
+    def probe(entries):
+        return subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", entries,
+             "-of", "csv=p=0", path],
+            capture_output=True, text=True, check=True,
+        ).stdout
+
+    time_base = Fraction(probe("stream=time_base").strip())
+    origin = Fraction(probe("format=start_time").strip())
+    pts = sorted(int(line) for line in probe("packet=pts").split())
+    raw = subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-i", path, "-fps_mode", "passthrough",
+         "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+        capture_output=True, check=True,
+    ).stdout
+    size = len(raw) // len(pts)
+    return time_base, origin, pts, [raw[i * size:(i + 1) * size] for i in range(len(pts))]
+
+
+def test_frame_at_picks_the_frame_on_screen_at_exact_frame_times(tmp_path, monkeypatch):
+    import src.executor.mcp_server as mcp_server
+    from src.core.config import Config
+
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    for name, rate in (("fast.mp4", "2000"), ("ntsc.mp4", "30000/1001")):
+        clip = _write_h264_clip(tmp_path / name, rate, 30, "-qp", "0", "-preset", "ultrafast")
+        time_base, origin, pts, pixels = _timeline(clip)
+        assert origin == 0 and len(set(pts)) == len(pts) == 30
+
+        def ask(ticks):
+            # The request is a JSON number: the float nearest to the exact time.
+            return mcp_server.handle_call("frame_at", {"source": clip, "time_sec": float(ticks * time_base - origin)})
+
+        def assert_shows(ticks, index):
+            outcome = ask(ticks)
+            assert outcome["ok"] is True
+            assert _png_rgb(outcome["data"]["file_path"]) == pixels[index], (name, float(ticks * time_base))
+            assert outcome["data"]["frame_time_sec"] == pytest.approx(float(pts[index] * time_base), abs=1e-6)
+
+        for index in (0, 1, 2, 17, 28):
+            assert_shows(pts[index], index)
+            assert_shows(Fraction(pts[index]) + Fraction(pts[index + 1] - pts[index], 2), index)
+            if index:
+                assert_shows(pts[index] - 1, index - 1)
+        with pytest.raises(ValueError, match="below the minimum 0"):
+            ask(pts[0] - 1)
+
+        end = pts[-1] + (pts[-1] - pts[-2])
+        assert_shows(end, len(pts) - 1)
+        with pytest.raises(ExtractionBoundsError, match=r"time_sec \S+ is outside the valid range"):
+            ask(end + 1)
+
+
 def test_frame_at_result_does_not_depend_on_earlier_calls(tmp_path, monkeypatch):
     import src.executor.mcp_server as mcp_server
     from src.core.config import Config
@@ -440,6 +508,78 @@ def test_frame_at_bounds_time_sec_to_the_media_duration(tmp_path, monkeypatch):
     outcome = mcp_server.handle_call("frame_at", {"source": clip, "time_sec": 2.0})
     assert outcome["data"]["frame_time_sec"] == pytest.approx(1.96, abs=1e-6)
     assert _png_rgb(outcome["data"]["file_path"]) == frames[1.96]
+
+    # The largest finite JSON number is refused as out of range, not as an arithmetic error.
+    with pytest.raises(ExtractionBoundsError, match=r"time_sec 1\.79769e\+308 is outside the valid range"):
+        mcp_server.handle_call("frame_at", {"source": clip, "time_sec": 1.7976931348623157e308})
+
+
+def test_frame_at_finds_the_frame_on_screen_past_b_frame_reordering(tmp_path, monkeypatch):
+    import src.executor.mcp_server as mcp_server
+    from src.core.config import Config
+
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    # 12 frames at 1 fps with B-frames: the decoder reads a later frame before the frames
+    # shown before it, so a short packet list misses them.
+    clip = _write_h264_clip(
+        tmp_path / "reordered.mp4", "1", 12,
+        "-preset", "ultrafast", "-x264-params", "b-adapt=0:bframes=3:scenecut=0",
+    )
+    frames = _frames_by_pts(clip)
+    assert sorted(frames) == [float(second) for second in range(12)]
+
+    for time_sec, shown in [(1.0, 1.0), (2.5, 2.0), (4.0, 4.0)]:
+        outcome = mcp_server.handle_call("frame_at", {"source": clip, "time_sec": time_sec})
+        assert outcome["ok"] is True
+        assert outcome["data"]["frame_time_sec"] == pytest.approx(shown, abs=1e-6), time_sec
+        assert _png_rgb(outcome["data"]["file_path"]) == frames[shown], time_sec
+
+
+def test_frame_at_reads_a_stream_that_starts_before_time_zero(tmp_path, monkeypatch):
+    import src.executor.mcp_server as mcp_server
+    from src.core.config import Config
+
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    base = _render_burned_clip(tmp_path / "base.mp4", duration=4.0)
+    early = str(tmp_path / "early.ts")
+    subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", base, "-c", "copy",
+         "-output_ts_offset", "-2", "-avoid_negative_ts", "disabled", "-f", "mpegts", early],
+        check=True,
+    )
+    start = float(subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=start_time", "-of", "csv=p=0", early],
+        capture_output=True, text=True, check=True,
+    ).stdout)
+    assert start < -0.5  # fixture check: the stream starts before time zero
+    frames = _frames_by_pts(early)
+
+    # Times count from the stream start, so the frame at time_sec t has source time t + start.
+    # The requests after the first second need a seek into the stream, not only a decode from its start.
+    for time_sec, shown in [(0.0, 0.0), (0.5, 0.48), (1.0, 1.0), (2.0, 2.0), (2.5, 2.48), (3.5, 3.48)]:
+        outcome = mcp_server.handle_call("frame_at", {"source": early, "time_sec": time_sec})
+        assert outcome["ok"] is True
+        assert outcome["data"]["frame_time_sec"] == pytest.approx(shown, abs=1e-6), time_sec
+        assert _png_rgb(outcome["data"]["file_path"]) == frames[round(shown + start, 6)], time_sec
+
+
+def test_frame_at_bounds_a_one_frame_mpeg_ts_by_its_packet_duration(tmp_path, monkeypatch):
+    import src.executor.mcp_server as mcp_server
+    from src.core.config import Config
+
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    single = str(tmp_path / "single.ts")
+    subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=25:duration=0.04",
+         "-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "ultrafast", "-f", "mpegts", single],
+        check=True,
+    )
+    # Newer FFmpeg builds print a trailing comma after the packet duration; the packet still lasts one frame.
+    outcome = mcp_server.handle_call("frame_at", {"source": single, "time_sec": 0.02})
+    assert outcome["ok"] is True
+    assert outcome["data"]["frame_time_sec"] == pytest.approx(0.0, abs=1e-6)
+    with pytest.raises(ExtractionBoundsError, match=r"time_sec 0\.05 is outside the valid range \[0, 0\.040\] s"):
+        mcp_server.handle_call("frame_at", {"source": single, "time_sec": 0.05})
 
 
 def test_frame_at_names_the_source_when_it_has_no_video(tmp_path, monkeypatch):
