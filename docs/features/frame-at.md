@@ -2,7 +2,7 @@
 
 How a user reaches it: `frame_at` (source, time_sec, optional crop {x, y, width, height} in source pixels, optional scale 1-4).
 
-Code: `src/media/frames.py` (`extract_frame_at`, `_video_end_ticks`, `_shown_frame_pts`, `_decode_frame_shown_at`), `src/media/timing.py` (`read_stream_clock`, `probe_packet_ticks`, `exact_request_seconds`, `parse_selected_frame_pts`), `src/media/probe.py` (displayed size), `src/retrieval/engine.py` (`frame_at`), `src/executor/mcp_server.py` (`frame_at` branch of `_dispatch`).
+Code: `src/media/frames.py` (`extract_frame_at`, `_video_end_ticks`, `_packets_through_request`, `_shown_frame_pts`, `_decode_frame_shown_at`), `src/media/timing.py` (`read_stream_clock`, `probe_packet_ticks`, `exact_request_seconds`, `parse_selected_frame_pts`), `src/media/probe.py` (displayed size), `src/retrieval/engine.py` (`frame_at`), `src/executor/mcp_server.py` (`frame_at` branch of `_dispatch`).
 
 How to check it works: `pytest tests/test_multi_window_inspection.py -k frame_at`.
 

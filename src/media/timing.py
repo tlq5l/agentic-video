@@ -230,15 +230,27 @@ def read_stream_clock(video_path: str | Path) -> StreamClock:
         ) from exc
 
 
+def _tick_value(raw: object) -> Optional[int]:
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, str) and _INTEGER_RE.fullmatch(raw):
+        return int(raw)
+    return None
+
+
 def probe_packet_ticks(video_path: str | Path, start_sec: float, end_sec: Optional[float]) -> List[Tuple[int, int]]:
-    """(pts, duration) in ticks of the first video stream's packets, from start_sec up to end_sec
-    (to the end of the file when None). ffprobe starts at the keyframe before start_sec, so the
-    list holds every packet from start_sec on, plus some earlier ones."""
+    """(pts, duration) in ticks of the first video stream's packets, in decode order, from start_sec
+    up to end_sec (to the end of the file when None). Times are on the container clock, so they may
+    be negative. ffprobe starts at the keyframe before start_sec, so the list holds every packet from
+    start_sec on, plus some earlier ones. A packet without a pts is left out; one without a duration
+    counts as 0."""
     interval = f"{start_sec:.6f}%" if end_sec is None else f"{start_sec:.6f}%{end_sec:.6f}"
     path = Path(video_path).resolve()
     proc = subprocess.run(
         ["ffprobe", "-v", "error", "-select_streams", "v:0", "-read_intervals", interval,
-         "-show_entries", "packet=pts,duration", "-of", "csv=p=0", str(path)],
+         "-show_entries", "packet=pts,duration", "-of", "json", str(path)],
         capture_output=True, text=True, timeout=Config.SUBPROCESS_TIMEOUT_SEC, check=False,
     )
     if proc.returncode != 0:
@@ -246,11 +258,18 @@ def probe_packet_ticks(video_path: str | Path, start_sec: float, end_sec: Option
             f"ffprobe could not list the frames of {path}: {proc.stderr.strip()}",
             {"video": str(path), "stderr": proc.stderr},
         )
+    try:
+        payload = json.loads(proc.stdout)
+    except ValueError as exc:
+        raise MediaCorruptError(
+            f"ffprobe printed no packet list for {path}",
+            {"video": str(path), "stderr": proc.stderr},
+        ) from exc
     packets: List[Tuple[int, int]] = []
-    for line in proc.stdout.splitlines():
-        pts_text, _, duration_text = line.partition(",")
-        if _INTEGER_RE.fullmatch(pts_text):
-            packets.append((int(pts_text), int(duration_text) if _INTEGER_RE.fullmatch(duration_text) else 0))
+    for packet in payload.get("packets", []):
+        pts = _tick_value(packet.get("pts"))
+        if pts is not None:
+            packets.append((pts, _tick_value(packet.get("duration")) or 0))
     return packets
 
 
@@ -272,6 +291,9 @@ def exact_request_seconds(value: float) -> Fraction:
     if value == 0:
         return Fraction(0)
     exact = Fraction(value)
-    low = (exact + Fraction(math.nextafter(value, -math.inf))) / 2
-    high = (exact + Fraction(math.nextafter(value, math.inf))) / 2
+    below = Fraction(math.nextafter(value, -math.inf))
+    above_value = math.nextafter(value, math.inf)
+    above = Fraction(above_value) if math.isfinite(above_value) else 2 * exact - below
+    low = (exact + below) / 2
+    high = (exact + above) / 2
     return _simplest_between(low, high)

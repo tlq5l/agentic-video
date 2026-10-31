@@ -32,15 +32,19 @@ LAST_FRAME_LOOKBACKS_SEC = (0.5, 5.0)
 # request; a window with no frame start in it (one frame lasting longer than the window) is
 # widened, and the last try starts at zero.
 FRAME_SHOWN_LOOKBACKS_SEC = (1.0, 10.0)
-# frame_at's packet list runs this far past the request, so it holds every frame up to the request.
+# frame_at's packet list first runs this far past the request; it is widened until the list
+# passes MAX_REORDER_FRAMES packets shown after the request, or reaches the end of the video.
 FRAME_LIST_AHEAD_SEC = 0.5
+# The most frames a decoder holds back for reordering (H.264 and HEVC allow 16). A frame shown
+# before the request is never decoded after this many frames shown after it.
+MAX_REORDER_FRAMES = 16
 # The end of a video is the end of its last packet, which is read from the last this many seconds.
 VIDEO_TAIL_READ_SEC = 10.0
 # frame_at's decoder starts this long before the chosen frame, so the frame is never skipped.
 FRAME_DECODE_LEAD_SEC = 1.0
 END_TOLERANCE_SEC = 0.001
 # Bump when the frame_at selection or decode chain changes, so saved PNGs made by the old chain are not reused.
-FRAME_AT_CACHE_VERSION = 4
+FRAME_AT_CACHE_VERSION = 5
 
 
 def _fps_if_within_media(vpath: Path, timestamp_sec: float, cache: MediaCache) -> Optional[float]:
@@ -168,9 +172,11 @@ def _decode_one_frame(
 def _video_end_ticks(vpath: Path, clock: StreamClock) -> int:
     """Where the video ends, in ticks: the end of its last packet. A last packet with no
     duration is taken to last one gap to the packet before it."""
-    packets = probe_packet_ticks(vpath, max(0.0, float(clock.duration) - VIDEO_TAIL_READ_SEC), None)
+    origin = float(clock.origin)
+    tail_start = max(origin, origin + float(clock.duration) - VIDEO_TAIL_READ_SEC)
+    packets = probe_packet_ticks(vpath, tail_start, None)
     if not packets:
-        packets = probe_packet_ticks(vpath, 0.0, None)
+        packets = probe_packet_ticks(vpath, origin, None)
     if not packets:
         raise MediaCorruptError(f"ffprobe found no video frames in {vpath}", {"video": str(vpath)})
     distinct = sorted({pts for pts, _ in packets})
@@ -178,16 +184,35 @@ def _video_end_ticks(vpath: Path, clock: StreamClock) -> int:
     return max(pts + (duration or gap) for pts, duration in packets)
 
 
-def _shown_frame_pts(vpath: Path, time_sec: float, request: Fraction, clock: StreamClock) -> int:
+def _packets_through_request(
+    vpath: Path, first_sec: Fraction, last_tick: int, clock: StreamClock, end_ticks: int,
+) -> List[Tuple[int, int]]:
+    """Packets from first_sec on, read far enough past the request (last_tick) that every frame
+    shown at or before it is in the list. ffprobe stops reading at the first packet past the end
+    of the window, and a B-frame can sit behind that packet in decode order. A frame shown before
+    the request comes at most MAX_REORDER_FRAMES frames after the frames shown after it in decode
+    order, so once more than that many packets lie after the request, none can be missing."""
+    video_end = end_ticks * clock.time_base
+    request_sec = last_tick * clock.time_base
+    ahead = FRAME_LIST_AHEAD_SEC
+    while True:
+        end = min(request_sec + Fraction(ahead), video_end)
+        packets = probe_packet_ticks(vpath, float(first_sec), float(end))
+        if end >= video_end or sum(1 for pts, _ in packets if pts > last_tick) > MAX_REORDER_FRAMES:
+            return packets
+        ahead *= 2
+
+
+def _shown_frame_pts(vpath: Path, time_sec: float, request: Fraction, clock: StreamClock, end_ticks: int) -> int:
     """The pts, in ticks, of the frame on screen at request (an exact time on the source clock):
     the largest frame pts at or before it. The packet list holds every frame up to the request,
     so that largest pts is the answer once the window holds a frame start; the window widens
     until it does, and a request before the first frame is refused."""
     last_tick = math.floor(request / clock.time_base)
     for lookback_sec in (*FRAME_SHOWN_LOOKBACKS_SEC, None):
-        first_sec = 0.0 if lookback_sec is None else max(0.0, float(request) - lookback_sec)
-        packets = probe_packet_ticks(vpath, first_sec, float(last_tick * clock.time_base) + FRAME_LIST_AHEAD_SEC)
-        first_tick = math.floor(Fraction(first_sec) / clock.time_base)
+        first_sec = clock.origin if lookback_sec is None else max(clock.origin, request - Fraction(lookback_sec))
+        packets = _packets_through_request(vpath, first_sec, last_tick, clock, end_ticks)
+        first_tick = math.floor(first_sec / clock.time_base)
         shown = [pts for pts, _ in packets if pts <= last_tick]
         if any(pts >= first_tick for pts in shown):
             return max(shown)
@@ -204,10 +229,9 @@ def _decode_frame_shown_at(vpath: Path, pts: int, clock: StreamClock, tmp_file: 
     The select keeps frames with exactly that pts; when a container gives several frames the
     same pts, the last one written stays, the one on screen last. The showinfo receipt must
     report pts, or the frame is refused."""
-    origin = float(clock.origin)
-    frame_sec = float(pts * clock.time_base)
-    start_sec = max(0.0, frame_sec - FRAME_DECODE_LEAD_SEC - origin)
-    read_sec = frame_sec - start_sec + FRAME_DECODE_LEAD_SEC + origin
+    frame_start = float(pts * clock.time_base) - float(clock.origin)
+    start_sec = max(0.0, frame_start - FRAME_DECODE_LEAD_SEC)
+    read_sec = frame_start - start_sec + FRAME_DECODE_LEAD_SEC
     proc = _run_ffmpeg_command(
         [
             "ffmpeg", "-y", "-copyts",
@@ -219,12 +243,12 @@ def _decode_frame_shown_at(vpath: Path, pts: int, clock: StreamClock, tmp_file: 
             "-fps_mode", "passthrough", "-update", "1",
             str(tmp_file),
         ],
-        vpath, frame_sec - origin, tmp_file,
+        vpath, frame_start, tmp_file,
     )
     if proc.returncode != 0 or not tmp_file.exists():
         _discard_file(tmp_file)
         raise MediaCorruptError(
-            f"FFmpeg failed extracting frame at {frame_sec - origin:.2f}s: {proc.stderr.strip()}",
+            f"FFmpeg failed extracting frame at {frame_start:.2f}s: {proc.stderr.strip()}",
             {"video": str(vpath), "stderr": proc.stderr}
         )
     receipt = parse_selected_frame_pts(proc.stderr)
@@ -234,7 +258,7 @@ def _decode_frame_shown_at(vpath: Path, pts: int, clock: StreamClock, tmp_file: 
             f"FFmpeg wrote the frame with pts {receipt} where pts {pts} was selected",
             {"video": str(vpath), "stderr": proc.stderr}
         )
-    return round(frame_sec - origin, 6)
+    return round(frame_start, 6)
 
 
 def extract_single_frame(
@@ -483,7 +507,7 @@ def extract_frame_at(
             f"time_sec {time_sec:g} is outside the valid range [0, {end_sec:.3f}] s",
             {"time_sec": time_sec, "duration_sec": end_sec},
         )
-    pts = _shown_frame_pts(vpath, time_sec, request, clock)
+    pts = _shown_frame_pts(vpath, time_sec, request, clock, end)
     decoded = _decode_frame_shown_at(vpath, pts, clock, tmp_file, ",".join(filters))
     from PIL import Image
     with Image.open(tmp_file) as im:

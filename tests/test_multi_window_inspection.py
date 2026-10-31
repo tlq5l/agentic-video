@@ -510,6 +510,85 @@ def test_frame_at_bounds_time_sec_to_the_media_duration(tmp_path, monkeypatch):
     assert outcome["data"]["frame_time_sec"] == pytest.approx(1.96, abs=1e-6)
     assert _png_rgb(outcome["data"]["file_path"]) == frames[1.96]
 
+    # The largest finite JSON number is refused as out of range, not as an arithmetic error.
+    with pytest.raises(ExtractionBoundsError, match=r"time_sec 1\.79769e\+308 is outside the valid range"):
+        mcp_server.handle_call("frame_at", {"source": clip, "time_sec": 1.7976931348623157e308})
+
+
+def _write_reordered_clip(path):
+    """12 frames at 1 fps, H.264 with B-frames: the decoder reads a later frame before the frames
+    shown before it, so a short packet list misses them."""
+    subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi",
+         "-i", "testsrc2=size=320x240:rate=1", "-frames:v", "12", "-pix_fmt", "yuv420p",
+         "-c:v", "libx264", "-preset", "ultrafast", "-x264-params", "b-adapt=0:bframes=3:scenecut=0",
+         "-fps_mode", "passthrough", str(path)],
+        check=True,
+    )
+    return str(path)
+
+
+def test_frame_at_finds_the_frame_on_screen_past_b_frame_reordering(tmp_path, monkeypatch):
+    import src.executor.mcp_server as mcp_server
+    from src.core.config import Config
+
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    clip = _write_reordered_clip(tmp_path / "reordered.mp4")
+    frames = _frames_by_pts(clip)
+    assert sorted(frames) == [float(second) for second in range(12)]
+
+    for time_sec, shown in [(1.0, 1.0), (2.5, 2.0), (4.0, 4.0)]:
+        outcome = mcp_server.handle_call("frame_at", {"source": clip, "time_sec": time_sec})
+        assert outcome["ok"] is True
+        assert outcome["data"]["frame_time_sec"] == pytest.approx(shown, abs=1e-6), time_sec
+        assert _png_rgb(outcome["data"]["file_path"]) == frames[shown], time_sec
+
+
+def test_frame_at_reads_a_stream_that_starts_before_time_zero(tmp_path, monkeypatch):
+    import src.executor.mcp_server as mcp_server
+    from src.core.config import Config
+
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    base = _render_burned_clip(tmp_path / "base.mp4")
+    early = str(tmp_path / "early.ts")
+    subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", base, "-c", "copy",
+         "-output_ts_offset", "-2", "-avoid_negative_ts", "disabled", "-f", "mpegts", early],
+        check=True,
+    )
+    start = float(subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=start_time", "-of", "csv=p=0", early],
+        capture_output=True, text=True, check=True,
+    ).stdout)
+    assert start < -0.5  # fixture check: the stream starts before time zero
+    frames = _frames_by_pts(early)
+
+    # Times count from the stream start, so the frame at time_sec t has source time t + start.
+    for time_sec, shown in [(0.0, 0.0), (0.5, 0.48), (1.0, 1.0)]:
+        outcome = mcp_server.handle_call("frame_at", {"source": early, "time_sec": time_sec})
+        assert outcome["ok"] is True
+        assert outcome["data"]["frame_time_sec"] == pytest.approx(shown, abs=1e-6), time_sec
+        assert _png_rgb(outcome["data"]["file_path"]) == frames[round(shown + start, 6)], time_sec
+
+
+def test_frame_at_bounds_a_one_frame_mpeg_ts_by_its_packet_duration(tmp_path, monkeypatch):
+    import src.executor.mcp_server as mcp_server
+    from src.core.config import Config
+
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    single = str(tmp_path / "single.ts")
+    subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=25:duration=0.04",
+         "-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "ultrafast", "-f", "mpegts", single],
+        check=True,
+    )
+    # Newer FFmpeg builds print a trailing comma after the packet duration; the packet still lasts one frame.
+    outcome = mcp_server.handle_call("frame_at", {"source": single, "time_sec": 0.02})
+    assert outcome["ok"] is True
+    assert outcome["data"]["frame_time_sec"] == pytest.approx(0.0, abs=1e-6)
+    with pytest.raises(ExtractionBoundsError, match=r"time_sec 0\.05 is outside the valid range \[0, 0\.040\] s"):
+        mcp_server.handle_call("frame_at", {"source": single, "time_sec": 0.05})
+
 
 def test_frame_at_names_the_source_when_it_has_no_video(tmp_path, monkeypatch):
     import src.executor.mcp_server as mcp_server
