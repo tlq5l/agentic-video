@@ -429,6 +429,25 @@ if mode == "serve":
 '''
 
 
+def _fresh_server_reply(cache_dir, marker, source):
+    fresh = subprocess.run(
+        [sys.executable, "-c", _OUTLIVING_WORKER_SERVER, str(cache_dir), str(marker), str(source), "once"],
+        cwd=Path(__file__).resolve().parents[1], stdin=subprocess.DEVNULL,
+        capture_output=True, text=True, timeout=60,
+    )
+    assert fresh.returncode == 0, fresh.stderr
+    return json.loads(fresh.stdout.strip().splitlines()[-1])["data"]
+
+
+def _assert_orphaned_reply(data):
+    assert data["status"] == "failed"
+    assert data["transcription_status"] == "failed"
+    assert data["retry_after_seconds"] == 15
+    assert "already running" not in data["transcription_message"]
+    assert "Retry this request" not in data["transcription_message"]
+    assert "no new attempt has started" in data["transcription_message"]
+
+
 @pytest.mark.skipif(os.name != "posix", reason="POSIX worker lock: the server is killed with SIGKILL")
 def test_transcribe_after_server_exit_is_not_reported_running(tmp_path):
     source = tmp_path / "clip.mkv"
@@ -456,17 +475,15 @@ def test_transcribe_after_server_exit_is_not_reported_running(tmp_path):
             assert time.monotonic() < deadline, "the stand-in worker never started"
             time.sleep(0.05)
         os.kill(server.pid, signal.SIGKILL)
-        server.wait(timeout=10)
+        # The killed server stays an unreaped zombie until this test collects it.
+        deadline = time.monotonic() + 10
+        while asr._process_state(server.pid) != "Z":
+            assert time.monotonic() < deadline, "the killed server did not become a zombie"
+            time.sleep(0.05)
 
-        fresh = subprocess.run(
-            [sys.executable, "-c", _OUTLIVING_WORKER_SERVER, str(cache_dir), str(marker), str(source), "once"],
-            cwd=root, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60,
-        )
-        assert fresh.returncode == 0, fresh.stderr
-        data = json.loads(fresh.stdout.strip().splitlines()[-1])["data"]
-        assert data["status"] != "in_progress"
-        assert data["transcription_status"] == "failed"
-        assert "already running" not in data["transcription_message"]
+        _assert_orphaned_reply(_fresh_server_reply(cache_dir, marker, source))
+        server.wait(timeout=10)
+        _assert_orphaned_reply(_fresh_server_reply(cache_dir, marker, source))
     finally:
         if server.poll() is None:
             server.kill()
@@ -478,6 +495,41 @@ def test_transcribe_after_server_exit_is_not_reported_running(tmp_path):
                 os.killpg(int(marker.read_text()), signal.SIGKILL)
             except ProcessLookupError:
                 pass
+
+
+def test_progress_estimate_follows_the_model_that_is_running(monkeypatch, tmp_path):
+    source = tmp_path / "long.mkv"
+    subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-y",
+         "-f", "lavfi", "-i", "testsrc=size=160x90:rate=1:duration=600",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=600",
+         "-c:v", "ffv1", "-c:a", "flac", str(source)],
+        check=True,
+    )
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(asr, "_installed_whisper_models", lambda: [])
+    lock, _, error = asr._acquire_background_process_lock(
+        Config.BASE_CACHE_DIR, str(source.resolve()), "tiny"
+    )
+    assert lock is not None and error is None
+    try:
+        # A tiny job that started 10 s ago. For this 600 s clip its estimate is 24 s; a small estimate would be 120 s.
+        lock.seek(0)
+        lock.truncate(0)
+        lock.write(json.dumps({
+            "pid": os.getpid(), "source_path": str(source.resolve()), "model_size": "tiny",
+            "started_at": time.time() - 10,
+        }).encode("utf-8"))
+        lock.flush()
+        response = handle_call("transcribe", {"source": str(source), "model_size": "small"})
+    finally:
+        asr._release_background_process_lock(lock)
+
+    data = response["data"]
+    assert data["transcription_status"] == "in_progress"
+    assert data["estimated_total_sec"] == 24
+    assert 40 <= data["estimated_percent"] <= 42
+    assert "A tiny transcription for this video is already running" in data["transcription_message"]
 
 
 def test_mcp_reports_a_failed_background_attempt(monkeypatch, tmp_path):
