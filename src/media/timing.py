@@ -239,13 +239,19 @@ def _tick_value(raw: object) -> Optional[int]:
     return None
 
 
-def probe_packet_ticks(video_path: str | Path, start_sec: float, end_sec: Optional[float]) -> List[Tuple[Optional[int], int]]:
+def probe_packet_ticks(
+    video_path: str | Path, start_sec: Optional[float], end_sec: Optional[float],
+) -> List[Tuple[Optional[int], int]]:
     """(pts, duration) in ticks of the first video stream's packets, in decode order, from start_sec up to
     end_sec (to the end of the file when None). Times are on the container clock, so they may be negative.
-    ffprobe starts at the keyframe before start_sec, so the list holds every packet from start_sec on, plus
-    some earlier ones. A packet without a pts (some AVI B-frames have none) has None as its pts; one without
-    a duration counts as 0."""
-    interval = f"{start_sec:.6f}%" if end_sec is None else f"{start_sec:.6f}%{end_sec:.6f}"
+    start_sec None reads from the first packet of the file: ffprobe drops packets before a start given as
+    a negative time or 0 (a stream that starts before zero loses its first frames), so the origin is never
+    passed as a start. ffprobe starts at the keyframe before start_sec, so the list holds every packet from
+    start_sec on, plus some earlier ones. A packet without a pts (some AVI B-frames have none) has None as
+    its pts; one without a duration counts as 0."""
+    start = "" if start_sec is None else f"{start_sec:.6f}"
+    end = "" if end_sec is None else f"{end_sec:.6f}"
+    interval = f"{start}%{end}"
     path = Path(video_path).resolve()
     proc = subprocess.run(
         ["ffprobe", "-v", "error", "-select_streams", "v:0", "-read_intervals", interval,
@@ -270,17 +276,23 @@ def probe_packet_ticks(video_path: str | Path, start_sec: float, end_sec: Option
     ]
 
 
-def probe_frame_ticks(video_path: str | Path, start_sec: float, end_sec: Optional[float]) -> List[Tuple[int, int]]:
+def probe_frame_ticks(
+    video_path: str | Path, start_sec: Optional[float], end_sec: Optional[float],
+) -> List[Tuple[int, int]]:
     """(pts, duration) in ticks of the first video stream's decoded frames, in presentation order, over the
-    same window as probe_packet_ticks. These are the timestamps FFmpeg's decoder and filter graph give each
-    frame, the ones the frame extraction selects by (showinfo's pts), so a frame whose packet has no pts
-    (some AVI B-frames, and the last frame of such a file) keeps its own start. Times stay on the container
-    clock (-copyts), and a frame with no reported pts is left out."""
+    same window as probe_packet_ticks (start_sec None decodes from the start of the file, with no seek). These
+    are the timestamps FFmpeg's decoder and filter graph give each frame, the ones the frame extraction selects
+    by (showinfo's pts), so a frame whose packet has no pts (some AVI B-frames, and the last frame of such a
+    file) keeps its own start. Times stay on the container clock (-copyts), and a frame with no reported pts
+    is left out. A seek can change the timestamps of a first frame, so callers pass None for the origin."""
     path = Path(video_path).resolve()
-    command = ["ffmpeg", "-nostdin", "-v", "info", "-copyts", "-ss", f"{start_sec:.6f}"]
+    command = ["ffmpeg", "-nostdin", "-v", "info", "-copyts"]
+    if start_sec is not None:
+        command += ["-ss", f"{start_sec:.6f}"]
+    command += ["-i", str(path), "-map", "0:v:0"]
     if end_sec is not None:
-        command += ["-t", f"{max(0.0, end_sec - start_sec):.6f}"]
-    command += ["-i", str(path), "-map", "0:v:0", "-vf", "showinfo", "-f", "null", "-"]
+        command += ["-to", f"{end_sec:.6f}"]
+    command += ["-vf", "showinfo", "-f", "null", "-"]
     proc = subprocess.run(command, capture_output=True, text=True, timeout=Config.SUBPROCESS_TIMEOUT_SEC, check=False)
     if proc.returncode != 0:
         raise MediaCorruptError(

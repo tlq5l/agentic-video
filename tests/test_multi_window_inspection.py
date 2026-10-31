@@ -570,6 +570,44 @@ def test_frame_at_keeps_avi_b_frames_that_have_no_packet_time(tmp_path, monkeypa
         assert outcome["data"]["frame_time_sec"] == pytest.approx((index + 1) / 25, abs=1e-6), time_sec
         assert _png_rgb(outcome["data"]["file_path"]) == frames[index], time_sec
 
+    # The same kind of AVI at 30000/1001 fps, where the first frame starts at one frame period (0.0334 s): the
+    # request at 0.5 s is the frame that starts at 14 x 1001 / 30000 s, and a full decode shows it.
+    ntsc = str(tmp_path / "ntsc.avi")
+    subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=160x90:r=30000/1001:d=2",
+         "-c:v", "mpeg4", "-bf", "2", ntsc],
+        check=True,
+    )
+    raw = subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-i", ntsc, "-fps_mode", "passthrough",
+         "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+        capture_output=True, check=True,
+    ).stdout
+    frames = [raw[i * size:(i + 1) * size] for i in range(len(raw) // size)]
+    outcome = mcp_server.handle_call("frame_at", {"source": ntsc, "time_sec": 0.5})
+    assert outcome["ok"] is True
+    assert outcome["data"]["frame_time_sec"] == pytest.approx(14 * 1001 / 30000, abs=1e-6)
+    assert _png_rgb(outcome["data"]["file_path"]) == frames[13]
+
+    # At 24 fps the last frame starts at 2.0 s and lasts to 2.0417 s, past the file's rounded duration:
+    # a request at 2.0208 s is that last frame, not the one before it.
+    avi24 = str(tmp_path / "avi24.avi")
+    subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=160x90:r=24:d=2",
+         "-c:v", "mpeg4", "-bf", "2", avi24],
+        check=True,
+    )
+    raw = subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-i", avi24, "-fps_mode", "passthrough",
+         "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+        capture_output=True, check=True,
+    ).stdout
+    frames = [raw[i * size:(i + 1) * size] for i in range(len(raw) // size)]
+    outcome = mcp_server.handle_call("frame_at", {"source": avi24, "time_sec": 2.0208333333333335})
+    assert outcome["ok"] is True
+    assert outcome["data"]["frame_time_sec"] == pytest.approx(2.0, abs=1e-6)
+    assert _png_rgb(outcome["data"]["file_path"]) == frames[len(frames) - 1]
+
 
 def test_frame_at_reads_a_stream_that_starts_before_time_zero(tmp_path, monkeypatch):
     import src.executor.mcp_server as mcp_server

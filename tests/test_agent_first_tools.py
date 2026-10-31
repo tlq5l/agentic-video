@@ -328,7 +328,7 @@ BAD_ARGUMENT_CALLS = [
     ("inspect_window", {"start_sec": "soon", "end_sec": 1}, "argument 'start_sec' must be a number (got 'soon'); expected seconds as a number or a MM:SS.mmm timecode"),
     ("inspect_window", {"start_sec": -1, "end_sec": 1}, "argument 'start_sec' is below the minimum 0 (got -1)"),
     ("count_repetitions", {"method": "fast"}, "argument 'method' is not one of the allowed values"),
-    ("count_repetitions", {"region": {"x": 0, "y": 0, "w": 1}}, "argument 'region' does not match any allowed form; expected an object with key(s) x, y, w, h; or an object with key(s) x, y, width, height; or a list, exactly 4 item(s)."),
+    ("count_repetitions", {"region": {"x": 0, "y": 0, "w": 1}}, "argument 'region' does not match any allowed form; expected an object with key(s) x, y, w, h; or an object with key(s) x, y, width, height; or an object with key(s) x, y, w, height; or an object with key(s) x, y, width, h; or a list, exactly 4 item(s)."),
     ("inspect_windows", {"windows": [{"start_sec": 0}]}, "argument 'windows[0]' is missing required key(s): end_sec"),
 ]
 

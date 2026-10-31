@@ -12,6 +12,8 @@ pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg n
 
 REGION_LIST = [0.1, 0.1, 0.5, 0.5]
 REGION_OBJECT = {"x": 0.1, "y": 0.1, "width": 0.5, "height": 0.5}
+MIXED_REGION = {"x": 0.1, "y": 0.1, "w": 0.5, "height": 0.5}
+MIXED_REGION_OTHER = {"x": 0.1, "y": 0.1, "width": 0.5, "h": 0.5}
 
 
 def _clip(path):
@@ -47,11 +49,18 @@ def test_guessed_argument_shapes_match_the_documented_ones_and_wrong_modes_name_
 
     # The published input schemas take every shortcut the server reads, and refuse the shapes it does not.
     published = {tool["name"]: tool["inputSchema"] for tool in TOOLS_MANIFEST}
+    # Each region tool takes the list and both object spellings, and the mixed spellings (w with height, width with h).
+    assert events(MIXED_REGION) == events(REGION_OBJECT)
     shortcuts = [
         ("inspect_moments", {"source": source, "moments": [1.0]}),
         ("inspect_moments", {"source": source, "moments": [{"time": 2.5}, {"t": 3}, {"time_sec": "00:02.500"}]}),
         ("track_region_events", {"source": source, "start_sec": 0, "end_sec": 6, "region": REGION_LIST}),
+        ("track_region_events", {"source": source, "start_sec": 0, "end_sec": 6, "region": MIXED_REGION}),
+        ("track_region_events", {"source": source, "start_sec": 0, "end_sec": 6, "region": MIXED_REGION_OTHER}),
+        ("track_region_changes", {"source": source, "start_sec": 0, "end_sec": 6, "region": MIXED_REGION_OTHER}),
         ("count_repetitions", {"source": source, "region": REGION_LIST}),
+        ("count_repetitions", {"source": source, "region": MIXED_REGION}),
+        ("count_repetitions", {"source": source, "region": MIXED_REGION_OTHER}),
     ]
     for name, args in shortcuts:
         jsonschema.validate(args, published[name])

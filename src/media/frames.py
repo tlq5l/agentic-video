@@ -44,7 +44,7 @@ VIDEO_TAIL_READ_SEC = 10.0
 FRAME_DECODE_LEAD_SEC = 1.0
 END_TOLERANCE_SEC = 0.001
 # Bump when the frame_at selection or decode chain changes, so saved PNGs made by the old chain are not reused.
-FRAME_AT_CACHE_VERSION = 7
+FRAME_AT_CACHE_VERSION = 8
 
 
 def _fps_if_within_media(vpath: Path, timestamp_sec: float, cache: MediaCache) -> Optional[float]:
@@ -169,25 +169,39 @@ def _decode_one_frame(
     return proc, last_frame_fallback
 
 
-def _frame_ticks(vpath: Path, start_sec: float, end_sec: Optional[float]) -> List[Tuple[int, int]]:
-    """(start, duration) in ticks of the frames from start_sec to end_sec (to the end of the file
-    when None), on the container clock. Packet times are used when every packet has one. Some AVI
-    files give B-frame packets no time, and dropping them would drop their frames; then the decoded
-    frames' times are read instead, so every decodable frame keeps its own start."""
-    packets = probe_packet_ticks(vpath, start_sec, end_sec)
-    if all(pts is not None for pts, _ in packets):
+def _reaches_back(frames: List[Tuple[Optional[int], int]], clock: StreamClock, start: Fraction, from_origin: bool) -> bool:
+    """True when a list read from start holds a frame at or before start, so it covers the window's start.
+    A list read from the stream origin always does."""
+    return from_origin or any(pts is not None and pts * clock.time_base <= start for pts, _ in frames)
+
+
+def _frame_ticks(vpath: Path, clock: StreamClock, start: Fraction, end_sec: Optional[float]) -> List[Tuple[int, int]]:
+    """(start, duration) in ticks of the frames from start (on the container clock, at or after the stream
+    origin) to end_sec (to the end of the file when None). Packet times are used when every packet has one
+    and the list reaches back to start. Some AVI files give B-frame packets no time, and dropping them would
+    drop their frames; then the decoded frames' times are read instead, so every decodable frame keeps its
+    own start. A seeked list that does not reach back to start is read again from the stream origin with no
+    seek, and the origin itself is never seeked: FFmpeg gives a first frame a different time after a seek."""
+    from_origin = start <= clock.origin
+    seek = None if from_origin else float(start)
+    packets = probe_packet_ticks(vpath, seek, end_sec)
+    if all(pts is not None for pts, _ in packets) and _reaches_back(packets, clock, start, from_origin):
         return [(pts, duration) for pts, duration in packets]
-    return probe_frame_ticks(vpath, start_sec, end_sec)
+    frames = probe_frame_ticks(vpath, seek, end_sec)
+    if _reaches_back(frames, clock, start, from_origin):
+        return frames
+    return probe_frame_ticks(vpath, None, end_sec)
 
 
 def _video_end_ticks(vpath: Path, clock: StreamClock) -> int:
-    """Where the video ends, in ticks: the end of its last frame. A last frame with no
-    duration is taken to last one gap to the frame before it."""
-    origin = float(clock.origin)
-    tail_start = max(origin, origin + float(clock.duration) - VIDEO_TAIL_READ_SEC)
-    frames = _frame_ticks(vpath, tail_start, None)
+    """Where the video ends, in ticks: the end of its last frame, read to the end of the file (no end
+    bound, so the final frame is never cut off). A last frame with no duration is taken to last one gap
+    to the frame before it."""
+    origin = clock.origin
+    tail_start = max(origin, origin + clock.duration - Fraction(VIDEO_TAIL_READ_SEC))
+    frames = _frame_ticks(vpath, clock, tail_start, None)
     if not frames:
-        frames = _frame_ticks(vpath, origin, None)
+        frames = _frame_ticks(vpath, clock, origin, None)
     if not frames:
         raise MediaCorruptError(f"ffprobe found no video frames in {vpath}", {"video": str(vpath)})
     distinct = sorted({pts for pts, _ in frames})
@@ -208,8 +222,9 @@ def _frames_through_request(
     ahead = FRAME_LIST_AHEAD_SEC
     while True:
         end = min(request_sec + Fraction(ahead), video_end)
-        frames = _frame_ticks(vpath, float(first_sec), float(end))
-        if end >= video_end or sum(1 for pts, _ in frames if pts > last_tick) > MAX_REORDER_FRAMES:
+        at_end = end >= video_end
+        frames = _frame_ticks(vpath, clock, first_sec, None if at_end else float(end))
+        if at_end or sum(1 for pts, _ in frames if pts > last_tick) > MAX_REORDER_FRAMES:
             return frames
         ahead *= 2
 

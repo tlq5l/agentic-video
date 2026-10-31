@@ -334,7 +334,7 @@ export interface CountRepetitionsInput {
   /** End of the window in seconds; defaults to the end of the video. Also accepts a timecode string in MM:SS.mmm form. */
   end_sec?: number | string | null;
   /** Fractions of the frame; uses w/h (width/height with the same meaning is also accepted), or the list [x, y, w, h]. Omit for the whole frame. */
-  region?: { x: number; y: number; w: number; h: number } | { x: number; y: number; width: number; height: number } | [number, number, number, number];
+  region?: { x: number; y: number; w: number; h: number } | { x: number; y: number; width: number; height: number } | { x: number; y: number; w: number; height: number } | { x: number; y: number; width: number; h: number } | [number, number, number, number];
   /** Sampling rate (default 10, maximum 15; larger values are clamped and the result says so). */
   fps?: number;
   /** auto (default) picks between motion, embedding and a periodicity check; motion or embedding forces that amplitude counter alone. */
@@ -666,7 +666,7 @@ export interface TrackRegionChangesInput {
   start_sec: number | string;
   end_sec: number | string;
   /** Fractions of the frame; uses width/height, not w/h (w/h with the same meaning is also accepted). */
-  region: { x: number; y: number; width: number; height: number } | { x: number; y: number; w: number; h: number } | [number, number, number, number];
+  region: { x: number; y: number; width: number; height: number } | { x: number; y: number; w: number; h: number } | { x: number; y: number; w: number; height: number } | { x: number; y: number; width: number; h: number } | [number, number, number, number];
   /** Sampling rate (default 0.25, maximum 10; larger values are clamped and the result says so). */
   sample_fps?: number;
   /** Decoded frame width in pixels (default 640, maximum 1920; larger values are clamped). */
@@ -728,7 +728,7 @@ export interface TrackRegionEventsInput {
   start_sec: number | string;
   end_sec: number | string;
   /** Fractions of the frame; uses width/height, not w/h (w/h with the same meaning is also accepted). */
-  region: { x: number; y: number; width: number; height: number } | { x: number; y: number; w: number; h: number } | [number, number, number, number];
+  region: { x: number; y: number; width: number; height: number } | { x: number; y: number; w: number; h: number } | { x: number; y: number; w: number; height: number } | { x: number; y: number; width: number; h: number } | [number, number, number, number];
   /** Sampling rate (default 0.25, maximum 10; larger values are clamped and the result says so). */
   sample_fps?: number;
   /** Decoded frame width in pixels (default 640, maximum 1920; larger values are clamped). */
