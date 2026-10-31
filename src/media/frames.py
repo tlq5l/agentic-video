@@ -213,9 +213,9 @@ def _shown_frame_pts(vpath: Path, time_sec: float, request: Fraction, clock: Str
         first_sec = clock.origin if lookback_sec is None else max(clock.origin, request - Fraction(lookback_sec))
         packets = _packets_through_request(vpath, first_sec, last_tick, clock, end_ticks)
         first_tick = math.floor(first_sec / clock.time_base)
-        shown = [pts for pts, _ in packets if pts <= last_tick]
-        if any(pts >= first_tick for pts in shown):
-            return max(shown)
+        shown = max((pts for pts, _ in packets if pts <= last_tick), default=None)
+        if shown is not None and shown >= first_tick:
+            return shown
     raise ExtractionBoundsError(
         f"no frame is on screen at time_sec {time_sec:g}: the first frame of this video starts later",
         {"video": str(vpath), "time_sec": time_sec},

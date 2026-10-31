@@ -373,12 +373,11 @@ def test_frame_at_never_returns_a_frame_after_the_request(tmp_path, monkeypatch)
         assert _png_rgb(outcome["data"]["file_path"]) == frames[shown], time_sec
 
 
-def _write_lossless_clip(path, rate, frames):
-    """320x240 test pattern at `rate` frames per second, lossless H.264 (qp 0)."""
+def _write_h264_clip(path, rate, frames, *encoder_args):
     subprocess.run(
         ["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi",
          "-i", f"testsrc2=size=320x240:rate={rate}", "-frames:v", str(frames),
-         "-pix_fmt", "yuv420p", "-c:v", "libx264", "-qp", "0", "-preset", "ultrafast",
+         "-pix_fmt", "yuv420p", "-c:v", "libx264", *encoder_args,
          "-fps_mode", "passthrough", str(path)],
         check=True,
     )
@@ -413,7 +412,7 @@ def test_frame_at_picks_the_frame_on_screen_at_exact_frame_times(tmp_path, monke
 
     monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
     for name, rate in (("fast.mp4", "2000"), ("ntsc.mp4", "30000/1001")):
-        clip = _write_lossless_clip(tmp_path / name, rate, 30)
+        clip = _write_h264_clip(tmp_path / name, rate, 30, "-qp", "0", "-preset", "ultrafast")
         time_base, origin, pts, pixels = _timeline(clip)
         assert origin == 0 and len(set(pts)) == len(pts) == 30
 
@@ -515,25 +514,17 @@ def test_frame_at_bounds_time_sec_to_the_media_duration(tmp_path, monkeypatch):
         mcp_server.handle_call("frame_at", {"source": clip, "time_sec": 1.7976931348623157e308})
 
 
-def _write_reordered_clip(path):
-    """12 frames at 1 fps, H.264 with B-frames: the decoder reads a later frame before the frames
-    shown before it, so a short packet list misses them."""
-    subprocess.run(
-        ["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi",
-         "-i", "testsrc2=size=320x240:rate=1", "-frames:v", "12", "-pix_fmt", "yuv420p",
-         "-c:v", "libx264", "-preset", "ultrafast", "-x264-params", "b-adapt=0:bframes=3:scenecut=0",
-         "-fps_mode", "passthrough", str(path)],
-        check=True,
-    )
-    return str(path)
-
-
 def test_frame_at_finds_the_frame_on_screen_past_b_frame_reordering(tmp_path, monkeypatch):
     import src.executor.mcp_server as mcp_server
     from src.core.config import Config
 
     monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
-    clip = _write_reordered_clip(tmp_path / "reordered.mp4")
+    # 12 frames at 1 fps with B-frames: the decoder reads a later frame before the frames
+    # shown before it, so a short packet list misses them.
+    clip = _write_h264_clip(
+        tmp_path / "reordered.mp4", "1", 12,
+        "-preset", "ultrafast", "-x264-params", "b-adapt=0:bframes=3:scenecut=0",
+    )
     frames = _frames_by_pts(clip)
     assert sorted(frames) == [float(second) for second in range(12)]
 

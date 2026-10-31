@@ -231,9 +231,7 @@ def read_stream_clock(video_path: str | Path) -> StreamClock:
 
 
 def _tick_value(raw: object) -> Optional[int]:
-    if isinstance(raw, bool):
-        return None
-    if isinstance(raw, int):
+    if isinstance(raw, int) and not isinstance(raw, bool):
         return raw
     if isinstance(raw, str) and _INTEGER_RE.fullmatch(raw):
         return int(raw)
