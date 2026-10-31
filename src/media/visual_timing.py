@@ -190,7 +190,12 @@ _BLACK_CACHE_KEY = "black_ranges_v1"
 
 
 def _is_number(value: Any) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
 
 
 def _cached_black_ranges(cache: MediaCache, fingerprint: str) -> Optional[Dict[str, Any]]:

@@ -87,6 +87,8 @@ def test_review_video_replaces_a_damaged_black_cache_entry(tmp_path, monkeypatch
         {"frame_rate": 30.0},
         {"frame_rate": 30.0, "ranges": [{"start_sec": "0"}]},
         {"frame_rate": 30.0, "ranges": [{"start_sec": 1.0, "end_sec": 0.5, "duration_sec": 0.5}]},
+        {"frame_rate": 10 ** 400, "ranges": []},
+        {"frame_rate": 30.0, "ranges": [{"start_sec": 0.0, "end_sec": 2.0, "duration_sec": 10 ** 400}]},
     ]
     for entry in damaged_entries:
         cache.save_json(fingerprint, "black_ranges_v1", entry)
