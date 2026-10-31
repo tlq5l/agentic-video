@@ -1115,7 +1115,7 @@
     },
     "review_video": {
       "name": "review_video",
-      "description": "First look at a video in ONE call: container metadata (duration, size, fps, codecs, has_audio), a contact sheet image with burned timestamp badges (default 24 samples; `samples` up to 150, larger values are clamped and the result says so), every cut and transition from detect_cuts, and a loudness summary (average and peak level, silence gaps, the strongest band-energy outliers with their times). It runs probe_video, contact_sheet, detect_cuts and loudness_timeline for you, so start here instead of calling them one by one. Finishes in a few seconds on clips up to about 10 minutes. `loudness` is null when the video has no audio track. Use the times it returns to zoom in with inspect_window or spectrogram_window; for a different threshold, window or time range call detect_cuts or loudness_timeline directly. Any step failing fails the whole call with that step's error message.",
+      "description": "First look at a video in ONE call: container metadata (duration, size, fps, codecs, has_audio), a contact sheet image with burned timestamp badges (default 24 samples; `samples` up to 150, larger values are clamped and the result says so), every cut and transition from detect_cuts, every near-black stretch of at least 0.2 s (`black_ranges`: start, end and duration; at most 50 are listed and `black_total` counts them all), and a loudness summary (average and peak level, silence gaps, the strongest band-energy outliers with their times). It runs probe_video, contact_sheet, detect_cuts, the black scan and loudness_timeline for you, so start here instead of calling them one by one. A first call on a 10-minute 1080p clip takes about 35 s (the cuts scan and the black scan share one decode of the file); repeat calls on the same file return from cache. `loudness` is null when the video has no audio track. Use the times it returns to zoom in with inspect_window or spectrogram_window; for a different threshold, window or time range call detect_cuts or loudness_timeline directly. Any step failing fails the whole call with that step's error message.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1209,6 +1209,41 @@
             "minimum": 1,
             "description": "How many cuts entries were left out of the list."
           },
+          "black_ranges": {
+            "type": "array",
+            "description": "Stretches of at least 0.2 s where the picture is near-black, in time order. At most 50 are listed; black_total is the full count.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "start_sec": {
+                  "type": "number"
+                },
+                "end_sec": {
+                  "type": "number"
+                },
+                "duration_sec": {
+                  "type": "number",
+                  "minimum": 0.2
+                }
+              },
+              "required": [
+                "start_sec",
+                "end_sec",
+                "duration_sec"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "black_total": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "How many near-black stretches were found in all."
+          },
+          "black_ranges_omitted": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "How many black_ranges entries were left out of the list."
+          },
           "loudness": {
             "type": [
               "object",
@@ -1299,6 +1334,8 @@
               "contact_sheet",
               "cuts",
               "cuts_total",
+              "black_ranges",
+              "black_total",
               "loudness"
             ]
           },

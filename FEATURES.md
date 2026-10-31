@@ -3,7 +3,7 @@
 One line per feature: name | what it does | words people use | details page.
 
 - mcp-responses | how every MCP tool result is sent (size limit, inline images, errors) | Internal tool error, too big, tool_file | docs/features/mcp-responses.md
-- review-video | review_video: metadata, contact sheet, cuts and loudness summary in one call (first look at a clip) | first look, review a video, probe then contact sheet then cuts, one call | docs/features/review-video.md
+- review-video | review_video: metadata, contact sheet, cuts, near-black stretches and loudness summary in one call (first look at a clip) | first look, review a video, probe then contact sheet then cuts, one call | docs/features/review-video.md
 - contact-sheets | contact_sheet, inspect_window(s) and other sheet images | contact sheet, overview, inspect windows, slow | docs/features/contact-sheets.md
 - frame-at | frame_at: one frame at native size as a PNG, optional crop and 1-4x Lanczos upscale, no timestamp drawn; read_text adds the on-screen text lines (Apple Vision) | exact frame, full size, zoom, crop, read small text, screenshot at time, raw ffmpeg, what does the sign say, read text on screen, OCR, code line | docs/features/frame-at.md
 - loudness-timeline | loudness_timeline: RMS, peak, bands, silence, outliers | loudness, peak, dBFS, clipping | docs/features/loudness-timeline.md
