@@ -119,3 +119,24 @@ def test_review_video_decoder_failure_is_an_error_and_leaves_no_black_result(tmp
     healthy = handle_call("review_video", {"source": clip})
     assert healthy["ok"] is True, healthy
     assert [(s["start_sec"], s["end_sec"]) for s in healthy["data"]["black_ranges"]] == [(0.0, 2.0)]
+
+
+def test_black_stretch_across_a_scan_part_seam_is_listed_whole(tmp_path, monkeypatch):
+    # The cut scan decodes a long file as parts, and the black levels come from that decode, so the
+    # seams of the parts must not cut a stretch in two. The split is forced on this short clip.
+    from src.media import scene
+
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(Config, "TEMP_DIR", tmp_path / "tmp")
+    monkeypatch.setattr(scene, "SCAN_SPLIT_MIN_SEC", 4)
+    monkeypatch.setattr(scene, "SCAN_MIN_PART_SEC", 2)
+    monkeypatch.setattr(scene.os, "cpu_count", lambda: 8)
+    clip = _write_lossless_clip(tmp_path / "seam.mkv", [("0x3a3a3a", 5.8), ("black", 0.6), ("0x3a3a3a", 5.6)])
+    assert len(scene._scan_plan(clip, 0.0, None)) > 1
+
+    result = handle_call("review_video", {"source": clip})
+    assert result["ok"] is True, result
+    [stretch] = result["data"]["black_ranges"]
+    frame = 1 / 30
+    assert abs(stretch["start_sec"] - 5.8) <= frame + 1e-6
+    assert abs(stretch["end_sec"] - 6.4) <= frame + 1e-6

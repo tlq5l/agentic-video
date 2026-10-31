@@ -861,12 +861,13 @@ def _dispatch(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
     elif name == "review_video":
         # Any step failing fails the whole call with that step's own error.
         meta = engine.probe().to_dict()
-        # The black scan decodes the whole file like detect_cuts does, so it runs beside it.
+        # The black scan runs the cut scan's decode and fills the cache detect_cuts reads, so it
+        # must finish before detect_cuts; the contact sheet runs beside it.
         with ThreadPoolExecutor(max_workers=1) as pool:
             black_scan = pool.submit(visual_timing.black_ranges, source)
             sheet = _dispatch("contact_sheet", {"source": source, "samples": args.get("samples", 24)})["data"]
-            cuts = _dispatch("detect_cuts", {"source": source})["data"]
             black = black_scan.result()
+            cuts = _dispatch("detect_cuts", {"source": source})["data"]
         data = {"metadata": meta, "contact_sheet": sheet, "cuts": cuts["cuts"], "cuts_total": cuts["total"],
                 "black_ranges": black["ranges"], "black_total": len(black["ranges"]),
                 "loudness": _loudness_summary(engine.loudness_timeline()) if meta["has_audio"] else None}

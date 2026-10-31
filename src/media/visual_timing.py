@@ -22,8 +22,8 @@ import numpy as np
 from src.core.cache import MediaCache
 from src.core.config import Config
 from src.core.errors import MediaCorruptError, MediaNotFoundError
+from src.media.scene import GRID_SIZE as _GRID, brightest_levels, scan_scene_changes
 
-_GRID = (160, 90)
 _CELL_CHANGE = 6.0
 # A frame stands out when its change share is at least this much above the
 # local median, and at least double it.
@@ -158,7 +158,7 @@ def _runs(flags: np.ndarray) -> List[tuple]:
 
 def _brightest_percent(path: Path, rate: float) -> np.ndarray:
     """Per frame, the grey level of its brightest 1% of grid cells (the near-black test)."""
-    return np.asarray([float(np.percentile(frame, 99)) for frame in _grid_frames(path, rate)])
+    return brightest_levels(_grid_frames(path, rate))
 
 
 def blank_flashes(source: str) -> Dict[str, Any]:
@@ -228,7 +228,12 @@ def black_ranges(source: str, cache: Optional[MediaCache] = None) -> Dict[str, A
     if cached is not None:
         return cached
     rate = _frame_rate(path)
-    blank = _brightest_percent(path, rate) < _BLANK_P99
+    # The cut scan decodes the whole file anyway and can emit these grid levels from that decode,
+    # so detect_cuts reads the cache this fills instead of decoding again.
+    levels = scan_scene_changes(str(path), cache=cache, defer_echoes=True, grid_rate=rate)
+    if levels is None:
+        levels = _brightest_percent(path, rate)
+    blank = levels < _BLANK_P99
     ranges: List[Dict[str, Any]] = []
     for index, end in _runs(blank):
         frames = end - index + 1
