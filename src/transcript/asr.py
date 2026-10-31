@@ -225,10 +225,18 @@ class _BackgroundTranscriptionSlot:
             process_lock, owner, lock_error = _acquire_background_process_lock(
                 Config.BASE_CACHE_DIR, key[0], key[1]
             )
-            if process_lock is None and lock_error is None and owner and _owner_server_exited(owner):
-                process_lock, owner, lock_error = _wait_for_released_lock(Config.BASE_CACHE_DIR, key)
-                if process_lock is None and lock_error is None and owner and _owner_server_exited(owner):
-                    return "orphaned", None
+            if process_lock is None and lock_error is None and owner:
+                exited = _owner_server_exited(owner)
+                if exited is None:
+                    return "unverified", None
+                if exited:
+                    process_lock, owner, lock_error = _wait_for_released_lock(Config.BASE_CACHE_DIR, key)
+                    if process_lock is None and lock_error is None and owner:
+                        exited = _owner_server_exited(owner)
+                        if exited is None:
+                            return "unverified", None
+                        if exited:
+                            return "orphaned", None
             if process_lock is None:
                 if lock_error:
                     return "start_failed", lock_error
@@ -362,30 +370,38 @@ def _release_background_process_lock(lock_file: Any) -> None:
         lock_file.close()
 
 
-def _process_state(pid: int) -> str:
-    """The first letter of the process state from ps ("Z" is a zombie); empty when ps cannot say."""
+def _process_state(pid: int) -> Optional[str]:
+    """The first letter of the process state from ps ("Z" is a zombie); None when ps fails, is denied or prints nothing."""
     try:
         completed = subprocess.run(
             ["ps", "-o", "stat=", "-p", str(pid)],
             capture_output=True, text=True, timeout=5,
         )
     except (OSError, subprocess.SubprocessError):
-        return ""
-    return completed.stdout.strip()[:1]
+        return None
+    state = completed.stdout.strip()[:1]
+    if completed.returncode != 0 or not state:
+        return None
+    return state
 
 
-def _owner_server_exited(owner: dict) -> bool:
-    """True when the server that wrote this lock record has exited or is an unreaped zombie (POSIX; unknown counts as running)."""
-    pid = owner.get("pid")
-    if os.name != "posix" or not isinstance(pid, int) or pid <= 0:
+def _owner_server_exited(owner: dict) -> Optional[bool]:
+    """Whether the server that wrote this lock record has exited: True when it is gone or an unreaped zombie, False while it runs, None when ps cannot say (POSIX; other platforms report False)."""
+    if os.name != "posix":
         return False
+    pid = owner.get("pid")
+    if not isinstance(pid, int) or pid <= 0:
+        return None
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
         return True
     except PermissionError:
-        return False
-    return _process_state(pid) == "Z"
+        pass
+    state = _process_state(pid)
+    if state is None:
+        return None
+    return state == "Z"
 
 
 def _wait_for_released_lock(
@@ -1084,7 +1100,8 @@ def request_transcription(source_path: str, model_size: str) -> Dict[str, Any]:
 
     state, error = _BACKGROUND_TRANSCRIPTION_SLOT.start(source_path, model_size)
     # An orphaned attempt is still reported as failed; its retry note says the slot is held.
-    wire_state = "failed" if state == "orphaned" else state
+    # An attempt whose owner could not be checked is reported as start_failed, retryable.
+    wire_state = {"orphaned": "failed", "unverified": "start_failed"}.get(state, state)
     retry_after = 0 if state == "failed" else TRANSCRIPTION_RETRY_AFTER_SECONDS
     message_by_state = {
         "started": f"The {model_size} transcription started in the background.",
@@ -1099,6 +1116,10 @@ def request_transcription(source_path: str, model_size: str) -> Dict[str, Any]:
             f"The server that started the {model_size} transcription exited before it finished, "
             "and its worker still holds the transcription slot, so no new attempt has started."
         ),
+        "unverified": (
+            "The server that holds the transcription slot could not be checked, "
+            "so no new attempt has started."
+        ),
     }
     message = message_by_state[state]
     if state == "failed":
@@ -1108,6 +1129,8 @@ def request_transcription(source_path: str, model_size: str) -> Dict[str, Any]:
             f" Call this tool again after about {retry_after} seconds; a new attempt starts "
             "once that worker has stopped."
         )
+    elif state == "unverified":
+        retry_note = f" Call this tool again after about {retry_after} seconds."
     else:
         retry_note = f" Call this tool again after about {retry_after} seconds to get the transcript."
     if result is not None:

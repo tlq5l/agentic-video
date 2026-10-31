@@ -429,11 +429,11 @@ if mode == "serve":
 '''
 
 
-def _fresh_server_reply(cache_dir, marker, source):
+def _fresh_server_reply(cache_dir, marker, source, env=None):
     fresh = subprocess.run(
         [sys.executable, "-c", _OUTLIVING_WORKER_SERVER, str(cache_dir), str(marker), str(source), "once"],
         cwd=Path(__file__).resolve().parents[1], stdin=subprocess.DEVNULL,
-        capture_output=True, text=True, timeout=60,
+        capture_output=True, text=True, timeout=60, env=env,
     )
     assert fresh.returncode == 0, fresh.stderr
     return json.loads(fresh.stdout.strip().splitlines()[-1])["data"]
@@ -480,6 +480,21 @@ def test_transcribe_after_server_exit_is_not_reported_running(tmp_path):
         while asr._process_state(server.pid) != "Z":
             assert time.monotonic() < deadline, "the killed server did not become a zombie"
             time.sleep(0.05)
+
+        # A ps that is denied cannot tell whether the zombie is gone, so the reply is retryable, not running.
+        ps_denied_dir = tmp_path / "ps-denied"
+        ps_denied_dir.mkdir()
+        for tool in ("ffmpeg", "ffprobe"):
+            os.symlink(shutil.which(tool), ps_denied_dir / tool)
+        (ps_denied_dir / "ps").write_text("#!/bin/sh\necho 'ps: permission denied' >&2\nexit 1\n")
+        (ps_denied_dir / "ps").chmod(0o755)
+        unverified = _fresh_server_reply(
+            cache_dir, marker, source, env=dict(os.environ, PATH=str(ps_denied_dir)))
+        assert unverified["status"] == "start_failed"
+        assert unverified["transcription_status"] == "start_failed"
+        assert unverified["retry_after_seconds"] == 15
+        assert "already running" not in unverified["transcription_message"]
+        assert "could not be checked" in unverified["transcription_message"]
 
         _assert_orphaned_reply(_fresh_server_reply(cache_dir, marker, source))
         server.wait(timeout=10)
