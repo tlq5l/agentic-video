@@ -106,7 +106,7 @@ def _ask(
         "audio": [{"content_type": "audio/wav", "base64": audio_b64}],
         "questions": {"sound": {"type": "choice", "instructions": "Which sound is heard in this clip?", "criteria": options}},
     }).encode("utf-8")
-    raw = run_model(MODEL, account, token, body, REQUEST_TIMEOUT_SEC, cutoff)
+    raw = run_model(f"@cf/cloudflare/{MODEL}", account, token, body, REQUEST_TIMEOUT_SEC, cutoff)
     try:
         payload = json.loads(raw)
         result = payload.get("result") or {}

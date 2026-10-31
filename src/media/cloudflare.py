@@ -109,13 +109,14 @@ def reply_excerpt(raw: bytes | str, token: str) -> str:
 
 
 def run_model(model: str, account: str, token: str, body: bytes, timeout_sec: float, cutoff: Optional[float] = None) -> bytes:
-    """POST one Workers AI run and return the raw reply.
+    """POST one Workers AI run and return the raw reply. `model` is the full model path, for example
+    "@cf/cloudflare/clef" or "@cf/openai/whisper-large-v3-turbo".
 
     One retry after a 429, 5xx or network error, never past `cutoff` (a time.monotonic() value; None means no
     limit). A 401 or 403 drops the kept command token. Every error text has the token removed.
     """
     request = urllib.request.Request(
-        f"{api_base()}/accounts/{account}/ai/run/@cf/cloudflare/{model}", data=body, method="POST",
+        f"{api_base()}/accounts/{account}/ai/run/{model}", data=body, method="POST",
         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
     )
     failure = "no reply"

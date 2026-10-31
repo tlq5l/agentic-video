@@ -18,6 +18,7 @@ from src.core.types import TranscriptSegment, TranscriptResult, VideoMetadata
 from src.core.cache import MediaCache
 from src.media.probe import probe_video
 from src.transcript.repeats import flag_repeated_segments
+from src.transcript import shadow_cf_asr
 
 def parse_srt_or_vtt(subtitle_path: Path) -> List[TranscriptSegment]:
     """Parse SRT or WebVTT file into TranscriptSegments."""
@@ -246,6 +247,9 @@ class _BackgroundTranscriptionSlot:
 
         def run() -> None:
             _ASR_WORKER_LOCK.lock_file = process_lock
+            _ASR_WORKER_LOCK.fresh_run = None
+            succeeded = False
+            began = time.monotonic()
             try:
                 result = transcribe_video(
                     key[0], model_size=key[1], allow_long_run=True
@@ -255,6 +259,7 @@ class _BackgroundTranscriptionSlot:
                         ASR_WORKER_FAILURE_NOTICE,
                         {"source_path": key[0], "model_size": key[1]},
                     )
+                succeeded = True
             except Exception as exc:
                 with self._lock:
                     failure = as_dependency_error(exc)
@@ -262,11 +267,18 @@ class _BackgroundTranscriptionSlot:
                     while len(self._failures) > 16:
                         del self._failures[next(iter(self._failures))]
             finally:
+                fresh_run = _ASR_WORKER_LOCK.fresh_run if succeeded else None
                 _ASR_WORKER_LOCK.lock_file = None
+                _ASR_WORKER_LOCK.fresh_run = None
                 _release_background_process_lock(process_lock)
                 with self._lock:
                     if self._active == key:
                         self._active = None
+            if fresh_run is not None:
+                # The cache is saved and the slot is free; the shadow trial (a detached child) never raises here.
+                shadow_cf_asr.start_after_fresh_run(
+                    key[0], key[1], fresh_run["result"], fresh_run["fingerprint"], time.monotonic() - began,
+                )
 
         worker = threading.Thread(
             target=run,
@@ -1522,6 +1534,9 @@ finally:
                         "ASR completed but its transcript could not be cached.",
                         {"source_path": str(p), "model_size": model_size},
                     )
+                # A fresh run (not a cache hit): the background thread in request_transcription reads this
+                # after it releases the slot and then starts the shadow trial.
+                _ASR_WORKER_LOCK.fresh_run = {"result": res, "fingerprint": meta.fingerprint}
                 return _with_repeat_flags(res)
             # Worker ran but reported a clean, actionable failure (e.g. invalid model
             # name): surface it instead of masking it as "no speech".

@@ -64,7 +64,7 @@ def _ask(
         "images": ["data:image/jpeg;base64," + base64.b64encode(jpeg).decode("ascii")],
         "questions": {f"q{i}": {"type": "noul", "instructions": text} for i, text in enumerate(questions)},
     }).encode("utf-8")
-    raw = run_model(MODEL, account, token, body, REQUEST_TIMEOUT_SEC, cutoff)
+    raw = run_model(f"@cf/cloudflare/{MODEL}", account, token, body, REQUEST_TIMEOUT_SEC, cutoff)
     try:
         payload = json.loads(raw)
         answers = (payload.get("result") or {}).get("answers") or {}
