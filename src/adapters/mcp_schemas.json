@@ -586,7 +586,7 @@
             "minimum": 0
           },
           "region": {
-            "description": "Rectangle that contains the repeating motion, as fractions of the frame: x, y (top-left) and w, h (size), with x+w <= 1 and y+h <= 1. Uses w/h; width/height with the same meaning is also accepted. Omit for the whole frame.",
+            "description": "Rectangle that contains the repeating motion, as fractions of the frame: x, y (top-left) and w, h (size), with x+w <= 1 and y+h <= 1. Uses w/h; width/height with the same meaning is also accepted. For example: {\"x\": 0.25, \"y\": 0.1, \"w\": 0.5, \"h\": 0.6}. Omit for the whole frame.",
             "anyOf": [
               {
                 "type": "object",
@@ -993,7 +993,7 @@
           "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
           "query": { "type": "string", "minLength": 1, "description": "Words or a phrase to find in the speech, e.g. 'launch date'. Punctuation and case are ignored." },
           "top_k": { "type": "integer", "minimum": 1, "maximum": 50, "default": 5, "description": "Maximum hits (default 5, maximum 50; larger values are clamped to 50 and the result says so)." },
-          "mode": { "type": "string", "enum": ["hybrid", "lexical"], "default": "hybrid", "description": "hybrid (default): keyword matches first, then matches by meaning. lexical: keyword matches only." }
+          "mode": { "type": "string", "enum": ["hybrid", "lexical"], "default": "hybrid", "description": "hybrid (default): keyword matches first, then matches by meaning. lexical: keyword matches only. For example: \"mode\": \"lexical\"." }
         },
         "required": ["source", "query"],
         "additionalProperties": false
@@ -1424,7 +1424,7 @@
           "start_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "Start of the range in seconds. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
           "end_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "End of the range in seconds; must be within the video. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
           "region": {
-            "description": "Rectangle to watch, as fractions of the frame: x, y (top-left) and width, height, with x+width <= 1 and y+height <= 1. Uses width/height, not w/h; w/h with the same meaning is also accepted.",
+            "description": "Rectangle to watch, as fractions of the frame: x, y (top-left) and width, height, with x+width <= 1 and y+height <= 1. Uses width/height, not w/h; w/h with the same meaning is also accepted. For example: {\"x\": 0.25, \"y\": 0.1, \"width\": 0.5, \"height\": 0.6}.",
             "anyOf": [
               {
                 "type": "object",
@@ -1543,7 +1543,7 @@
           "start_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "Start of the range in seconds. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
           "end_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "End of the range in seconds; must be within the video. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
           "region": {
-            "description": "Rectangle to watch, as fractions of the frame: x, y (top-left) and width, height, with x+width <= 1 and y+height <= 1. Uses width/height, not w/h; w/h with the same meaning is also accepted.",
+            "description": "Rectangle to watch, as fractions of the frame: x, y (top-left) and width, height, with x+width <= 1 and y+height <= 1. Uses width/height, not w/h; w/h with the same meaning is also accepted. For example: {\"x\": 0.25, \"y\": 0.1, \"width\": 0.5, \"height\": 0.6}.",
             "anyOf": [
               {
                 "type": "object",
