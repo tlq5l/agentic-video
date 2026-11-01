@@ -1021,7 +1021,7 @@ export interface AudioOnsetsInput {
   source: string;
   start_sec?: number | string;
   end_sec?: number | string;
-  /** Minimum normalized spectral-flux strength, from 0 to 1 (default 0.12); raise it to keep only stronger onsets. */
+  /** Minimum onset strength, from 0 to 1 (default 0.12): the larger of the gated spectral flux and the in-band level-rise term; raise it to keep only stronger onsets. */
   min_strength?: number;
   /** Onsets closer than this many seconds to a group's first onset are merged into one; 0 keeps every raw onset (default 0.035). */
   min_gap_sec?: number | string;
