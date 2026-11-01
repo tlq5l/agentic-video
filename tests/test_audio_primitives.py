@@ -100,8 +100,12 @@ def test_audio_onsets_min_gap_merges_double_hits_through_handle_call(monkeypatch
 
     raw = handle_call("audio_onsets", {"source": str(source), "min_gap_sec": 0})
     merged = handle_call("audio_onsets", {"source": str(source), "min_gap_sec": 0.05})
+    default = handle_call("audio_onsets", {"source": str(source)})
 
-    assert raw["ok"] is True and merged["ok"] is True
+    assert raw["ok"] is True and merged["ok"] is True and default["ok"] is True
+    # The default gap keeps both clicks of each flam, each timed at its own start (the second 40 ms after the first).
+    default_times = [onset["time_sec"] for onset in default["data"]["onsets"]]
+    assert default_times == pytest.approx([time for click in clicks for time in (click, click + 0.04)], abs=0.01)
     assert raw["data"]["merged_count"] == 0
     assert raw["data"]["total"] > len(clicks)
     raw_times = [onset["time_sec"] for onset in raw["data"]["onsets"]]
