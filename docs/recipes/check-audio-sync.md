@@ -28,4 +28,6 @@ Output from agentic-video 0.3.3 on synthetic_bench_60s.mp4 (structuredContent, t
 
 All five cues are within 6 ms of an audio onset. Add `"verbose": true` to see each cue's candidate onsets.
 
-Can miss: the sync and counting checks use heuristics tuned on the author's videos, so treat a result as evidence to check (README, Limits). Only the cue times you pass are checked; a sound you did not list appears only in `unmatched_strong_onsets`.
+Sounds you did not list are reported in two places. `uncued_sounds` holds a sound that matches a cue's group with no cue at that time (empty on this fixture). `unmatched_strong_onsets` holds audio onsets of strength 0.5 or more that no cue claimed (six on this fixture, the first at 8.04 s). Detected visual cuts are in `cuts` (13 here), each with its nearest audio onset and `offset_ms`.
+
+Can miss: the sync and counting checks use heuristics tuned on the author's videos, so treat a result as evidence to check (README, Limits). Only the cue times you pass are checked as cues.

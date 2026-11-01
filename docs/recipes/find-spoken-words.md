@@ -15,7 +15,7 @@ Tool calls (from the repo folder). `transcribe` is cached after its first run. I
 .venv/bin/python -m src.executor.mcp_server call search_transcript '{"source": "fixtures/synthetic_bench_60s.mp4", "query": "Project Cygnus"}'
 ```
 
-`transcribe` returned 10 timestamped segments on its first call. Output from agentic-video 0.3.3 on synthetic_bench_60s.mp4 (structuredContent of `search_transcript`, trimmed):
+`transcribe` returned 10 timestamped segments on its first call. The fixture's `.vtt` sidecar supplied them (`transcribe` reports "Subtitle sidecar used"), so this example is subtitle-backed search: it finds subtitle lines, and it does not show what the audio says. Output from agentic-video 0.3.3 on synthetic_bench_60s.mp4 (structuredContent of `search_transcript`, trimmed):
 
 ```json
 {"hits": [{"segment_id": 8, "start_sec": 34.0, "end_sec": 36.5,
@@ -26,6 +26,6 @@ Tool calls (from the repo folder). `transcribe` is cached after its first run. I
  "note": "Semantic search is off (semantic search needs macOS ...); keyword matches only."}
 ```
 
-Only `match: exact` or `all_terms` hits mean the words were spoken. Negative answers: if there is no exact hit, say the words were not found.
+A hit with `match: exact` or `match: all_terms` means the words appear in the transcript. Negative answers: if there is neither an `exact` nor an `all_terms` hit, say the words were not found. An `all_terms` hit has every word in one segment but not as one phrase: `"Cygnus Project"` on this fixture returns segment 8 with `match: all_terms` (score 0.8) and no exact hit.
 
 Can miss: Whisper can invent lines over music or silence (lines repeated 3 or more times in a row carry `suspect`). On Linux there are no meaning matches, so a reworded phrase is missed. Text shown on screen is not in the transcript (see the on-screen text recipe).
