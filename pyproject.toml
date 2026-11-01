@@ -11,7 +11,7 @@ license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.10"
 authors = [{ name = "tlq5l" }]
-keywords = ["mcp", "video", "agents", "ffmpeg", "whisper", "contact-sheet"]
+keywords = ["mcp", "video", "agents", "ffmpeg", "whisper", "contact-sheet", "model-context-protocol", "mcp-server", "claude-code", "ai-agents", "video-understanding", "transcription", "scene-detection"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
@@ -24,6 +24,8 @@ dynamic = ["dependencies", "optional-dependencies"]
 Homepage = "https://github.com/tlq5l/agentic-video"
 Repository = "https://github.com/tlq5l/agentic-video"
 Issues = "https://github.com/tlq5l/agentic-video/issues"
+Gallery = "https://agentic-video-gallery.infra-1b7.workers.dev"
+Changelog = "https://github.com/tlq5l/agentic-video/releases"
 
 [project.scripts]
 agentic-video = "src.executor.mcp_server:main"
