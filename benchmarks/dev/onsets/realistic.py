@@ -54,13 +54,13 @@ def _syllable(rng: np.random.Generator, f0_base: float) -> np.ndarray:
     formants_end = formants_start * rng.uniform(0.8, 1.25, size=3)
     widths = np.array([90.0, 120.0, 160.0])
     gains = np.array([1.0, 0.6, 0.3])
-    progress = local / duration
     mean_f0 = float(np.mean(f0))
     harmonics = np.arange(1, int(4500 / mean_f0))
-    formants = formants_start[None, :] * (1 - progress[:, None]) + formants_end[None, :] * progress[:, None]
     # Each harmonic's gain follows the moving formants (sampled every 5 ms) with a gentle spectral tilt.
     coarse = slice(None, None, 240)
-    envelope = np.sum(gains * np.exp(-0.5 * ((harmonics[None, :, None] * mean_f0 - formants[coarse, None, :]) / widths) ** 2), axis=2)
+    progress = local[coarse] / duration
+    formants = formants_start[None, :] * (1 - progress[:, None]) + formants_end[None, :] * progress[:, None]
+    envelope = np.sum(gains * np.exp(-0.5 * ((harmonics[None, :, None] * mean_f0 - formants[:, None, :]) / widths) ** 2), axis=2)
     envelope = np.stack([np.interp(local, local[coarse], column) for column in envelope.T], axis=1) / harmonics ** 0.6
     offsets = rng.uniform(0, 2 * np.pi, size=len(harmonics))
     voiced = np.sum(envelope * np.sin(phase[:, None] * harmonics[None, :] + offsets), axis=1)
@@ -152,17 +152,18 @@ def codec(count: int, rng: np.random.Generator, level_db: float) -> np.ndarray:
     out = np.zeros(count + frame)
     window = np.hanning(2 * frame)
     edges = 125.0 * 2.0 ** (np.arange(0, 22) / 3.0)
+    frequencies = np.fft.rfftfreq(2 * frame, 1.0 / RATE)
+    bands = [(low, (frequencies >= low) & (frequencies < high)) for low, high in zip(edges[:-1], edges[1:])]
     for first in range(0, count, frame):
         piece = noise[first:first + 2 * frame]
         if len(piece) < 2 * frame:
             break
         spectrum = np.fft.rfft(piece * window)
-        frequencies = np.fft.rfftfreq(2 * frame, 1.0 / RATE)
         gains = np.zeros_like(frequencies)
-        for low, high in zip(edges[:-1], edges[1:]):
+        for low, mask in bands:
             # Each band is kept or dropped and its gain jumps by up to 9 dB from frame to frame.
             if rng.random() < 0.75:
-                gains[(frequencies >= low) & (frequencies < high)] = 10 ** (rng.uniform(-9, 0) / 20) / np.sqrt(low / 125.0)
+                gains[mask] = 10 ** (rng.uniform(-9, 0) / 20) / np.sqrt(low / 125.0)
         out[first:first + 2 * frame] += np.fft.irfft(spectrum * gains, 2 * frame)
     return _rms_to(out[:count], level_db)
 
@@ -247,7 +248,6 @@ def make_clip(entry: dict, legacy_event_wave) -> Tuple[np.ndarray, List[float], 
     """Waveform, planted onset times and decoy times (out-of-band beeps, plosive bursts) for one clip."""
     count = int(DURATION_SEC * RATE)
     signal, plosives = _bed_signal(entry, count)
-    signal = signal.copy()
     rng = np.random.default_rng(entry["seed"])
     truth: List[float] = []
     decoys: Dict[str, List[float]] = {"plosive": plosives, "off_band_beep": []}

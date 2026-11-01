@@ -385,8 +385,8 @@ def _ramp(values: np.ndarray, low: float, high: float) -> np.ndarray:
     return np.clip((values - low) / (high - low), 0.0, 1.0)
 
 
-def _onset_strength(flux: np.ndarray, level_db: np.ndarray, lag: int) -> Tuple[np.ndarray, np.ndarray]:
-    """Onset strength per frame (0..1) and whether the level-rise term set it.
+def _onset_strength(flux: np.ndarray, level_db: np.ndarray, lag: int) -> np.ndarray:
+    """Onset strength per frame (0..1).
 
     rise = level now minus level `lag` frames (one window) back, so a fade or a
     tone's end never rises. strength = max(flux * gate, rise_term):
@@ -410,7 +410,7 @@ def _onset_strength(flux: np.ndarray, level_db: np.ndarray, lag: int) -> Tuple[n
     gate = _ramp(rise_ahead, *ONSET_GATE_RISE_DB) * _ramp(level_ahead, *ONSET_GATE_LEVEL_DB)
     rise_term = _ramp(rise, *ONSET_RISE_DB) * _ramp(level_db, *ONSET_RISE_LEVEL_DB)
     gated_flux = flux * gate
-    return np.maximum(gated_flux, rise_term).astype(np.float32), rise_term > gated_flux
+    return np.maximum(gated_flux, rise_term).astype(np.float32)
 
 
 def _span_chunks(starts: np.ndarray, ends: np.ndarray, rows: int = 512) -> List[Tuple[int, np.ndarray]]:
@@ -512,7 +512,7 @@ def _detect_onsets_in_samples(
     fft_size = 1024 if band is not None and band["low_hz"] >= 500.0 else N_FFT
     flux, level_db = _flux_and_level(local, band, fft_size=fft_size)
     lag = fft_size // HOP_SAMPLES
-    strength, from_rise = _onset_strength(flux, level_db, lag)
+    strength = _onset_strength(flux, level_db, lag)
     peaks = np.zeros(0, dtype=np.int64)
     if len(strength) >= 3:
         middle = strength[1:-1]

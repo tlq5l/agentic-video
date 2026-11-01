@@ -22,9 +22,10 @@ def _babble(count, rng):
             f0 = rng.uniform(100, 240) * (1 + rng.uniform(-0.1, 0.1) * local / local[-1])
             phase = 2 * np.pi * np.cumsum(f0) / RATE
             formants = (rng.uniform(300, 800), rng.uniform(900, 2200), rng.uniform(2300, 3000))
+            mean_f0 = f0.mean()
             syllable = sum(
-                sum(np.exp(-0.5 * ((k * f0.mean() - formant) / 120.0) ** 2) for formant in formants)
-                / k ** 0.6 * np.sin(k * phase) for k in range(1, int(4500 / f0.mean())))
+                sum(np.exp(-0.5 * ((k * mean_f0 - formant) / 120.0) ** 2) for formant in formants)
+                / k ** 0.6 * np.sin(k * phase) for k in range(1, int(4500 / mean_f0)))
             syllable *= np.minimum(1.0, np.minimum(local / 0.03, (local[-1] - local) / 0.06))
             signal[first:first + length] += syllable[:max(0, count - first)]
             position = (first + length) / RATE + rng.uniform(0.0, 0.06)
