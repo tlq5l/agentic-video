@@ -41,6 +41,27 @@ HOP_SAMPLES = 256
 # Chosen on benchmarks/dev/onsets (climb split): the widest gap tried that keeps recall on both settings.
 DEFAULT_ONSET_MIN_GAP_SEC = 0.035
 N_FFT = 2048
+# audio_onsets strength terms (see _onset_strength), fitted on the climb splits of benchmarks/dev/onsets.
+ONSET_GATE_RISE_DB = (1.0, 4.0)  # in-band rise (dB over one window) that opens the spectral-flux term
+ONSET_GATE_LEVEL_DB = (-50.0, -35.0)  # in-band mean-square level (dBFS) that opens the spectral-flux term
+ONSET_GATE_CONTRAST_DB = (12.0, 20.0)  # in-band level over a still bed's low level that also opens it
+ONSET_GATE_AFTER_CONTRAST_DB = (8.0, 12.0)  # the same, for the gate kept open after a brief sound
+ONSET_GATE_DROP_DB = (6.0, 12.0)  # fall from the level just reached that keeps it open after a brief sound
+ONSET_RISE_DB = (4.0, 16.0)  # in-band rise over which the level-rise term grows from 0 to 1
+ONSET_RISE_LEVEL_DB = (-30.0, -15.0)  # in-band level over which the level-rise term grows from 0 to 1
+ONSET_ENTRY_RISE_DB = 3.0  # level rise that marks where an onset entered the analysis window
+ONSET_TIMING_VALLEY_DB = 6.0  # level fall in the window before a peak after which its entry is searched
+# Steady-bed term: a start over a steady background (noise floor, hum, room tone) scores by how far it rises over it.
+ONSET_BED_SEC = 2.0  # span before a start over which its bed's level and steadiness are measured
+ONSET_BED_BLOCK_SEC = 0.1  # the bed's level is averaged (in dB) over blocks this long
+ONSET_BED_MIN_SEC = 0.3  # shortest clip with a steady bed
+ONSET_BED_FLOOR_DB = (-115.0, -110.0)  # bed level (dBFS) under which it is digital silence, not a steady bed
+ONSET_BED_PERCENTILES = (20.0, 40.0, 60.0)  # low, bed and high percentiles of the block levels
+ONSET_STEADY_SPREAD_DB = (8.0, 12.0)  # high minus low percentile over which a bed stops counting as steady
+ONSET_STEADY_RISE_DB = (8.0, 16.0)  # in-band rise over which the steady-bed term grows
+ONSET_STEADY_CONTRAST_DB = (12.0, 18.0)  # in-band level over the bed over which the steady-bed term grows
+ONSET_STEADY_LASTING_HOPS = (0.5, 1.5)  # hops beyond half a window a start stays within 6 dB of its peak
+ONSET_FLOOR_DB = (-75.0, -70.0)  # in-band level (dBFS) under which the steady-bed term never scores: near-silence
 BANDS: Tuple[Tuple[str, float, float], ...] = (
     ("sub", 0.0, 120.0),
     ("low_mid", 120.0, 500.0),
@@ -361,6 +382,171 @@ def _stft_flux(
     return flux
 
 
+def _flux_and_level(
+    samples: np.ndarray,
+    band: Optional[Dict[str, Any]] = None,
+    fft_size: int = N_FFT,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Per STFT frame: normalized positive spectral flux (0..1) and mean-square level in dBFS.
+
+    Both come from one STFT (Hann window of `fft_size`, frames `HOP_SAMPLES`
+    apart and centered on `frame * HOP_SAMPLES`), limited to `band` when given.
+    The flux compares each frame's magnitude spectrum, divided by its sum, with
+    the previous frame's, so it sees changes of spectral shape but not of
+    level. The level is the band's mean-square power (a full-scale sine in the
+    band reads -3 dB).
+    """
+    if len(samples) < 2:
+        return np.zeros(1, dtype=np.float32), np.full(1, -120.0)
+    fft_size = max(256, int(fft_size))
+    half = fft_size // 2
+    samples = np.asarray(samples, dtype=np.float32)
+    frame_count = int(math.ceil(len(samples) / float(HOP_SAMPLES)))
+    flux = np.zeros(frame_count, dtype=np.float32)
+    level_db = np.empty(frame_count)
+    window = np.hanning(fft_size).astype(np.float32)
+    power_scale = 2.0 / (fft_size * float(np.sum(window.astype(np.float64) ** 2)))
+    if band is None:
+        band_mask = None
+    else:
+        frequencies = np.fft.rfftfreq(fft_size, d=1.0 / SAMPLE_RATE)
+        band_mask = (frequencies >= band["low_hz"]) & (frequencies < band["high_hz"])
+        if not np.any(band_mask):
+            raise ExtractionBoundsError("band_hz is too narrow for the analysis FFT", {"band_hz": band})
+    frames_per_chunk = int(10.0 * SAMPLE_RATE / HOP_SAMPLES)
+
+    def chunk_features(first: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        count = min(frames_per_chunk, frame_count - first)
+        view_start = first * HOP_SAMPLES
+        view_end = (first + count - 1) * HOP_SAMPLES + fft_size
+        view = np.lib.stride_tricks.sliding_window_view(
+            _zero_padded_slice(samples, view_start - half, view_end - half), fft_size)[::HOP_SAMPLES]
+        magnitudes = np.abs(np.fft.rfft(view * window, axis=1)).astype(np.float32, copy=False)
+        if band_mask is not None:
+            magnitudes = magnitudes[:, band_mask]
+        power = np.einsum("ij,ij->i", magnitudes, magnitudes, dtype=np.float64) * power_scale
+        level = 10.0 * np.log10(np.maximum(power, 1e-12))
+        totals = np.sum(magnitudes, axis=1, keepdims=True)
+        normalized = magnitudes / np.maximum(totals, 1e-12)
+        inner = np.maximum(normalized[1:] - normalized[:-1], 0.0).sum(axis=1)
+        return inner, normalized[0].copy(), normalized[-1].copy(), level
+
+    # Chunks are independent; only the first frame of each needs the previous chunk's last row.
+    starts = list(range(0, frame_count, frames_per_chunk))
+    previous = None
+    for first, (inner, head, tail, level) in zip(starts, _parallel_map(chunk_features, starts)):
+        if previous is not None:
+            flux[first] = np.maximum(head - previous, 0.0).sum()
+        flux[first + 1:first + 1 + len(inner)] = inner
+        level_db[first:first + len(level)] = level
+        previous = tail
+    return flux, level_db
+
+
+def _ramp(values: np.ndarray, low: float, high: float) -> np.ndarray:
+    """0 at or below `low`, 1 at or above `high`, linear between."""
+    return np.clip((values - low) / (high - low), 0.0, 1.0)
+
+
+def _steady_bed(level_db: np.ndarray, lag: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Per frame, (bed level in dB, steadiness 0..1, low level in dB, stillness 0..1) of the ONSET_BED_SEC before the frame's window.
+
+    Levels are averaged over ONSET_BED_BLOCK_SEC blocks; only whole blocks that
+    end before the window (frame `lag` back) count, except in the clip's first
+    ONSET_BED_SEC, which all use that first span. The bed is the middle
+    percentile of the block levels and the low level the low percentile;
+    stillness falls from 1 to 0 as their spread (high minus low percentile)
+    grows over ONSET_STEADY_SPREAD_DB, and steadiness is stillness except over
+    digital silence (ONSET_BED_FLOOR_DB), where it is 0. Speech swings far between
+    syllables and pauses, so it is not steady; noise floors, hum, room tone and
+    a dense crowd roar are. A clip shorter than ONSET_BED_MIN_SEC has no steady bed.
+    """
+    count = len(level_db)
+    frames_per_sec = SAMPLE_RATE / HOP_SAMPLES
+    block = max(1, int(round(ONSET_BED_BLOCK_SEC * frames_per_sec)))
+    blocks = -(-count // block)
+    if blocks < int(round(ONSET_BED_MIN_SEC * frames_per_sec / block)):
+        return np.zeros(count), np.zeros(count), np.full(count, np.inf), np.zeros(count)
+    padded = np.concatenate([level_db, np.full(blocks * block - count, level_db[-1])])
+    means = padded.reshape(blocks, block).mean(axis=1)
+    width = max(1, int(round(ONSET_BED_SEC * frames_per_sec / block)))
+    first = np.percentile(means[:width], ONSET_BED_PERCENTILES)[:, None]
+    stats = np.repeat(first, min(width, blocks), axis=1)
+    if blocks > width:
+        # Row i of the sliding view holds blocks i .. i + width - 1, the bed of block i + width.
+        trailing = np.lib.stride_tricks.sliding_window_view(means, width)[:blocks - width]
+        stats = np.concatenate([stats, np.percentile(trailing, ONSET_BED_PERCENTILES, axis=1)], axis=1)
+    low, bed, high = stats
+    still = 1.0 - _ramp(high - low, *ONSET_STEADY_SPREAD_DB)
+    steady = still * _ramp(bed, *ONSET_BED_FLOOR_DB)
+    index = np.clip((np.arange(count) - lag) // block, 0, blocks - 1)
+    return bed[index], steady[index], low[index], still[index]
+
+
+def _onset_strength(flux: np.ndarray, level_db: np.ndarray, lag: int) -> Tuple[np.ndarray, np.ndarray]:
+    """Per frame: onset strength (0..1), and the frame whose rise it belongs to.
+
+    rise = level now minus the lowest level in the window before, so a fade or
+    a tone's end never rises. strength = max(flux * gate, rise_term, steady_term):
+    - gate (0..1) needs a rise of ONSET_GATE_RISE_DB, and either an in-band
+      level of ONSET_GATE_LEVEL_DB or, over a still bed (_steady_bed: noise,
+      hum, room tone or digital silence, not speech), a level
+      ONSET_GATE_CONTRAST_DB over the bed's low level. So a bed's level-free
+      shape jitter and very quiet sounds cannot fire, but a quiet click over a
+      quiet steady bed can. It looks half a window ahead, because the flux
+      peaks as a start enters the window, before the level has risen. Over a
+      still bed it also stays open for a window after a rise once the level
+      has fallen back (ONSET_GATE_DROP_DB) from a level
+      ONSET_GATE_AFTER_CONTRAST_DB over the bed: a click shorter than the
+      window changes the spectrum's shape most as it leaves the window;
+    - rise_term (0..1) grows with the rise (ONSET_RISE_DB) and with the level
+      reached (ONSET_RISE_LEVEL_DB), so a loud tone over a busy bed, whose start
+      barely changes the normalized shape of a few bins, still scores high;
+    - steady_term (0..1) finds quiet starts over a steady bed (_steady_bed): it
+      grows with the rise (ONSET_STEADY_RISE_DB) and the level over the bed
+      (ONSET_STEADY_CONTRAST_DB), needs a level above near-silence
+      (ONSET_FLOOR_DB), and needs the start to last: it stays within 6 dB of its
+      peak for ONSET_STEADY_LASTING_HOPS hops beyond half a window, so key clicks
+      and the switch-on tick of an out-of-band tone do not fire. Over speech
+      the bed is not steady, so only the absolute-level terms apply.
+    A frame scored by the gate kept open after a brief sound belongs to that
+    sound's rise; the second array holds the frame of that rise (else the frame itself).
+    """
+    count = len(level_db)
+    frames = np.arange(count)
+    history = np.concatenate([np.full(lag, level_db[0]), level_db])
+    rise = level_db - np.lib.stride_tricks.sliding_window_view(history, lag)[:count].min(axis=1)
+    ahead = max(1, lag // 2) + 1
+    behind = lag - 1
+
+    def window_max(values: np.ndarray, before: int, after: int) -> np.ndarray:
+        padded = np.concatenate([np.full(before, values[0]), values, np.full(after, values[-1])])
+        return np.lib.stride_tricks.sliding_window_view(padded, before + after + 1).max(axis=1)
+
+    rise_ahead = window_max(rise, 0, ahead - 1)
+    bed_db, steady, low_db, still = _steady_bed(level_db, lag)
+    level_near = window_max(level_db, behind, ahead - 1)
+    contrast = still * _ramp(level_near - low_db, *ONSET_GATE_CONTRAST_DB)
+    opens = _ramp(rise_ahead, *ONSET_GATE_RISE_DB)
+    gate = opens * np.maximum(_ramp(window_max(level_db, 0, ahead - 1), *ONSET_GATE_LEVEL_DB), contrast)
+    padded = np.concatenate([np.full(behind, rise[0]), rise])
+    recent = np.lib.stride_tricks.sliding_window_view(padded, behind + 1)
+    rise_frame = frames - behind + np.argmax(recent, axis=1)
+    drop = window_max(level_db, behind, 0) - level_db
+    contrast_after = still * _ramp(level_near - low_db, *ONSET_GATE_AFTER_CONTRAST_DB)
+    gate_after = _ramp(recent.max(axis=1), *ONSET_GATE_RISE_DB) * _ramp(drop, *ONSET_GATE_DROP_DB) * contrast_after
+    rise_term = _ramp(rise, *ONSET_RISE_DB) * _ramp(level_db, *ONSET_RISE_LEVEL_DB)
+    around = np.concatenate([np.full(lag, level_db[0]), level_db, np.full(lag, level_db[-1])])
+    spans = np.lib.stride_tricks.sliding_window_view(around, 2 * lag + 1)
+    lasting = np.count_nonzero(spans >= spans.max(axis=1, keepdims=True) - 6.0, axis=1) - lag / 2.0
+    steady_term = (steady * _ramp(rise, *ONSET_STEADY_RISE_DB) * _ramp(level_db - bed_db, *ONSET_STEADY_CONTRAST_DB)
+                   * _ramp(level_db, *ONSET_FLOOR_DB) * _ramp(lasting, *ONSET_STEADY_LASTING_HOPS))
+    strength = np.maximum.reduce([flux * gate, rise_term, steady_term])
+    after = flux * gate_after
+    anchor = np.where(after > strength, np.maximum(rise_frame, 0), frames)
+    return np.maximum(strength, after).astype(np.float32), anchor
+
+
 def _span_chunks(starts: np.ndarray, ends: np.ndarray, rows: int = 512) -> List[Tuple[int, np.ndarray]]:
     """(length, positions) groups of at most `rows` spans, equal-length spans together."""
     lengths = ends - starts
@@ -509,6 +695,175 @@ def _detect_onsets_in_samples(
     return onsets
 
 
+# Strength-detector onsets (the second pass) join the main onsets only when no main onset lies within this
+# many seconds of them (abs(time - main time) <= window counts as within). Main's onsets never move or drop.
+ONSET_UNION_SEC = 0.030
+
+
+def _finish_onsets(
+    onsets: List[Dict[str, Any]],
+    samples: np.ndarray,
+    compare_samples: Optional[np.ndarray],
+    band: Optional[Dict[str, Any]],
+    gap: float,
+) -> Tuple[List[Dict[str, Any]], int]:
+    """The compare_to filter (when compare_samples is given), then the min_gap merge. Returns (onsets, merged_count)."""
+    if compare_samples is not None:
+        energy_band = band or {"name": "full", "low_hz": 0.0, "high_hz": SAMPLE_RATE / 2.0}
+        kept: List[Dict[str, Any]] = []
+        for onset in onsets:
+            onset_time = float(onset["time_sec"])
+            energy_start = max(0, int(round((onset_time - 0.010) * SAMPLE_RATE)))
+            energy_end = min(len(samples), energy_start + int(round(0.030 * SAMPLE_RATE)))
+            source_energy = _band_energy_db(samples[energy_start:energy_end], energy_band)
+            baseline_energy = _band_energy_db(compare_samples[energy_start:min(len(compare_samples), energy_end)], energy_band)
+            delta = round(source_energy - baseline_energy, 3)
+            # Require a measurable energy increase even when the baseline
+            # detector missed a weak event or its flux peak fell one hop away.
+            if delta >= 2.5:
+                onset["band_energy_db"] = source_energy
+                onset["compare_band_energy_db"] = baseline_energy
+                onset["compare_delta_db"] = delta
+                kept.append(onset)
+        # A single new pitched attack can produce neighboring flux maxima.
+        # Keep the strongest energy-difference peak from each 30 ms cluster.
+        kept_ranked = sorted(kept, key=lambda item: (-item["compare_delta_db"], item["time_sec"]))
+        selected = []
+        for onset in kept_ranked:
+            if all(abs(onset["time_sec"] - other["time_sec"]) > 0.030 for other in selected):
+                selected.append(onset)
+        onsets = sorted(selected, key=lambda item: item["time_sec"])
+    return _merge_close_onsets(onsets, gap)
+
+
+def _add_onsets_away_from(
+    base: List[Dict[str, Any]], extra: List[Dict[str, Any]], window_sec: float,
+) -> List[Dict[str, Any]]:
+    """`base` (unchanged) plus each `extra` onset that has no base onset within window_sec. Sorted by time."""
+    base_times = np.sort(np.asarray([float(item["time_sec"]) for item in base], dtype=np.float64))
+    added: List[Dict[str, Any]] = []
+    for onset in extra:
+        time_sec = float(onset["time_sec"])
+        index = int(np.searchsorted(base_times, time_sec))
+        near = any(abs(time_sec - base_times[k]) <= window_sec for k in (index - 1, index) if 0 <= k < len(base_times))
+        if not near:
+            added.append(onset)
+    return sorted([*base, *added], key=lambda item: float(item["time_sec"]))
+
+
+def _detect_strength_onsets_in_samples(
+    samples: np.ndarray,
+    start: float,
+    end: float,
+    first_sample: int,
+    last_sample: int,
+    threshold: float,
+    band: Optional[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    # Read the steady-bed span (and a window) before the range, on the clip's frame grid, so a ranged call
+    # scores a start as the whole clip does; a range near the clip's start reads at least the first
+    # ONSET_BED_SEC, as the clip does.
+    bed_span = int(round((ONSET_BED_SEC + ONSET_BED_BLOCK_SEC) * SAMPLE_RATE)) + 2 * N_FFT
+    context_first = max(0, first_sample - bed_span) // HOP_SAMPLES * HOP_SAMPLES
+    context_last = min(len(samples), max(last_sample + N_FFT, bed_span if context_first == 0 else 0))
+    local = np.asarray(samples[context_first:context_last], dtype=np.float32)
+    # Higher bands have enough bin density at 1024 samples and benefit from
+    # a shorter window when pitched attacks sit only a few milliseconds apart.
+    fft_size = 1024 if band is not None and band["low_hz"] >= 500.0 else N_FFT
+    flux, level_db = _flux_and_level(local, band, fft_size=fft_size)
+    lag = fft_size // HOP_SAMPLES
+    strength, anchor = _onset_strength(flux, level_db, lag)
+    peaks = np.zeros(0, dtype=np.int64)
+    if len(strength) >= 3:
+        middle = strength[1:-1]
+        peaks = np.flatnonzero((middle >= threshold) & (middle > strength[:-2]) & (middle >= strength[2:])) + 1
+    elif len(strength) == 1 and strength[0] >= threshold:
+        peaks = np.zeros(1, dtype=np.int64)
+
+    # Debounce multiple strength peaks from one attack, keeping the strongest
+    # (strongest first, earlier first among equals).
+    ranked = peaks[np.lexsort((peaks, -strength[peaks].astype(np.float64)))].tolist()
+    selected: List[int] = []
+    debounce_sec = 0.010 if band is not None else 0.030
+    min_gap_frames = max(1, int(round(debounce_sec * SAMPLE_RATE / HOP_SAMPLES)))
+    blocked = np.zeros(len(strength), dtype=bool)
+    for index in ranked:
+        if not blocked[index]:
+            selected.append(index)
+            blocked[max(0, index - min_gap_frames + 1):index + min_gap_frames] = True
+
+    # Strength peaks after the start entered the window, up to one window
+    # later over a bed (a peak after a brief sound counts from that sound's
+    # rise, `anchor`). Time each onset at the first frame from a window before
+    # its peak to half a window after (the gate looks ahead) whose level is
+    # ONSET_ENTRY_RISE_DB over the level just before, or at the steepest
+    # one-hop rise if none is. When the level falls inside the window by more
+    # than ONSET_TIMING_VALLEY_DB and then rises, search only after the deepest
+    # such valley, so a start right after another keeps its own time.
+    steps = np.diff(level_db, prepend=level_db[0])
+    timed: List[Tuple[int, int]] = []
+    for peak in selected:
+        frame = origin = int(anchor[peak])
+        if origin > 0:
+            first = max(1, origin - lag + 1)
+            last = min(len(level_db), origin + lag // 2 + 1)
+            before = level_db[first - 1:origin + 1]
+            falls = np.maximum.accumulate(before) - before
+            valley = int(np.argmax(falls))
+            after_valley = (falls[valley] > ONSET_TIMING_VALLEY_DB
+                            and level_db[first + valley:last].max(initial=-np.inf) - before[valley] >= ONSET_ENTRY_RISE_DB)
+            if after_valley:
+                first += valley
+            first = min(first, last - 1)
+            entered = np.flatnonzero(level_db[first:last] - level_db[first - 1] >= ONSET_ENTRY_RISE_DB)
+            frame = first + (int(entered[0]) if len(entered) else int(np.argmax(steps[first:last])))
+            if after_valley:
+                # The earlier sound's tail still fills the window, so the level rises about a hop late;
+                # go back that hop, but not before the flux peak.
+                frame = min(frame, max(frame - 1, first - 1 + int(np.argmax(flux[first - 1:origin + 1]))))
+        timed.append((frame, peak))
+    # Peaks timed within the debounce of a stronger one (less the hop timing can shift a start) are the
+    # same onset (`selected` is strongest first). In a band that is the same frame only.
+    kept: Dict[int, int] = {}
+    reach = max(1, min_gap_frames - 1)
+    taken = np.zeros(len(strength) + 2 * reach, dtype=bool)  # index frame + reach
+    for frame, peak in timed:
+        if not taken[frame + reach]:
+            kept[frame] = peak
+            taken[frame + 1:frame + 2 * reach] = True
+    frames = np.asarray(sorted(kept), dtype=np.int64)
+    peaks = np.asarray([kept[frame] for frame in frames.tolist()], dtype=np.int64)
+
+    # A centered window first sees an attack as it enters its right edge,
+    # half a window before the attack time. Correct that known STFT lead; the
+    # remaining quantization is one 256-sample hop. Band-limited onsets peak a
+    # little later for short pitched bursts than broadband attacks. One hop
+    # corrects that band-specific window lag.
+    bias = fft_size // 2 - (HOP_SAMPLES if band is not None else 0)
+    times = context_first / float(SAMPLE_RATE) + (frames * HOP_SAMPLES + bias) / float(SAMPLE_RATE)
+    inside = (times >= start - 1e-6) & (times <= end + 1e-6)
+    peaks, times = peaks[inside], times[inside]
+    starts = np.clip(np.rint(times * SAMPLE_RATE), 0, len(samples) - 1).astype(np.int64)
+    ends = np.minimum(len(samples), starts + int(0.085 * SAMPLE_RATE))
+    # Codec noise at a silence boundary can still reach the strength cut.
+    # Do not call a near-silent span a sound. A time can be up to one hop after
+    # the true start, past all of a click shorter than a hop, so look from a hop before.
+    audible = ~(_activity_rms(samples, np.maximum(0, starts - HOP_SAMPLES), ends) < 1e-4)
+    peaks, times, starts, ends = peaks[audible], times[audible], starts[audible], ends[audible]
+    onsets: List[Dict[str, Any]] = [
+        {"time_sec": round(time_sec, 6), "strength": round(value, 6)}
+        for time_sec, value in zip(times.tolist(), strength[peaks].astype(np.float64).tolist())
+    ]
+    profiles, energies = _onset_spectra(samples, starts, ends, band)
+    names = [name for name, _, _ in BANDS]
+    for onset, row in zip(onsets, profiles.tolist()):
+        onset["band_db"] = dict(zip(names, row))
+    if energies is not None:
+        for onset, energy in zip(onsets, energies.tolist()):
+            onset["band_energy_db"] = energy
+    return onsets
+
+
 def audio_onsets(
     source: str,
     start_sec: Optional[float] = None,
@@ -539,38 +894,18 @@ def audio_onsets(
         "min_strength": threshold, "band_hz": band,
         "min_gap_sec": gap, "compare_fingerprint": compare_fingerprint,
     }
-    result_key = _cache_tag("audio_onsets_v9", options)
+    result_key = _cache_tag("audio_onsets_v10", options)
     cached = cache.load_json(fingerprint, result_key)
     if isinstance(cached, dict):
         return cached
 
-    onsets = _detect_onsets_in_samples(samples, start, end, first_sample, last_sample, threshold, band)
-    if compare_samples is not None:
-        energy_band = band or {"name": "full", "low_hz": 0.0, "high_hz": SAMPLE_RATE / 2.0}
-        kept: List[Dict[str, Any]] = []
-        for onset in onsets:
-            onset_time = float(onset["time_sec"])
-            energy_start = max(0, int(round((onset_time - 0.010) * SAMPLE_RATE)))
-            energy_end = min(len(samples), energy_start + int(round(0.030 * SAMPLE_RATE)))
-            source_energy = _band_energy_db(samples[energy_start:energy_end], energy_band)
-            baseline_energy = _band_energy_db(compare_samples[energy_start:min(len(compare_samples), energy_end)], energy_band)
-            delta = round(source_energy - baseline_energy, 3)
-            # Require a measurable energy increase even when the baseline
-            # detector missed a weak event or its flux peak fell one hop away.
-            if delta >= 2.5:
-                onset["band_energy_db"] = source_energy
-                onset["compare_band_energy_db"] = baseline_energy
-                onset["compare_delta_db"] = delta
-                kept.append(onset)
-        # A single new pitched attack can produce neighboring flux maxima.
-        # Keep the strongest energy-difference peak from each 30 ms cluster.
-        kept_ranked = sorted(kept, key=lambda item: (-item["compare_delta_db"], item["time_sec"]))
-        selected = []
-        for onset in kept_ranked:
-            if all(abs(onset["time_sec"] - other["time_sec"]) > 0.030 for other in selected):
-                selected.append(onset)
-        onsets = sorted(selected, key=lambda item: item["time_sec"])
-    onsets, merged_count = _merge_close_onsets(onsets, gap)
+    main_onsets, merged_count = _finish_onsets(
+        _detect_onsets_in_samples(samples, start, end, first_sample, last_sample, threshold, band),
+        samples, compare_samples, band, gap)
+    strength_onsets, _ = _finish_onsets(
+        _detect_strength_onsets_in_samples(samples, start, end, first_sample, last_sample, threshold, band),
+        samples, compare_samples, band, gap)
+    onsets = _add_onsets_away_from(main_onsets, strength_onsets, ONSET_UNION_SEC)
 
     result = {
         "source_path": str(Path(source).expanduser().resolve()),

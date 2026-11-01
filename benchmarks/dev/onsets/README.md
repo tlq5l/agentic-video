@@ -25,3 +25,15 @@ Numbers from the box run:
 - Realistic climb, beep (both tolerances): F1 0.000. Quiet beep at 30 ms: 0.035; at 100 ms: 0.043.
 - Realistic held-out, click at 30 ms: F1 0.523; at 50 ms: 0.556. Beep: 0.000. Quiet beep at 30 ms: 0.156; at 100 ms: 0.235.
 - No-loss check, origin/main against itself: `NOLOSS total lost=0 (within_gap=0) lost_chance=0 lost_babble=0`.
+
+## Union of origin/main and the strength pass, 2026-11-01
+
+`audio_onsets` runs origin/main's detector, then a second detector (the strength terms of the v14 branch), and adds each second-pass onset that has no main onset within 30 ms. Main's onsets keep their times.
+
+Numbers from the box run:
+
+- Legacy climb, band setting: F1 0.8675. Broadband (0.12): F1 0.1889.
+- Legacy held-out, band: F1 0.8624. Broadband: F1 0.3065.
+- Realistic climb, click at 30 ms: F1 0.604; beep at 30 ms: 0.966; quiet click at 30 ms: 0.659; quiet beep at 30 ms: 0.865.
+- Realistic held-out, click at 30 ms: F1 0.580; beep at 30 ms: 0.991; quiet click at 30 ms: 0.645; quiet beep at 30 ms: 0.680.
+- No-loss check, each family against origin/main: `NOLOSS total lost=0 (within_gap=0) lost_chance=0 lost_babble=0` for legacy, real, short, pair and ranged.
