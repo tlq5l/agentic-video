@@ -26,7 +26,6 @@ starts whenever both are timed within it.
 """
 from __future__ import annotations
 
-import hashlib
 import importlib.util
 import subprocess
 import sys
@@ -169,11 +168,6 @@ def export_ref(ref: str, dest: Path) -> Path:
     return dest
 
 
-def _digest(path: Path) -> str:
-    """Short hash of a detector file's bytes."""
-    return hashlib.sha256(path.read_bytes()).hexdigest()[:16]
-
-
 def _load(path: Path, name: str) -> Any:
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
@@ -190,7 +184,7 @@ def run(baseline_audio: Path, families: List[str], work: Path) -> Dict[str, Any]
     work.mkdir(parents=True, exist_ok=True)
     # Detector results are cached per file; key each cache folder by the detector's own bytes so a reused --work
     # never serves results from another baseline ref or another edit of this tree.
-    caches = {name: MediaCache(work / f"cache-{name}-{_digest(path)}")
+    caches = {name: MediaCache(work / f"cache-{name}-{score.detector_digest(path)}")
               for name, path in (("baseline", baseline_audio), ("current", Path(current.__file__)))}
     sources: Dict[str, Callable[[], Iterator[Item]]] = {
         "legacy": _legacy, "real": _real, "short": lambda: _generated("short"),

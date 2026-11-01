@@ -44,6 +44,7 @@ only when given.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import tempfile
 import wave
 from pathlib import Path
@@ -178,14 +179,28 @@ def detect(path: Path, band_hz: Optional[List[float]], min_strength: float, cach
     return [float(item["time_sec"]) for item in audio_onsets(str(path), **kwargs)["onsets"]]
 
 
-def score(split: str, band_hz: Optional[List[float]], min_strength: float, min_gap_sec: Optional[float], work: Path) -> Dict[str, Any]:
+def detector_digest(path: Path) -> str:
+    """Short hash of a detector file's bytes: the identity its cached results are keyed by (noloss.py uses it too)."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+
+
+def detector_cache(work: Path) -> Any:
+    """Detector result cache in ``work``, in a folder named by this tree's ``src/media/audio.py`` bytes.
+
+    A reused work folder then never serves results from another edit of the detector.
+    """
     import sys
 
     sys.path.insert(0, str(REPO))
     from src.core.cache import MediaCache
+    from src.media import audio
 
+    return MediaCache(work / f"cache-current-{detector_digest(Path(audio.__file__))}")
+
+
+def score(split: str, band_hz: Optional[List[float]], min_strength: float, min_gap_sec: Optional[float], work: Path) -> Dict[str, Any]:
     work.mkdir(parents=True, exist_ok=True)
-    cache = MediaCache(work / "cache")
+    cache = detector_cache(work)
     totals: Dict[str, Any] = {"tp": 0, "fp": 0, "fn": 0, "errors": []}
     groups: Dict[str, Dict[str, int]] = {}
     for entry in clip_plan():
@@ -219,10 +234,9 @@ def score_real(split: str, work: Path) -> Dict[str, Dict[float, Dict[str, Any]]]
     sys.path.insert(0, str(REPO))
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import realistic
-    from src.core.cache import MediaCache
 
     work.mkdir(parents=True, exist_ok=True)
-    cache = MediaCache(work / "cache")
+    cache = detector_cache(work)
     tolerances = {"click": (0.030, 0.050), "beep": (0.030, 0.100), "mixed": (0.030,), "broadband": (0.030,),
                   "quiet_click": (0.030, 0.050), "quiet_beep": (0.030, 0.100), "quiet_broadband": (0.030,)}
     pooled: Dict[str, Dict[float, Dict[str, Any]]] = {
