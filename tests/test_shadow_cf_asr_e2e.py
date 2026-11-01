@@ -259,6 +259,25 @@ def test_an_expired_trial_sends_nothing_and_writes_trial_ended_once(speech_clip,
     assert trial["ended"] is True and trial["count"] == 3
 
 
+def test_an_expired_trial_with_no_token_source_logs_nothing(speech_clip, trial_env, monkeypatch):
+    """Regression: the switch and account id were set but no token, so the expired trial wrote its trial_ended line
+    before the credentials check. A run with no token source must now leave the log and the trial state alone."""
+    state = trial_env["state"]
+    expired_at = time.time() - (shadow_cf_asr.TRIAL_DAYS + 1) * 86400
+    _write_trial_state(state, expired_at, count=3)
+    monkeypatch.setenv(shadow_cf_asr.SWITCH_ENV, HOSTNAME)
+    monkeypatch.delenv("CLOUDFLARE_API_TOKEN")
+    monkeypatch.delenv("AGENTIC_VIDEO_CF_TOKEN_COMMAND", raising=False)
+
+    _transcribe(speech_clip)
+    _wait_for_background_worker()
+    time.sleep(3)  # the shadow prepare thread runs after the transcript returns
+
+    assert trial_env["seen"] == [] and _log_records(state) == []
+    trial = json.loads((state / "shadow-cf-asr-state.json").read_text(encoding="utf-8"))
+    assert trial["ended"] is False and trial["count"] == 3
+
+
 def test_an_expiry_during_a_job_stops_its_remaining_pieces(speech_clip, trial_env, monkeypatch):
     """Pieces run one at a time here, so the trial can expire after the first piece is sent. The later pieces and
     their retries are refused, the job still logs once, and trial_ended is written once."""

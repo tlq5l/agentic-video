@@ -191,13 +191,20 @@ def _account_id_set() -> bool:
     return bool(os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip())
 
 
+def _token_source_set() -> bool:
+    """The cheap check before the trial: without a token or a token command nothing can be sent, so an expired trial
+    must not write its one trial_ended line for a run that could never have sent."""
+    return bool(os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
+                or os.environ.get("AGENTIC_VIDEO_CF_TOKEN_COMMAND", "").strip())
+
+
 def start_after_fresh_run(source_path: str, model_size: str, result: Any, fingerprint: str,
                           local_wall_sec: float) -> bool:
     """Start the shadow job for one fresh local run. Returns True when a child was started. Never raises.
-    The cheap checks (switch, account id, trial) all run before the token command, so a refused run starts no process."""
+    The cheap checks (switch, account id, token source, trial) all run before the token command, so a refused run starts no process."""
     job_path = None
     try:
-        if not _switch_names_this_host() or not _account_id_set():
+        if not _switch_names_this_host() or not _account_id_set() or not _token_source_set():
             return False
         if not _trial_open(admit=False):  # the child admits the job itself, right before it sends
             return False
