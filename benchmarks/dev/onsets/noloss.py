@@ -11,9 +11,12 @@ Families (``--family``, default all):
   before the decay; measured peaks: decayed sines -32.2 to -7.3 dBFS, square bursts
   -29.9 to -6.1 dBFS);
   over silence, white and pink noise at -70 to -40 dBFS RMS;
-- pair: two starts 20-60 ms apart (short clicks or decaying tones) over the same beds;
+- pair: two starts 20-60 ms apart (short clicks or decaying tones) over the same beds,
+  plus click pairs exactly 35 ms (the default min gap) and 40 ms apart;
 - ranged: single starts (loud clicks, quiet beeps 25 dB over steady noise, moderate
-  beeps) analyzed through start_sec/end_sec windows 0.1-1 s long around them.
+  beeps) analyzed through start_sec/end_sec windows 0.1-1 s long around them, plus 1 ms
+  clicks over a bed analyzed through those windows with compare_to set to the bed alone.
+  The short family also has 2 ms clicks over music-like chord beds.
 The generated families are scored at three settings: click (band [1000, 4000], 0.36),
 beep (band f +-100 Hz around the event frequency, 0.7) and broadband (0.12).
 
@@ -29,6 +32,7 @@ starts whenever both are timed within it.
 from __future__ import annotations
 
 import importlib.util
+import itertools
 import subprocess
 import sys
 from pathlib import Path
@@ -50,6 +54,7 @@ CLICK_BAND = [1000.0, 4000.0]
 TOLERANCE = {"click": 0.05, "beep": 0.1, "broadband": 0.03, "band": 0.03, "mixed": 0.03,
              "quiet_click": 0.05, "quiet_beep": 0.1, "quiet_broadband": 0.03}
 BED_KINDS = ("silence", "white", "pink")
+COMPARE_PREFIX = "cmp"  # clip names with this prefix are called with compare_to set to their bed alone
 
 # (family, clip id, bed, samples, bed-only samples, truth, setting, band_hz, min_strength, start_sec, end_sec)
 Item = Tuple[str, str, str, np.ndarray, np.ndarray, List[float], str, Optional[List[float]], float, Optional[float], Optional[float]]
@@ -146,6 +151,84 @@ def _generated(family: str) -> Iterator[Item]:
                 yield family, clip, bed_kind, samples, bed_only, [start], setting, band, strength, start - lead, min(5.99, start - lead + length)
 
 
+def _fixed_click(frequency: float, peak_db: float, milliseconds: float) -> np.ndarray:
+    local = np.arange(int(round(milliseconds * RATE / 1000.0))) / RATE
+    return 10.0 ** (peak_db / 20.0) * np.sin(2 * np.pi * frequency * local) * np.exp(-local / (0.3 * local[-1] + 1e-9))
+
+
+def _music_clicks() -> Iterator[Item]:
+    """2 ms clicks over a music-like chord bed (score's "music" bed), placed like the short family."""
+    count = int(4.0 * RATE)
+    for index in range(12):
+        rng = np.random.default_rng(SEED + 100 * index + 3)
+        bed_signal = score._bed("music", count, rng)
+        signal = bed_signal.copy()
+        frequency = float(rng.uniform(1100.0, 3400.0))
+        truth: List[float] = []
+        position = rng.uniform(0.4, 0.7)
+        while position < 3.6:
+            wave = _fixed_click(frequency, rng.uniform(-20.0, -6.0), 2.0)
+            first = int(position * RATE)
+            signal[first:first + len(wave)] += wave
+            truth.append(first / RATE)
+            position += rng.uniform(0.3, 0.8)
+        samples = np.clip(signal, -0.95, 0.95).astype(np.float32)
+        bed_only = np.clip(bed_signal, -0.95, 0.95).astype(np.float32)
+        for setting, band, strength in _settings(frequency):
+            yield "short", f"music{index:02d}-2ms", "music", samples, bed_only, truth, setting, band, strength, None, None
+
+
+def _exact_gap_pairs() -> Iterator[Item]:
+    """Click pairs exactly 35 ms (audio_onsets' default min gap) and 40 ms apart, over the three bed kinds."""
+    count = int(4.0 * RATE)
+    for index in range(12):
+        rng = np.random.default_rng(SEED + 100 * index + 4)
+        bed_kind = BED_KINDS[index % 3]
+        bed_signal = _bed(bed_kind, count, rng.uniform(-70.0, -40.0), rng)
+        signal = bed_signal.copy()
+        frequency = float(rng.uniform(1100.0, 3400.0))
+        gap_ms = (35, 40)[(index // 3) % 2]
+        gap_samples = int(round(gap_ms * RATE / 1000.0))
+        truth: List[float] = []
+        position = rng.uniform(0.4, 0.7)
+        while position < 3.5:
+            pair_first = int(position * RATE)
+            for first in (pair_first, pair_first + gap_samples):
+                wave = _short_click(rng, frequency, rng.uniform(-20.0, -6.0), "decay")
+                signal[first:first + len(wave)] += wave
+                truth.append(first / RATE)
+            position += rng.uniform(0.4, 0.8)
+        samples = np.clip(signal, -0.95, 0.95).astype(np.float32)
+        bed_only = np.clip(bed_signal, -0.95, 0.95).astype(np.float32)
+        for setting, band, strength in _settings(frequency):
+            yield "pair", f"gap{gap_ms}ms-{index:02d}", bed_kind, samples, bed_only, truth, setting, band, strength, None, None
+
+
+def _compare_ranged() -> Iterator[Item]:
+    """1 ms clicks over a bed, analyzed through start_sec/end_sec windows (the caller also sets compare_to to the bed)."""
+    count = int(6.0 * RATE)
+    for index in range(12):
+        rng = np.random.default_rng(SEED + 100 * index + 5)
+        bed_kind = BED_KINDS[index % 3]
+        bed_signal = _bed(bed_kind, count, rng.uniform(-70.0, -40.0), rng)
+        signal = bed_signal.copy()
+        frequency = float(rng.uniform(1100.0, 3400.0))
+        truth: List[float] = []
+        for position in (1.0, 2.5, 4.0, 5.2):
+            wave = _fixed_click(frequency, rng.uniform(-20.0, -6.0), 1.0)
+            first = int(position * RATE)
+            signal[first:first + len(wave)] += wave
+            truth.append(first / RATE)
+        samples = np.clip(signal, -0.95, 0.95).astype(np.float32)
+        bed_only = np.clip(bed_signal, -0.95, 0.95).astype(np.float32)
+        clip = f"{COMPARE_PREFIX}{index:02d}-1ms"
+        for setting, band, strength in _settings(frequency):
+            for start in truth:
+                length = rng.uniform(0.1, 1.0)
+                lead = rng.uniform(0.02, 0.8 * length)
+                yield "ranged", clip, bed_kind, samples, bed_only, [start], setting, band, strength, start - lead, min(5.99, start - lead + length)
+
+
 def _legacy() -> Iterator[Item]:
     for entry in score.clip_plan():
         samples, truth = score.make_clip(entry)
@@ -189,8 +272,10 @@ def run(baseline_audio: Path, families: List[str], work: Path) -> Dict[str, Any]
     caches = {name: MediaCache(work / f"cache-{name}-{score.detector_digest(path)}")
               for name, path in (("baseline", baseline_audio), ("current", Path(current.__file__)))}
     sources: Dict[str, Callable[[], Iterator[Item]]] = {
-        "legacy": _legacy, "real": _real, "short": lambda: _generated("short"),
-        "pair": lambda: _generated("pair"), "ranged": lambda: _generated("ranged")}
+        "legacy": _legacy, "real": _real,
+        "short": lambda: itertools.chain(_generated("short"), _music_clicks()),
+        "pair": lambda: itertools.chain(_generated("pair"), _exact_gap_pairs()),
+        "ranged": lambda: itertools.chain(_generated("ranged"), _compare_ranged())}
     summary: Dict[str, Dict[str, int]] = {}
     written: Dict[str, Path] = {}
     for family in families:
@@ -198,10 +283,18 @@ def run(baseline_audio: Path, families: List[str], work: Path) -> Dict[str, Any]
             path = written.get(f"{family}/{clip}")
             if path is None:
                 path = written[f"{family}/{clip}"] = score.write_wav(work / f"{family}-{clip}.wav", samples)
+
+            def bed_file() -> Path:
+                """The clip's bed alone, written once."""
+                if f"{family}/{clip}/bed" not in written:
+                    written[f"{family}/{clip}/bed"] = score.write_wav(work / f"{family}-{clip}-bed.wav", bed_only)
+                return written[f"{family}/{clip}/bed"]
+
+            compare = {"compare_to": str(bed_file())} if clip.startswith(COMPARE_PREFIX) else {}
             found = {}
             for name, module in (("baseline", baseline), ("current", current)):
                 result = module.audio_onsets(str(path), start_sec=start, end_sec=end, min_strength=strength,
-                                             band_hz=band, cache=caches[name])
+                                             band_hz=band, cache=caches[name], **compare)
                 found[name] = [float(item["time_sec"]) for item in result["onsets"]]
             tolerance = TOLERANCE[setting]
             matched = {name: _matched(truth, times, tolerance) for name, times in found.items()}
@@ -214,9 +307,7 @@ def run(baseline_audio: Path, families: List[str], work: Path) -> Dict[str, Any]
             chance: set = set()
             if lost and bed != "babble":
                 # A baseline hit is chance when the baseline also fires there on the bed alone, without the event.
-                bed_path = written.get(f"{family}/{clip}/bed")
-                if bed_path is None:
-                    bed_path = written[f"{family}/{clip}/bed"] = score.write_wav(work / f"{family}-{clip}-bed.wav", bed_only)
+                bed_path = bed_file()
                 bed_times = [float(item["time_sec"]) for item in baseline.audio_onsets(
                     str(bed_path), start_sec=start, end_sec=end, min_strength=strength, band_hz=band, cache=caches["baseline"])["onsets"]]
                 chance = {event for event in lost if any(abs(hit - truth[event]) <= tolerance for hit in bed_times)}
