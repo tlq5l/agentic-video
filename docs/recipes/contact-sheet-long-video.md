@@ -19,7 +19,7 @@ Output from agentic-video 0.3.3 on synthetic_bench_60s.mp4 (structuredContent, t
 ```json
 {"file_path": "/home/agent/.cache/agentic-video/cc3956f3407c03c8c394/contact_sheets/sheet_24samples_6cols_a767f4.jpg",
  "sample_count": 24, "rows": 4, "cols": 6, "start_sec": 1.25, "end_sec": 58.75,
- "timestamps": [1.25, 3.75, 6.25, "... 19 more ...", 58.75]}
+ "timestamps": [1.25, 3.75, 6.25, "... 20 more ...", 58.75]}
 ```
 
 The longest fixture is 60 s, so this run did not test a long file. The `start_sec` and `end_sec` split is from the tool schema and is not run here. For a long file, `overview_chunks` returns consecutive sheets in one call (README); that was not run here either.

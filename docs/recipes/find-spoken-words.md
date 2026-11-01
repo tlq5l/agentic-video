@@ -8,10 +8,19 @@ Paste into your agent:
 
 > Use agentic-video to find when "Project Cygnus" is said in `/path/to/video.mp4`. Quote the timecode and the full line. If it is not said, say so; do not guess from the frames.
 
-Tool calls (from the repo folder). `transcribe` is cached after its first run. If it returns `status=in_progress`, repeat the same call after `retry_after_seconds`.
+Tool calls (from the repo folder). `transcribe` is cached after its first run. A video with no subtitle file and no cached transcript starts a background job inside the process that starts it, and the job stops when that process exits. So the one-line `call` form returns `status=in_progress` and never finishes. Send the request to one server process, wait `retry_after_seconds`, and send it again in that same process:
 
 ```sh
-.venv/bin/python -m src.executor.mcp_server call transcribe '{"source": "fixtures/synthetic_bench_60s.mp4", "model_size": "tiny"}'
+{ echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
+  echo '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"transcribe","arguments":{"source":"fixtures/synthetic_bench_60s.mp4","model_size":"tiny"}}}'
+  sleep 25
+  echo '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"transcribe","arguments":{"source":"fixtures/synthetic_bench_60s.mp4","model_size":"tiny"}}}'
+} | .venv/bin/python -m src.executor.mcp_server
+```
+
+Once the transcript is cached, search it with a one-line call:
+
+```sh
 .venv/bin/python -m src.executor.mcp_server call search_transcript '{"source": "fixtures/synthetic_bench_60s.mp4", "query": "Project Cygnus"}'
 ```
 

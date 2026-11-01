@@ -28,4 +28,4 @@ Output from agentic-video 0.3.3 on synthetic_bench_60s.mp4 (response id 3, struc
 
 Without `direction` the same clip gives `count: 3`, at 7.0, 21.0 and 48.0 s, all `travel: stationary`. These are the purple badges, which do not move, so the one-way count is 0. The fixtures have no object that crosses the frame, so this run shows the filter, not a crossing count.
 
-Can miss: appearances shorter than 1/fps are missed (0.2 s at the default 5 fps). Spans too brief to show motion are counted with `travel: unknown`; check them by eye. Check each span with inspect_window. The counts are heuristics tuned on the author's videos (README, Limits).
+Can miss: appearances shorter than 1/fps can be missed (0.2 s at the default 5 fps). Spans too brief to show motion are counted with `travel: unknown`; check them by eye. Check each span with inspect_window. The counts are heuristics tuned on the author's videos (README, Limits).
