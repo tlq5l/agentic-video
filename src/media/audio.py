@@ -398,9 +398,9 @@ def _onset_strength(flux: np.ndarray, level_db: np.ndarray, lag: int) -> np.ndar
       reached (ONSET_RISE_LEVEL_DB), so a loud tone over a busy bed, whose start
       barely changes the normalized shape of a few bins, still scores high.
     """
-    reference = np.empty_like(level_db)
-    reference[:lag] = level_db[0]
-    reference[lag:] = level_db[:len(level_db) - lag]
+    reference = np.full_like(level_db, level_db[0])
+    if len(level_db) > lag:  # a clip shorter than one window has nothing a window back
+        reference[lag:] = level_db[:len(level_db) - lag]
     rise = level_db - reference
     ahead = max(1, lag // 2) + 1
     padded = np.concatenate([rise, np.full(ahead - 1, rise[-1])])
@@ -609,7 +609,7 @@ def audio_onsets(
         "min_strength": threshold, "band_hz": band,
         "min_gap_sec": gap, "compare_fingerprint": compare_fingerprint,
     }
-    result_key = _cache_tag("audio_onsets_v11", options)
+    result_key = _cache_tag("audio_onsets_v12", options)
     cached = cache.load_json(fingerprint, result_key)
     if isinstance(cached, dict):
         return cached

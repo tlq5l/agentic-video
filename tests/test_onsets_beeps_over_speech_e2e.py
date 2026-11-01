@@ -1,7 +1,9 @@
-"""Guards audio_onsets finding loud 1 kHz beeps over speech-like babble at band [900, 1100] and 0.7, through handle_call."""
+"""Guards audio_onsets through handle_call: loud 1 kHz beeps over speech-like babble at band [900, 1100] and 0.7,
+and clips shorter than one analysis window."""
 import wave
 
 import numpy as np
+import pytest
 
 from src.core.config import Config
 from src.executor.mcp_server import handle_call
@@ -60,3 +62,18 @@ def test_beeps_over_babble_are_found_once_each_at_their_start(monkeypatch, tmp_p
     assert len(times) == len(BEEPS), times
     assert all(abs(hit - start) <= 0.03 for hit, start in zip(times, BEEPS)), times
     assert all(0.7 <= onset["strength"] <= 1.0 for onset in result["data"]["onsets"])
+
+
+@pytest.mark.parametrize("band_hz", [None, [900, 1100], [1000, 4000]])
+def test_clip_shorter_than_one_window_returns_normally(monkeypatch, tmp_path, band_hz):
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    # 25 ms: a 1 kHz square burst after 5 ms of silence, shorter than the 2048- and 1024-sample windows.
+    local = np.arange(int(0.025 * RATE)) / RATE
+    signal = np.where(local >= 0.005, 0.5 * np.sign(np.sin(2 * np.pi * 1000 * local)), 0.0)
+    source = _write_wav(tmp_path / "short.wav", signal)
+
+    arguments = {"source": source} if band_hz is None else {"source": source, "band_hz": band_hz}
+    result = handle_call("audio_onsets", arguments)
+
+    assert result["ok"] is True, result
+    assert all(0.0 <= onset["time_sec"] <= 0.025 for onset in result["data"]["onsets"])
