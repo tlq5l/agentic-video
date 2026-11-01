@@ -41,6 +41,12 @@ HOP_SAMPLES = 256
 # Chosen on benchmarks/dev/onsets (climb split): the widest gap tried that keeps recall on both settings.
 DEFAULT_ONSET_MIN_GAP_SEC = 0.035
 N_FFT = 2048
+# audio_onsets strength terms (see _onset_strength), fitted on the climb splits of benchmarks/dev/onsets.
+ONSET_GATE_RISE_DB = (1.0, 4.0)  # in-band rise (dB over one window) that opens the spectral-flux term
+ONSET_GATE_LEVEL_DB = (-50.0, -35.0)  # in-band mean-square level (dBFS) that opens the spectral-flux term
+ONSET_RISE_DB = (4.0, 16.0)  # in-band rise over which the level-rise term grows from 0 to 1
+ONSET_RISE_LEVEL_DB = (-30.0, -15.0)  # in-band level over which the level-rise term grows from 0 to 1
+ONSET_ENTRY_RISE_DB = 3.0  # level rise that marks where an onset entered the analysis window
 BANDS: Tuple[Tuple[str, float, float], ...] = (
     ("sub", 0.0, 120.0),
     ("low_mid", 120.0, 500.0),
@@ -313,20 +319,30 @@ def _zero_padded_slice(samples: np.ndarray, first: int, last: int) -> np.ndarray
     return out
 
 
-def _stft_flux(
+def _flux_and_level(
     samples: np.ndarray,
     band: Optional[Dict[str, Any]] = None,
     fft_size: int = N_FFT,
-) -> np.ndarray:
-    """Normalized positive spectral flux, optionally limited to one frequency band."""
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Per STFT frame: normalized positive spectral flux (0..1) and mean-square level in dBFS.
+
+    Both come from one STFT (Hann window of `fft_size`, frames `HOP_SAMPLES`
+    apart and centered on `frame * HOP_SAMPLES`), limited to `band` when given.
+    The flux compares each frame's magnitude spectrum, divided by its sum, with
+    the previous frame's, so it sees changes of spectral shape but not of
+    level. The level is the band's mean-square power (a full-scale sine in the
+    band reads -3 dB).
+    """
     if len(samples) < 2:
-        return np.zeros(1, dtype=np.float32)
+        return np.zeros(1, dtype=np.float32), np.full(1, -120.0)
     fft_size = max(256, int(fft_size))
     half = fft_size // 2
     samples = np.asarray(samples, dtype=np.float32)
     frame_count = int(math.ceil(len(samples) / float(HOP_SAMPLES)))
     flux = np.zeros(frame_count, dtype=np.float32)
+    level_db = np.empty(frame_count)
     window = np.hanning(fft_size).astype(np.float32)
+    power_scale = 2.0 / (fft_size * float(np.sum(window.astype(np.float64) ** 2)))
     if band is None:
         band_mask = None
     else:
@@ -336,7 +352,7 @@ def _stft_flux(
             raise ExtractionBoundsError("band_hz is too narrow for the analysis FFT", {"band_hz": band})
     frames_per_chunk = int(10.0 * SAMPLE_RATE / HOP_SAMPLES)
 
-    def chunk_flux(first: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def chunk_features(first: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         count = min(frames_per_chunk, frame_count - first)
         view_start = first * HOP_SAMPLES
         view_end = (first + count - 1) * HOP_SAMPLES + fft_size
@@ -345,20 +361,56 @@ def _stft_flux(
         magnitudes = np.abs(np.fft.rfft(view * window, axis=1)).astype(np.float32, copy=False)
         if band_mask is not None:
             magnitudes = magnitudes[:, band_mask]
+        power = np.einsum("ij,ij->i", magnitudes, magnitudes, dtype=np.float64) * power_scale
+        level = 10.0 * np.log10(np.maximum(power, 1e-12))
         totals = np.sum(magnitudes, axis=1, keepdims=True)
         normalized = magnitudes / np.maximum(totals, 1e-12)
         inner = np.maximum(normalized[1:] - normalized[:-1], 0.0).sum(axis=1)
-        return inner, normalized[0].copy(), normalized[-1].copy()
+        return inner, normalized[0].copy(), normalized[-1].copy(), level
 
     # Chunks are independent; only the first frame of each needs the previous chunk's last row.
     starts = list(range(0, frame_count, frames_per_chunk))
     previous = None
-    for first, (inner, head, tail) in zip(starts, _parallel_map(chunk_flux, starts)):
+    for first, (inner, head, tail, level) in zip(starts, _parallel_map(chunk_features, starts)):
         if previous is not None:
             flux[first] = np.maximum(head - previous, 0.0).sum()
         flux[first + 1:first + 1 + len(inner)] = inner
+        level_db[first:first + len(level)] = level
         previous = tail
-    return flux
+    return flux, level_db
+
+
+def _ramp(values: np.ndarray, low: float, high: float) -> np.ndarray:
+    """0 at or below `low`, 1 at or above `high`, linear between."""
+    return np.clip((values - low) / (high - low), 0.0, 1.0)
+
+
+def _onset_strength(flux: np.ndarray, level_db: np.ndarray, lag: int) -> Tuple[np.ndarray, np.ndarray]:
+    """Onset strength per frame (0..1) and whether the level-rise term set it.
+
+    rise = level now minus level `lag` frames (one window) back, so a fade or a
+    tone's end never rises. strength = max(flux * gate, rise_term):
+    - gate (0..1) needs a rise of ONSET_GATE_RISE_DB to an in-band level of
+      ONSET_GATE_LEVEL_DB, so a bed's level-free shape jitter and very quiet
+      sounds cannot fire. It looks half a window ahead, because the flux peaks
+      as a start enters the window, before the level has risen;
+    - rise_term (0..1) grows with the rise (ONSET_RISE_DB) and with the level
+      reached (ONSET_RISE_LEVEL_DB), so a loud tone over a busy bed, whose start
+      barely changes the normalized shape of a few bins, still scores high.
+    """
+    reference = np.empty_like(level_db)
+    reference[:lag] = level_db[0]
+    reference[lag:] = level_db[:len(level_db) - lag]
+    rise = level_db - reference
+    ahead = max(1, lag // 2) + 1
+    padded = np.concatenate([rise, np.full(ahead - 1, rise[-1])])
+    rise_ahead = np.lib.stride_tricks.sliding_window_view(padded, ahead).max(axis=1)
+    padded = np.concatenate([level_db, np.full(ahead - 1, level_db[-1])])
+    level_ahead = np.lib.stride_tricks.sliding_window_view(padded, ahead).max(axis=1)
+    gate = _ramp(rise_ahead, *ONSET_GATE_RISE_DB) * _ramp(level_ahead, *ONSET_GATE_LEVEL_DB)
+    rise_term = _ramp(rise, *ONSET_RISE_DB) * _ramp(level_db, *ONSET_RISE_LEVEL_DB)
+    gated_flux = flux * gate
+    return np.maximum(gated_flux, rise_term).astype(np.float32), rise_term > gated_flux
 
 
 def _span_chunks(starts: np.ndarray, ends: np.ndarray, rows: int = 512) -> List[Tuple[int, np.ndarray]]:
@@ -458,46 +510,64 @@ def _detect_onsets_in_samples(
     # Higher bands have enough bin density at 1024 samples and benefit from
     # a shorter window when pitched attacks sit only a few milliseconds apart.
     fft_size = 1024 if band is not None and band["low_hz"] >= 500.0 else N_FFT
-    envelope = _stft_flux(local, band, fft_size=fft_size)
+    flux, level_db = _flux_and_level(local, band, fft_size=fft_size)
+    lag = fft_size // HOP_SAMPLES
+    strength, from_rise = _onset_strength(flux, level_db, lag)
     peaks = np.zeros(0, dtype=np.int64)
-    if len(envelope) >= 3:
-        middle = envelope[1:-1]
-        peaks = np.flatnonzero((middle >= threshold) & (middle > envelope[:-2]) & (middle >= envelope[2:])) + 1
-    elif len(envelope) == 1 and envelope[0] >= threshold:
+    if len(strength) >= 3:
+        middle = strength[1:-1]
+        peaks = np.flatnonzero((middle >= threshold) & (middle > strength[:-2]) & (middle >= strength[2:])) + 1
+    elif len(strength) == 1 and strength[0] >= threshold:
         peaks = np.zeros(1, dtype=np.int64)
 
-    # Debounce multiple spectral peaks from one attack, keeping the strongest
+    # Debounce multiple strength peaks from one attack, keeping the strongest
     # (strongest first, earlier first among equals).
-    ranked = peaks[np.lexsort((peaks, -envelope[peaks].astype(np.float64)))].tolist()
+    ranked = peaks[np.lexsort((peaks, -strength[peaks].astype(np.float64)))].tolist()
     selected: List[int] = []
     debounce_sec = 0.010 if band is not None else 0.030
     min_gap_frames = max(1, int(round(debounce_sec * SAMPLE_RATE / HOP_SAMPLES)))
-    blocked = np.zeros(len(envelope), dtype=bool)
+    blocked = np.zeros(len(strength), dtype=bool)
     for index in ranked:
         if not blocked[index]:
             selected.append(index)
             blocked[max(0, index - min_gap_frames + 1):index + min_gap_frames] = True
-    selected.sort()
 
-    # A centered 2048-sample window first sees an attack as it enters its
-    # right edge, half a window before the attack time. Correct that known
-    # STFT lead; the remaining quantization is one 256-sample hop.
-    # Band-limited flux peaks a little later for short pitched bursts than
-    # broadband attacks. One hop corrects that band-specific window lag.
+    # Strength peaks after the start entered the window, up to one window
+    # later over a bed. Time each onset at the first frame of the window before
+    # its peak whose level is ONSET_ENTRY_RISE_DB over the level just before
+    # that window, or at the steepest one-hop rise if none is. Two peaks timed
+    # to the same frame are one onset with the stronger peak's strength.
+    steps = np.diff(level_db, prepend=level_db[0])
+    peak_at_frame: Dict[int, int] = {}
+    for peak in selected:
+        frame = peak
+        if peak > 0:
+            first = max(1, peak - lag + 1)
+            entered = np.flatnonzero(level_db[first:peak + 1] - level_db[first - 1] >= ONSET_ENTRY_RISE_DB)
+            frame = first + (int(entered[0]) if len(entered) else int(np.argmax(steps[first:peak + 1])))
+        if frame not in peak_at_frame or strength[peak] > strength[peak_at_frame[frame]]:
+            peak_at_frame[frame] = peak
+    frames = np.asarray(sorted(peak_at_frame), dtype=np.int64)
+    peaks = np.asarray([peak_at_frame[frame] for frame in frames.tolist()], dtype=np.int64)
+
+    # A centered window first sees an attack as it enters its right edge,
+    # half a window before the attack time. Correct that known STFT lead; the
+    # remaining quantization is one 256-sample hop. Band-limited onsets peak a
+    # little later for short pitched bursts than broadband attacks. One hop
+    # corrects that band-specific window lag.
     bias = fft_size // 2 - (HOP_SAMPLES if band is not None else 0)
-    frames = np.asarray(selected, dtype=np.int64)
     times = context_first / float(SAMPLE_RATE) + (frames * HOP_SAMPLES + bias) / float(SAMPLE_RATE)
     inside = (times >= start - 1e-6) & (times <= end + 1e-6)
-    frames, times = frames[inside], times[inside]
+    peaks, times = peaks[inside], times[inside]
     starts = np.clip(np.rint(times * SAMPLE_RATE), 0, len(samples) - 1).astype(np.int64)
     ends = np.minimum(len(samples), starts + int(0.085 * SAMPLE_RATE))
-    # A normalized spectrum can show a large flux when codec noise changes
-    # shape at a silence boundary. Do not call that a sound.
+    # Codec noise at a silence boundary can still reach the strength cut.
+    # Do not call a near-silent span a sound.
     audible = ~(_activity_rms(samples, starts, ends) < 1e-4)
-    frames, times, starts, ends = frames[audible], times[audible], starts[audible], ends[audible]
+    peaks, times, starts, ends = peaks[audible], times[audible], starts[audible], ends[audible]
     onsets: List[Dict[str, Any]] = [
-        {"time_sec": round(time_sec, 6), "strength": round(strength, 6)}
-        for time_sec, strength in zip(times.tolist(), envelope[frames].astype(np.float64).tolist())
+        {"time_sec": round(time_sec, 6), "strength": round(value, 6)}
+        for time_sec, value in zip(times.tolist(), strength[peaks].astype(np.float64).tolist())
     ]
     profiles, energies = _onset_spectra(samples, starts, ends, band)
     names = [name for name, _, _ in BANDS]
@@ -539,7 +609,7 @@ def audio_onsets(
         "min_strength": threshold, "band_hz": band,
         "min_gap_sec": gap, "compare_fingerprint": compare_fingerprint,
     }
-    result_key = _cache_tag("audio_onsets_v9", options)
+    result_key = _cache_tag("audio_onsets_v10", options)
     cached = cache.load_json(fingerprint, result_key)
     if isinstance(cached, dict):
         return cached
