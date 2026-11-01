@@ -200,7 +200,7 @@ CLICK_BAND = [1000.0, 4000.0]
 
 
 def plan() -> List[dict]:
-    """The 120 clips: per group a click clip, a beep clip, a legacy-kind clip and, every third group, a bed-only clip."""
+    """The 156 clips: per group a click, a beep, a legacy-kind and a quiet clip and, every third group, a bed-only clip."""
     climb = {int(group) for group in np.random.default_rng(SEED).permutation(GROUPS)[:CLIMB_GROUPS]}
     entries = []
     for group in range(GROUPS):
@@ -219,6 +219,11 @@ def plan() -> List[dict]:
         if group % 3 == 0:
             entries.append({**common, "id": f"g{group:02d}-bed", "family": "bed", "level": bed_level, "seed": bed_seed + 4,
                             "beep_hz": beep_hz})
+        # Quiet but clear starts: square bursts at -50 to -30 dBFS, 20-30 dB over a bed at -75 to -55 dBFS.
+        quiet_bed_db = rng.uniform(-75.0, -55.0)
+        event_db = float(np.clip(quiet_bed_db + rng.uniform(20.0, 30.0), -50.0, -30.0))
+        entries.append({**common, "id": f"g{group:02d}-quiet", "family": "quiet", "level": quiet_bed_db,
+                        "event_db": event_db, "seed": bed_seed + 5, "beep_hz": beep_hz})
     return entries
 
 
@@ -232,6 +237,7 @@ def settings(entry: dict) -> List[Tuple[str, Optional[List[float]], float]]:
         "beep": [beep],
         "mixed": [("mixed", CLICK_BAND, 0.36), ("broadband", None, 0.12)],
         "bed": [("click", CLICK_BAND, 0.36), beep, ("broadband", None, 0.12)],
+        "quiet": [("quiet_click", CLICK_BAND, 0.36), ("quiet_beep", beep and beep[1], 0.7), ("quiet_broadband", None, 0.12)],
     }
     return by_family[entry["family"]]
 
@@ -269,6 +275,12 @@ def make_clip(entry: dict, legacy_event_wave) -> Tuple[np.ndarray, List[float], 
             wave = sine_beep(rng, frequency, rng.uniform(0.05, 0.30), rng.uniform(0.15, 0.8))
             (decoys["off_band_beep"] if decoy else truth).append(first / RATE)
             gap = len(wave) / RATE + rng.uniform(0.15, 1.0)
+        elif family == "quiet":
+            # A square burst at the beep frequency is in band for the click, beep and broadband settings.
+            amplitude = 10.0 ** ((entry["event_db"] + rng.uniform(-2.0, 2.0)) / 20.0)
+            wave = square_click(rng, entry["beep_hz"], rng.uniform(0.015, 0.100), amplitude)
+            truth.append(first / RATE)
+            gap = rng.uniform(0.3, 0.8)
         else:
             wave = legacy_event_wave(entry["kind"], rng)
             truth.append(first / RATE)

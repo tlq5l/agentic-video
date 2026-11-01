@@ -16,13 +16,16 @@ The held-out split is printed only when asked for it.
     python benchmarks/dev/onsets/score.py --split climb --breakdown
     python benchmarks/dev/onsets/score.py --split heldout
 
-``--set real`` scores the 120 real-world-like clips of ``realistic.py`` instead
+``--set real`` scores the 156 real-world-like clips of ``realistic.py`` instead
 (``--set both``, the default, scores both sets): square clicks, sine beeps,
-legacy kinds and bed-only clips over speech-like babble, crowd, screen-recording
-and codec-floor beds, split 80 climb / 40 held out by bed group. Settings: click
-(band [1000, 4000], 0.36; at 30 and 50 ms), beep (band f +-100 Hz, 0.7; at 30
-and 100 ms; off-band beeps and plosive bursts are decoys), mixed (legacy kinds
-at the click setting) and broadband (0.12). Every detection that is not a
+legacy kinds, quiet square bursts and bed-only clips over speech-like babble,
+crowd, screen-recording and codec-floor beds, split by bed group (24 groups,
+105 clips climb / 12 groups, 51 clips held out; groups differ in size).
+Settings: click (band [1000, 4000], 0.36; at 30 and 50 ms), beep (band f +-100
+Hz, 0.7; at 30 and 100 ms; off-band beeps and plosive bursts are decoys), mixed
+(legacy kinds at the click setting), broadband (0.12), and quiet_click,
+quiet_beep and quiet_broadband (the same three settings on quiet clips: bursts
+at -50 to -30 dBFS, 20-30 dB over their bed). Every detection that is not a
 planted event counts as a false positive, beds included.
 
 Each run scores two settings: the gallery setting (``band_hz`` [1000, 4000],
@@ -214,7 +217,8 @@ def score_real(split: str, work: Path) -> Dict[str, Dict[float, Dict[str, Any]]]
 
     work.mkdir(parents=True, exist_ok=True)
     cache = MediaCache(work / "cache")
-    tolerances = {"click": (0.030, 0.050), "beep": (0.030, 0.100), "mixed": (0.030,), "broadband": (0.030,)}
+    tolerances = {"click": (0.030, 0.050), "beep": (0.030, 0.100), "mixed": (0.030,), "broadband": (0.030,),
+                  "quiet_click": (0.030, 0.050), "quiet_beep": (0.030, 0.100), "quiet_broadband": (0.030,)}
     pooled: Dict[str, Dict[float, Dict[str, Any]]] = {
         name: {tolerance: {"tp": 0, "fp": 0, "fn": 0, "errors": []} for tolerance in values}
         for name, values in tolerances.items()}
