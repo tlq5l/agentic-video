@@ -775,7 +775,7 @@ def count_video(engine, progress=lambda done, total: None, **args):
         result["gaps_merged"] = len(builder.bridged)
         if direction == "any":
             result["count_without_merges"] = len(spans) + len(builder.bridged)
-            unmerged = f"without merging the count is {len(spans) + len(builder.bridged)}"
+            unmerged = f"without merging the count is {result['count_without_merges']}"
         else:
             unmerged = f"the joined pairs' direction is unknown, so no count without merging is given for direction={direction}"
         result["note"] += (f" min_gap_sec={min_gap:g} joined {len(builder.bridged)} pair(s) of appearances that the default "

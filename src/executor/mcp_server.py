@@ -963,14 +963,13 @@ def _dispatch(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
                                f"check the gaps listed in note and {unmerged}.")
         if data.get("travel_counts") and not data.get("capped") and "verify" in data:
             if direction == "any":
-                data["verify"] += (" Some appearances show net motion across the frame; travel_counts estimates it from first "
-                                   "and last positions, so it is not a verified crossing or direction count. The count includes "
-                                   "all directions: for a directional question, rerun with direction (e.g. left_to_right) and "
-                                   "check those spans with inspect_window before answering.")
+                detail = (" or direction count. The count includes all directions: for a directional question, "
+                          "rerun with direction (e.g. left_to_right) and check those spans with inspect_window before answering.")
             else:
-                data["verify"] += (f" Some appearances show net motion across the frame; travel_counts estimates it from first "
-                                   f"and last positions, so it is not a verified crossing. The count holds only the appearances "
-                                   f"that travel {direction}; check them with inspect_window before answering.")
+                detail = (f". The count holds only the appearances that travel {direction}; "
+                          "check them with inspect_window before answering.")
+            data["verify"] += (" Some appearances show net motion across the frame; travel_counts estimates it from first "
+                               "and last positions, so it is not a verified crossing" + detail)
         sheet = data.get("contact_sheet")
         if isinstance(sheet, dict) and sheet.get("file_path"):
             sheet = dict(sheet)
