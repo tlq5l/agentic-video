@@ -16,9 +16,28 @@ The held-out split is printed only when asked for it.
     python benchmarks/dev/onsets/score.py --split climb --breakdown
     python benchmarks/dev/onsets/score.py --split heldout
 
+``--set real`` scores the 156 real-world-like clips of ``realistic.py`` instead
+(``--set both``, the default, scores both sets): square clicks, sine beeps,
+legacy kinds, quiet square bursts and bed-only clips over speech-like babble,
+crowd, screen-recording and codec-floor beds, split by bed group (24 groups,
+105 clips climb / 12 groups, 51 clips held out; groups differ in size).
+Settings: click (band [1000, 4000], 0.36; at 30 and 50 ms), beep (band f +-100
+Hz, 0.7; at 30 and 100 ms; off-band beeps and plosive bursts are decoys), mixed
+(legacy kinds at the click setting), broadband (0.12), and quiet_click,
+quiet_beep and quiet_broadband (the same three settings on quiet clips: bursts
+at -50 to -30 dBFS, 20-30 dB over their bed). Every detection that is not a
+planted event counts as a false positive, beds included.
+
+``--set noloss`` runs a baseline detector (main's ``src/media/audio.py``, read
+with ``git show`` from ``--baseline-ref``, default ``origin/main``; or the file
+given by ``--baseline-audio``) and this tree's on the same clips and lists every
+planted start the baseline finds and this tree misses (see ``noloss.py``;
+``--family`` picks the clip families, so slices can run in parallel).
+
 Each run scores two settings: the gallery setting (``band_hz`` [1000, 4000],
 ``min_strength`` 0.36; primary) and the tool default (broadband, 0.12; guard).
 Prints ``METRIC onsets.<split>.<setting>_f1``, ``_precision``, ``_recall``,
+``_timing_median_ms``, ``_timing_p95_ms`` (absolute error of matched pairs),
 ``_tp``, ``_fp`` and ``_fn``. ``--min-gap-sec`` is passed to ``audio_onsets``
 only when given.
 """
@@ -122,8 +141,8 @@ def write_wav(path: Path, samples: np.ndarray) -> Path:
     return path
 
 
-def match(truth: Sequence[float], detected: Sequence[float], tolerance: float = TOLERANCE_SEC) -> Tuple[int, int, int]:
-    """(true positives, false positives, false negatives) with one-to-one matching, closest pairs first."""
+def match_errors(truth: Sequence[float], detected: Sequence[float], tolerance: float = TOLERANCE_SEC) -> Tuple[int, int, int, List[float]]:
+    """(true positives, false positives, false negatives, matched absolute errors in seconds); one-to-one, closest pairs first."""
     pairs = sorted(
         (abs(hit - target), t_index, d_index)
         for t_index, target in enumerate(truth)
@@ -132,12 +151,31 @@ def match(truth: Sequence[float], detected: Sequence[float], tolerance: float = 
     )
     used_truth: set = set()
     used_hits: set = set()
-    for _, t_index, d_index in pairs:
+    errors: List[float] = []
+    for error, t_index, d_index in pairs:
         if t_index not in used_truth and d_index not in used_hits:
             used_truth.add(t_index)
             used_hits.add(d_index)
+            errors.append(error)
     true_positive = len(used_truth)
-    return true_positive, len(detected) - true_positive, len(truth) - true_positive
+    return true_positive, len(detected) - true_positive, len(truth) - true_positive, errors
+
+
+def match(truth: Sequence[float], detected: Sequence[float], tolerance: float = TOLERANCE_SEC) -> Tuple[int, int, int]:
+    """(true positives, false positives, false negatives) with one-to-one matching, closest pairs first."""
+    return match_errors(truth, detected, tolerance)[:3]
+
+
+def detect(path: Path, band_hz: Optional[List[float]], min_strength: float, cache: Any, min_gap_sec: Optional[float] = None) -> List[float]:
+    import sys
+
+    sys.path.insert(0, str(REPO))
+    from src.media.audio import audio_onsets
+
+    kwargs: Dict[str, Any] = {"min_strength": min_strength, "band_hz": band_hz, "cache": cache}
+    if min_gap_sec is not None:
+        kwargs["min_gap_sec"] = min_gap_sec
+    return [float(item["time_sec"]) for item in audio_onsets(str(path), **kwargs)["onsets"]]
 
 
 def score(split: str, band_hz: Optional[List[float]], min_strength: float, min_gap_sec: Optional[float], work: Path) -> Dict[str, Any]:
@@ -145,26 +183,66 @@ def score(split: str, band_hz: Optional[List[float]], min_strength: float, min_g
 
     sys.path.insert(0, str(REPO))
     from src.core.cache import MediaCache
-    from src.media.audio import audio_onsets
 
     work.mkdir(parents=True, exist_ok=True)
-    kwargs: Dict[str, Any] = {"min_strength": min_strength, "band_hz": band_hz, "cache": MediaCache(work / "cache")}
-    if min_gap_sec is not None:
-        kwargs["min_gap_sec"] = min_gap_sec
-    totals = {"tp": 0, "fp": 0, "fn": 0}
+    cache = MediaCache(work / "cache")
+    totals: Dict[str, Any] = {"tp": 0, "fp": 0, "fn": 0, "errors": []}
     groups: Dict[str, Dict[str, int]] = {}
     for entry in clip_plan():
         if entry["split"] != split:
             continue
         samples, truth = make_clip(entry)
         path = write_wav(work / f"{entry['id']}.wav", samples)
-        detected = [float(item["time_sec"]) for item in audio_onsets(str(path), **kwargs)["onsets"]]
-        counts = match(truth, detected)
+        detected = detect(path, band_hz, min_strength, cache, min_gap_sec)
+        *counts, errors = match_errors(truth, detected)
+        totals["errors"] += errors
         for key, value in zip(("tp", "fp", "fn"), counts):
             totals[key] += value
             for group in (entry["kind"], entry["bed"]):
                 groups.setdefault(group, {"tp": 0, "fp": 0, "fn": 0})[key] += value
-    return {**totals, **_rates(totals), "groups": {name: _rates(counts) | counts for name, counts in groups.items()}}
+    return {**totals, **_rates(totals), **_timing(totals["errors"]),
+            "groups": {name: _rates(counts) | counts for name, counts in groups.items()}}
+
+
+def _timing(errors: Sequence[float]) -> Dict[str, float]:
+    """Median and 95th percentile of matched absolute timing errors, in ms."""
+    if not errors:
+        return {"timing_median_ms": float("nan"), "timing_p95_ms": float("nan")}
+    values = np.asarray(errors) * 1000.0
+    return {"timing_median_ms": float(np.median(values)), "timing_p95_ms": float(np.percentile(values, 95))}
+
+
+def score_real(split: str, work: Path) -> Dict[str, Dict[float, Dict[str, Any]]]:
+    """Pooled counts per setting and tolerance on the extended (real-world-like) set."""
+    import sys
+
+    sys.path.insert(0, str(REPO))
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import realistic
+    from src.core.cache import MediaCache
+
+    work.mkdir(parents=True, exist_ok=True)
+    cache = MediaCache(work / "cache")
+    tolerances = {"click": (0.030, 0.050), "beep": (0.030, 0.100), "mixed": (0.030,), "broadband": (0.030,),
+                  "quiet_click": (0.030, 0.050), "quiet_beep": (0.030, 0.100), "quiet_broadband": (0.030,)}
+    pooled: Dict[str, Dict[float, Dict[str, Any]]] = {
+        name: {tolerance: {"tp": 0, "fp": 0, "fn": 0, "errors": []} for tolerance in values}
+        for name, values in tolerances.items()}
+    for entry in realistic.plan():
+        if entry["split"] != split:
+            continue
+        samples, truth, _ = realistic.make_clip(entry, _event_wave)
+        path = write_wav(work / f"{entry['id']}.wav", samples)
+        for name, band_hz, min_strength in realistic.settings(entry):
+            detected = detect(path, band_hz, min_strength, cache)
+            for tolerance, counts in pooled[name].items():
+                tp, fp, fn, errors = match_errors(truth, detected, tolerance)
+                counts["tp"] += tp
+                counts["fp"] += fp
+                counts["fn"] += fn
+                counts["errors"] += errors
+    return {name: {tolerance: {**counts, **_rates(counts), **_timing(counts["errors"])} for tolerance, counts in by_tolerance.items()}
+            for name, by_tolerance in pooled.items()}
 
 
 def _rates(counts: Dict[str, int]) -> Dict[str, float]:
@@ -178,28 +256,57 @@ def _rates(counts: Dict[str, int]) -> Dict[str, float]:
 
 def main(argv: Optional[Sequence[str]] = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("--split", choices=["climb", "heldout"], required=True)
-    parser.add_argument("--min-gap-sec", type=float, default=None, help="passed to audio_onsets only when given")
+    parser.add_argument("--split", choices=["climb", "heldout"], help="required except with --set noloss")
+    parser.add_argument("--set", choices=["legacy", "real", "both", "noloss"], default="both",
+                        help="legacy: the 60 original clips; real: the 156 real-world-like clips (realistic.py); "
+                             "noloss: list planted starts --baseline-audio finds and this tree misses (noloss.py)")
+    parser.add_argument("--baseline-audio", default=None,
+                        help="--set noloss: the baseline's src/media/audio.py file (default: read from --baseline-ref)")
+    parser.add_argument("--baseline-ref", default="origin/main",
+                        help="--set noloss: git ref whose src/media/audio.py is the baseline (default origin/main)")
+    parser.add_argument("--family", action="append", choices=["legacy", "real", "short", "pair", "ranged"],
+                        help="--set noloss: families to check (repeatable; default all)")
+    parser.add_argument("--min-gap-sec", type=float, default=None, help="passed to audio_onsets only when given (legacy set)")
     parser.add_argument("--work", default=None, help="scratch folder for the generated WAVs (default: a new temp folder)")
-    parser.add_argument("--breakdown", action="store_true", help="also print tp/fp/fn per sound kind and per bed")
+    parser.add_argument("--breakdown", action="store_true", help="also print tp/fp/fn per sound kind and per bed (legacy set)")
     args = parser.parse_args(argv)
     work = Path(args.work) if args.work else Path(tempfile.mkdtemp(prefix="onsets-score-"))
     work.mkdir(parents=True, exist_ok=True)
-    # The reported gallery setting (primary) and the tool's default broadband setting (guard).
-    configs = {
-        "band": ([1000.0, 4000.0], 0.36),
-        "broadband": (None, 0.12),
-    }
-    for label, (band, min_strength) in configs.items():
-        result = score(args.split, band, min_strength, args.min_gap_sec, work / label)
-        prefix = f"onsets.{args.split}.{label}"
-        for key in ("f1", "precision", "recall"):
-            print(f"METRIC {prefix}_{key}={result[key]:.4f}")
-        for key in ("tp", "fp", "fn"):
-            print(f"METRIC {prefix}_{key}={result[key]}")
-        if args.breakdown:
-            for name, counts in sorted(result["groups"].items()):
-                print(f"BREAKDOWN {prefix}.{name} f1={counts['f1']:.4f} tp={counts['tp']} fp={counts['fp']} fn={counts['fn']}")
+    if args.set == "noloss":
+        import sys
+
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import noloss
+
+        baseline = Path(args.baseline_audio) if args.baseline_audio else noloss.export_ref(args.baseline_ref, work / "noloss" / "baseline_audio.py")
+        noloss.run(baseline, args.family or ["legacy", "real", "short", "pair", "ranged"], work / "noloss")
+        return
+    if args.split is None:
+        parser.error("--split is required")
+    timing_keys = ("timing_median_ms", "timing_p95_ms")
+    if args.set in ("legacy", "both"):
+        # The reported gallery setting (primary) and the tool's default broadband setting (guard).
+        configs = {
+            "band": ([1000.0, 4000.0], 0.36),
+            "broadband": (None, 0.12),
+        }
+        for label, (band, min_strength) in configs.items():
+            result = score(args.split, band, min_strength, args.min_gap_sec, work / label)
+            prefix = f"onsets.{args.split}.{label}"
+            for key in ("f1", "precision", "recall") + timing_keys:
+                print(f"METRIC {prefix}_{key}={result[key]:.4f}")
+            for key in ("tp", "fp", "fn"):
+                print(f"METRIC {prefix}_{key}={result[key]}")
+            if args.breakdown:
+                for name, counts in sorted(result["groups"].items()):
+                    print(f"BREAKDOWN {prefix}.{name} f1={counts['f1']:.4f} tp={counts['tp']} fp={counts['fp']} fn={counts['fn']}")
+    if args.set in ("real", "both"):
+        for name, by_tolerance in score_real(args.split, work / "real").items():
+            for tolerance, result in by_tolerance.items():
+                prefix = f"onsets.real.{args.split}.{name}@{int(round(tolerance * 1000))}ms"
+                print(f"METRIC {prefix} P={result['precision']:.3f} R={result['recall']:.3f} F1={result['f1']:.3f} "
+                      f"timing_median_ms={result['timing_median_ms']:.1f} timing_p95_ms={result['timing_p95_ms']:.1f} "
+                      f"tp={result['tp']} fp={result['fp']} fn={result['fn']}")
 
 
 if __name__ == "__main__":
