@@ -712,8 +712,8 @@ def count_video(engine, progress=lambda done, total: None, **args):
     fps = round(fps, 3)
     judged = [ALGORITHM_VERSION, meta.fingerprint, description, text, case_sensitive, start, end, requested_fps]
     direction = args.get("direction", "any")
-    filters = [] if direction == "any" else [direction]
-    tag = hashlib.sha256(json.dumps(judged + [min_gap, max_spans] + filters).encode()).hexdigest()[:20]
+    direction_key = [] if direction == "any" else [direction]
+    tag = hashlib.sha256(json.dumps(judged + [min_gap, max_spans] + direction_key).encode()).hexdigest()[:20]
     cache_dir = engine._cache.get_entry_dir(meta.fingerprint)
     result_path = cache_dir / f"{tag}.occurrences.json"
     if result_path.exists():
@@ -786,8 +786,8 @@ def count_video(engine, progress=lambda done, total: None, **args):
     if moving:
         result["travel_counts"] = moving
         if direction == "any":
-            outcome = ("The count includes every direction. Directional counting is unsupported: verify each span with "
-                       "inspect_window before answering a directional question.")
+            outcome = ("The count includes every direction; for a directional question, rerun with direction (e.g. "
+                       "left_to_right) and verify each span with inspect_window before answering.")
         else:
             outcome = "Verify each span with inspect_window before answering."
         result["note"] += (f" {sum(moving.values())} appearance(s) show net motion across the frame ("

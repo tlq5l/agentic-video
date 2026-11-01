@@ -491,6 +491,7 @@ def test_batched_clip_judging_matches_one_frame_at_a_time():
 
 @needs_ffmpeg
 def test_direction_narrows_the_count_through_the_mcp_tool(tmp_path, monkeypatch):
+    """Guards count_occurrences(direction=...): through handle_call on a real clip, only that direction is counted."""
     from src.core.config import Config
     from src.executor import mcp_server
     monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")

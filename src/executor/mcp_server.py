@@ -953,8 +953,8 @@ def _dispatch(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         elif data.get("status") != "complete":
             data.pop("verify", None)
         elif not data.get("spans"):
-            nothing = "Nothing matched" if direction == "any" else f"No appearance travels {direction}"
-            data["verify"] = (f"{nothing}. Before answering 0, look at contact_sheet frames over the same window "
+            no_match = "Nothing matched" if direction == "any" else f"No appearance travels {direction}"
+            data["verify"] = (f"{no_match}. Before answering 0, look at contact_sheet frames over the same window "
                               "and count by eye; if your count differs, trust your own.")
         elif data.get("gaps_merged"):
             unmerged = "use count_without_merges if they were separate" if "count_without_merges" in data else \
@@ -965,7 +965,8 @@ def _dispatch(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
             if direction == "any":
                 data["verify"] += (" Some appearances show net motion across the frame; travel_counts estimates it from first "
                                    "and last positions, so it is not a verified crossing or direction count. The count includes "
-                                   "all directions: do not answer a directional question from it without checking with inspect_window.")
+                                   "all directions: for a directional question, rerun with direction (e.g. left_to_right) and "
+                                   "check those spans with inspect_window before answering.")
             else:
                 data["verify"] += (f" Some appearances show net motion across the frame; travel_counts estimates it from first "
                                    f"and last positions, so it is not a verified crossing. The count holds only the appearances "

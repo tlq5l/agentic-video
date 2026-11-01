@@ -15,7 +15,7 @@ CLIP-described targets and repetition counting need the local model:
 export HF_HOME=<cache with the CLIP weights> HF_HUB_OFFLINE=1.
 
 METRIC occ_trap_* lines cover the trap questions: exact is the right count, safe is right or explicitly
-flagged (capped, merged gaps, appearances in more than one direction, or no count from the tool), silent_wrong is a
+flagged (capped, merged gaps, appearances that move across the frame when no direction was passed, or no count from the tool), silent_wrong is a
 wrong count with no flag (should be 0).
 A tool error is never safe: it counts as a wrong, unflagged answer.
 METRIC rep_* lines are the synthetic clips; real_rep_* lines are the real Countix-train clips
