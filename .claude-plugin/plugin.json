@@ -1,0 +1,11 @@
+{
+  "name": "agentic-video",
+  "description": "Local video tools for AI agents: frames, contact sheets, timestamped transcripts, cuts, loudness, sound and sync checks, and counting on screen. Served over MCP.",
+  "author": {
+    "name": "tlq5l"
+  },
+  "homepage": "https://github.com/tlq5l/agentic-video",
+  "repository": "https://github.com/tlq5l/agentic-video",
+  "license": "MIT",
+  "keywords": ["video", "mcp", "transcript", "ffmpeg", "agents"]
+}

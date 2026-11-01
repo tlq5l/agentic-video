@@ -1,0 +1,14 @@
+{
+  "name": "agentic-video",
+  "description": "Local video tools for AI agents, served over MCP",
+  "owner": {
+    "name": "tlq5l"
+  },
+  "plugins": [
+    {
+      "name": "agentic-video",
+      "source": "./",
+      "description": "Look at, listen to and check local video files: contact sheets, transcripts, cuts, loudness and sync checks"
+    }
+  ]
+}
