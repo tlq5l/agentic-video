@@ -186,16 +186,29 @@ def _switch_names_this_host() -> bool:
     return socket.gethostname() in names
 
 
+def _account_id_set() -> bool:
+    """The cheap check that comes before any token command: without an account id nothing can be sent."""
+    return bool(os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip())
+
+
+def _token_source_set() -> bool:
+    """The cheap check before the trial: without a token or a token command nothing can be sent, so an expired trial
+    must not write its one trial_ended line for a run that could never have sent."""
+    return bool(os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
+                or os.environ.get("AGENTIC_VIDEO_CF_TOKEN_COMMAND", "").strip())
+
+
 def start_after_fresh_run(source_path: str, model_size: str, result: Any, fingerprint: str,
                           local_wall_sec: float) -> bool:
-    """Start the shadow job for one fresh local run. Returns True when a child was started. Never raises."""
+    """Start the shadow job for one fresh local run. Returns True when a child was started. Never raises.
+    The cheap checks (switch, account id, token source, trial) all run before the token command, so a refused run starts no process."""
     job_path = None
     try:
-        if not _switch_names_this_host():
+        if not _switch_names_this_host() or not _account_id_set() or not _token_source_set():
             return False
-        cloudflare.credentials(FEATURE, SENDS)  # raises when the credentials are missing; nothing is sent
         if not _trial_open(admit=False):  # the child admits the job itself, right before it sends
             return False
+        cloudflare.credentials(FEATURE, SENDS)  # may run the token command; raises when the token is missing; nothing is sent
         job = {
             "source_path": source_path,
             "fingerprint": fingerprint,
@@ -303,7 +316,7 @@ def _language_hint(language: str) -> str:
 def run_job(job: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Send one job's audio and append its log line. Returns the record written, or None when nothing was sent.
     The switch is checked here as well as in the parent, so a child started by hand cannot send either."""
-    if not _switch_names_this_host():
+    if not _switch_names_this_host() or not _account_id_set():
         return None
     try:
         account, token = cloudflare.credentials(FEATURE, SENDS)

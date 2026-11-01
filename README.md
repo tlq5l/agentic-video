@@ -2,7 +2,7 @@
 
 <!-- mcp-name: io.github.tlq5l/agentic-video -->
 
-agentic-video lets an AI agent that reads text and images, but not video, work with video files on your own machine. It is a Python library plus a stdio MCP server. The agent asks small, targeted questions ("show me 12 frames from 0:40 to 1:10", "when is 'launch' spoken?") and gets back measurements, transcripts and contact sheets: grids of frames, each with its timestamp burned into the pixels. Everything runs locally with FFmpeg, Whisper and optional local models, except two optional cloud tools (`watch_for`, `label_sounds`), which send frames or audio to Cloudflare Workers AI only when you set credentials and call them.
+agentic-video lets an AI agent that reads text and images, but not video, work with video files on your own machine. It is a Python library plus a stdio MCP server. The agent asks small, targeted questions ("show me 12 frames from 0:40 to 1:10", "when is 'launch' spoken?") and gets back measurements, transcripts and contact sheets: grids of frames, each with its timestamp burned into the pixels. Everything runs locally with FFmpeg, Whisper and optional local models, except two optional cloud tools (`watch_for`, `label_sounds`), which send frames or audio to Cloudflare Workers AI only when you set credentials and call them. An opt-in shadow transcription trial (off by default, owner machines only) also sends audio to Cloudflare when its switch and credentials are set.
 
 **Install:** `brew install ffmpeg` on macOS, or `sudo apt-get install -y ffmpeg` on Debian or Ubuntu (see [Install](#install-macos-or-linux) for the uv line). Then add it to Claude Code with `claude mcp add -s user agentic-video -- uvx agentic-video` (or `pipx install agentic-video`). Other clients: [Run the MCP server](#run-the-mcp-server).
 
@@ -12,7 +12,7 @@ agentic-video lets an AI agent that reads text and images, but not video, work w
 
 *One `contact_sheet` call on a 5-second clip: six frames, each stamped with its time, as a single image the agent can read.*
 
-In 2 minutes (macOS) your agent can answer "what happens in this video?" and "when is X said?" for a local video file. You get the length and size, a contact sheet image with timestamps, the cuts, a loudness summary and searchable speech. Nothing leaves your machine unless you use the optional cloud tools below. Setup for Claude Code:
+In 2 minutes (macOS) your agent can answer "what happens in this video?" and "when is X said?" for a local video file. You get the length and size, a contact sheet image with timestamps, the cuts, a loudness summary and searchable speech. Nothing leaves your machine unless you use the optional cloud tools below or set the shadow transcription trial switch (off by default, owner machines only). Setup for Claude Code:
 
 ```sh
 brew install ffmpeg uv
@@ -105,10 +105,10 @@ This installs PyTorch, Transformers and (on macOS) the Apple Vision bindings, an
 
 ### Optional: cloud tools (`watch_for`, `label_sounds`)
 
-`watch_for` and `label_sounds` send video frames or audio to Cloudflare Workers AI (the Clef models). They are optional: the other tools never call Cloudflare. Do not use them on recordings you need to keep private. Set these in the server's environment:
+`watch_for` and `label_sounds` send video frames or audio to Cloudflare Workers AI (the Clef models). They are optional: the other tools never call Cloudflare, except the off-by-default shadow transcription trial (see the trial switch below). Do not use them on recordings you need to keep private. Set these in the server's environment:
 
 - `CLOUDFLARE_ACCOUNT_ID`: your account id.
-- `CLOUDFLARE_API_TOKEN`: a token with Workers AI access. Or set `AGENTIC_VIDEO_CF_TOKEN_COMMAND` to a command whose last printed line is the token (for example, `wrangler auth token`); the command runs at most once every 50 minutes.
+- `CLOUDFLARE_API_TOKEN`: a token with Workers AI access. Or set `AGENTIC_VIDEO_CF_TOKEN_COMMAND` to a command whose last printed line is the token (for example, `wrangler auth token`); the command runs at most once every 50 minutes per process, and each detached shadow child keeps its own token cache.
 
 Without them the two tools fail with a message naming what is missing, and nothing is sent.
 
