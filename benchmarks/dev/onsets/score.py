@@ -24,8 +24,10 @@ crowd, screen-recording and codec-floor beds, split by bed group (24 groups,
 Settings: click (band [1000, 4000], 0.36; at 30 and 50 ms), beep (band f +-100
 Hz, 0.7; at 30 and 100 ms; off-band beeps and plosive bursts are decoys), mixed
 (legacy kinds at the click setting), broadband (0.12), and quiet_click,
-quiet_beep and quiet_broadband (the same three settings on quiet clips: bursts
-at -50 to -30 dBFS, 20-30 dB over their bed). Every detection that is not a
+quiet_beep and quiet_broadband (the same three settings on quiet clips: per-clip
+level -50 to -30 dBFS, 20-30 dB over a bed at -75 to -55 dBFS, plus up to 2 dB up
+or down per burst, so bursts span -52.0 to -28.3 dBFS and 18.3 to 31.9 dB over
+their bed). Every detection that is not a
 planted event counts as a false positive, beds included.
 
 ``--set noloss`` runs a baseline detector (main's ``src/media/audio.py``, read

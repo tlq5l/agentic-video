@@ -219,7 +219,9 @@ def plan() -> List[dict]:
         if group % 3 == 0:
             entries.append({**common, "id": f"g{group:02d}-bed", "family": "bed", "level": bed_level, "seed": bed_seed + 4,
                             "beep_hz": beep_hz})
-        # Quiet but clear starts: square bursts at -50 to -30 dBFS, 20-30 dB over a bed at -75 to -55 dBFS.
+        # Quiet but clear starts: per-clip level -50 to -30 dBFS, 20-30 dB over a bed at -75 to -55 dBFS,
+        # plus up to 2 dB up or down per burst (make_clip), so bursts span -52.0 to -28.3 dBFS and
+        # 18.3 to 31.9 dB over their bed.
         quiet_bed_db = rng.uniform(-75.0, -55.0)
         event_db = float(np.clip(quiet_bed_db + rng.uniform(20.0, 30.0), -50.0, -30.0))
         entries.append({**common, "id": f"g{group:02d}-quiet", "family": "quiet", "level": quiet_bed_db,
