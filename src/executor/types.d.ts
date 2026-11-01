@@ -393,7 +393,7 @@ export interface CountOccurrencesInput {
   min_gap_sec?: number | string;
   /** Maximum spans listed (default 20, maximum 100; larger values are clamped and the result says so); count always includes omitted spans. */
   max_spans?: number;
-  /** Count only appearances moving this way across the frame (estimated from first and last positions; verify the spans). Spans under three samples are too brief to show motion and are counted under any direction (travel "unknown"; check them); default "any" counts every appearance. */
+  /** Count the appearances moving this way across the frame (estimated from first and last positions; verify the spans). Spans under three samples are too brief to show motion and are counted under any direction (travel "unknown"; check them); default "any" counts every appearance. */
   direction?: "any" | "left_to_right" | "right_to_left" | "top_to_bottom" | "bottom_to_top";
 }
 
