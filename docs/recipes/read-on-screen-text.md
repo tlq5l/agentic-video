@@ -25,4 +25,4 @@ I opened that PNG. It shows "PROJECT CYGNUS CODE [CYGNUS-VERIFIED-77]" and "TOKE
 
 `"read_text": true` adds Apple Vision OCR. On the Linux box it returns an error instead: `read_text needs Apple Vision through pyobjc (macOS only)`. That call was not run on a Mac.
 
-Can miss: this is one frame at one time. Text that is on screen for less than the gap between your chosen times is missed. Small text can be misread by eye, so crop and scale it (see the arguments above) before you quote it.
+Can miss: this is one frame at one time. Text that is on screen for less than the gap between your chosen times can be missed. Small text can be misread by eye, so crop and scale it (see the arguments above) before you quote it.
