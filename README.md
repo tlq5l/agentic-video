@@ -8,7 +8,7 @@ agentic-video lets an AI agent that reads text and images, but not video, work w
 
 ## Try it in 2 minutes
 
-Pick one route. Each is one command or one click; the steps behind them are in the sections below.
+Pick one route and follow its steps.
 
 - **Claude Code:** `brew install ffmpeg uv`, then `claude mcp add -s user agentic-video -- uvx agentic-video`.
 - **Claude Desktop:** download the `.mcpb` from the [latest release](https://github.com/tlq5l/agentic-video/releases/latest) and double-click it (macOS; run `brew install ffmpeg` first).
