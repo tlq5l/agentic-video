@@ -15,7 +15,7 @@ CLIP-described targets and repetition counting need the local model:
 export HF_HOME=<cache with the CLIP weights> HF_HUB_OFFLINE=1.
 
 METRIC occ_trap_* lines cover the trap questions: exact is the right count, safe is right or explicitly
-flagged (capped, merged gaps, appearances in more than one direction, or no count from the tool), silent_wrong is a
+flagged (capped, merged gaps, appearances that move across the frame when no direction was passed, or no count from the tool), silent_wrong is a
 wrong count with no flag (should be 0).
 A tool error is never safe: it counts as a wrong, unflagged answer.
 METRIC rep_* lines are the synthetic clips; real_rep_* lines are the real Countix-train clips
@@ -124,8 +124,10 @@ def main():
                 f"{k}={data[k]}" for k in ("confidence", "count_reliable", "method_used", "spans_omitted", "capped", "gaps_merged",
                                    "count_without_merges", "min_gap_sec_clamped_from") if k in data)
             results["real_rep" if row.get("real") else name][row["split"]].append((expected, answer))
+            # With a direction passed, the count is already narrowed to that direction, so only a count made without one is flagged by travel_counts.
             flagged = bool((answer is None and data.get("status") == "complete")
-                           or data.get("capped") or data.get("gaps_merged") or data.get("travel_counts"))
+                           or data.get("capped") or data.get("gaps_merged")
+                           or (data.get("travel_counts") and "direction" not in call))
             records.append({"id": row["id"], "split": row["split"], "tool": name, "trap": "args" in row,
                             "expected": expected, "answer": answer, "flagged": flagged, "error": "error" in data})
             if "args" in row:
