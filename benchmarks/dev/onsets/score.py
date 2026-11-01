@@ -40,7 +40,8 @@ Each run scores two settings: the gallery setting (``band_hz`` [1000, 4000],
 ``min_strength`` 0.36; primary) and the tool default (broadband, 0.12; guard).
 Prints ``METRIC onsets.<split>.<setting>_f1``, ``_precision``, ``_recall``,
 ``_timing_median_ms``, ``_timing_p95_ms`` (absolute error of matched pairs),
-``_tp``, ``_fp`` and ``_fn``. ``--min-gap-sec`` is passed to ``audio_onsets``
+``_tp``, ``_fp`` and ``_fn``; ``--set real`` also prints ``onsets.real.<split>.primary_f1@30ms``, the headline
+mean of the unrounded realistic F1s. ``--min-gap-sec`` is passed to ``audio_onsets``
 only when given.
 """
 from __future__ import annotations
@@ -229,6 +230,9 @@ def _timing(errors: Sequence[float]) -> Dict[str, float]:
     return {"timing_median_ms": float(np.median(values)), "timing_p95_ms": float(np.percentile(values, 95))}
 
 
+PRIMARY_REAL_SETTINGS = ("click", "beep", "quiet_click", "quiet_beep")  # realistic settings in the primary (30 ms)
+
+
 def score_real(split: str, work: Path) -> Dict[str, Dict[float, Dict[str, Any]]]:
     """Pooled counts per setting and tolerance on the extended (real-world-like) set."""
     import sys
@@ -317,12 +321,16 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 for name, counts in sorted(result["groups"].items()):
                     print(f"BREAKDOWN {prefix}.{name} f1={counts['f1']:.4f} tp={counts['tp']} fp={counts['fp']} fn={counts['fn']}")
     if args.set in ("real", "both"):
-        for name, by_tolerance in score_real(args.split, work / "real").items():
+        real = score_real(args.split, work / "real")
+        for name, by_tolerance in real.items():
             for tolerance, result in by_tolerance.items():
                 prefix = f"onsets.real.{args.split}.{name}@{int(round(tolerance * 1000))}ms"
                 print(f"METRIC {prefix} P={result['precision']:.3f} R={result['recall']:.3f} F1={result['f1']:.3f} "
                       f"timing_median_ms={result['timing_median_ms']:.1f} timing_p95_ms={result['timing_p95_ms']:.1f} "
                       f"tp={result['tp']} fp={result['fp']} fn={result['fn']}")
+        # The headline primary: the mean of the unrounded F1s (not of the rounded ones printed above).
+        primary = [real[name][0.030]["f1"] for name in PRIMARY_REAL_SETTINGS]
+        print(f"METRIC onsets.real.{args.split}.primary_f1@30ms={sum(primary) / len(primary):.4f}")
 
 
 if __name__ == "__main__":

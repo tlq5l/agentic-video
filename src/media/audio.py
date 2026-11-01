@@ -696,7 +696,8 @@ def _detect_onsets_in_samples(
 
 
 # Strength-detector onsets (the second pass) join the main onsets only when no main onset lies within this
-# many seconds of them (abs(time - main time) <= window counts as within). Main's onsets never move or drop.
+# many seconds of them (abs(time - main time) <= window counts as within), and only when they keep the
+# min_gap_sec distance from every onset already kept. Main's onsets never move or drop.
 ONSET_UNION_SEC = 0.030
 
 
@@ -728,27 +729,44 @@ def _finish_onsets(
         # A single new pitched attack can produce neighboring flux maxima.
         # Keep the strongest energy-difference peak from each 30 ms cluster.
         kept_ranked = sorted(kept, key=lambda item: (-item["compare_delta_db"], item["time_sec"]))
-        selected = []
+        selected: List[Dict[str, Any]] = []
+        # Times of the selected onsets, bucketed in 30 ms cells. Two onsets within 30 ms sit in
+        # cells at most two apart, so only the nearby cells are checked (same rule as a full scan).
+        buckets: Dict[int, List[float]] = {}
         for onset in kept_ranked:
-            if all(abs(onset["time_sec"] - other["time_sec"]) > 0.030 for other in selected):
+            time_sec = float(onset["time_sec"])
+            cell = math.floor(time_sec / 0.030)
+            clash = any(abs(time_sec - other) <= 0.030
+                        for near in range(cell - 2, cell + 3) for other in buckets.get(near, ()))
+            if not clash:
                 selected.append(onset)
+                buckets.setdefault(cell, []).append(time_sec)
         onsets = sorted(selected, key=lambda item: item["time_sec"])
     return _merge_close_onsets(onsets, gap)
 
 
 def _add_onsets_away_from(
-    base: List[Dict[str, Any]], extra: List[Dict[str, Any]], window_sec: float,
-) -> List[Dict[str, Any]]:
-    """`base` (unchanged) plus each `extra` onset that has no base onset within window_sec. Sorted by time."""
+    base: List[Dict[str, Any]], extra: List[Dict[str, Any]], window_sec: float, gap_sec: float,
+) -> Tuple[List[Dict[str, Any]], List[float]]:
+    """`base` (unchanged) plus each `extra` onset that has no base onset within window_sec and stays at least
+    gap_sec from every onset kept before it (earlier `extra` onsets count too). Returns (sorted list, times of the added).
+
+    Walks `extra` in time order, so the earlier of two clashing strength onsets is the one kept.
+    """
     base_times = np.sort(np.asarray([float(item["time_sec"]) for item in base], dtype=np.float64))
     added: List[Dict[str, Any]] = []
-    for onset in extra:
+    for onset in sorted(extra, key=lambda item: float(item["time_sec"])):
         time_sec = float(onset["time_sec"])
+        # The nearest base onset on each side is the only one that can be within either limit.
         index = int(np.searchsorted(base_times, time_sec))
-        near = any(abs(time_sec - base_times[k]) <= window_sec for k in (index - 1, index) if 0 <= k < len(base_times))
-        if not near:
-            added.append(onset)
-    return sorted([*base, *added], key=lambda item: float(item["time_sec"]))
+        gaps = [abs(time_sec - base_times[k]) for k in (index - 1, index) if 0 <= k < len(base_times)]
+        if any(distance <= window_sec or distance < gap_sec for distance in gaps):
+            continue
+        if added and time_sec - float(added[-1]["time_sec"]) < gap_sec:
+            continue
+        added.append(onset)
+    merged = sorted([*base, *added], key=lambda item: float(item["time_sec"]))
+    return merged, [float(item["time_sec"]) for item in added]
 
 
 def _detect_strength_onsets_in_samples(
@@ -894,7 +912,7 @@ def audio_onsets(
         "min_strength": threshold, "band_hz": band,
         "min_gap_sec": gap, "compare_fingerprint": compare_fingerprint,
     }
-    result_key = _cache_tag("audio_onsets_v10", options)
+    result_key = _cache_tag("audio_onsets_v11", options)
     cached = cache.load_json(fingerprint, result_key)
     if isinstance(cached, dict):
         return cached
@@ -905,7 +923,7 @@ def audio_onsets(
     strength_onsets, _ = _finish_onsets(
         _detect_strength_onsets_in_samples(samples, start, end, first_sample, last_sample, threshold, band),
         samples, compare_samples, band, gap)
-    onsets = _add_onsets_away_from(main_onsets, strength_onsets, ONSET_UNION_SEC)
+    onsets, added_times = _add_onsets_away_from(main_onsets, strength_onsets, ONSET_UNION_SEC, gap)
 
     result = {
         "source_path": str(Path(source).expanduser().resolve()),
@@ -921,6 +939,8 @@ def audio_onsets(
         "onsets": onsets,
         "total": len(onsets),
         "merged_count": merged_count,
+        # Times of the strength-pass onsets in `onsets` (the rest are the main pass's). The MCP cap uses them.
+        "added_times_sec": added_times,
     }
     cache.save_json(fingerprint, result_key, result)
     return result

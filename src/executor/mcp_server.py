@@ -328,6 +328,24 @@ def _bound_list(data: Dict[str, Any], key: str, limit: int, advice: str) -> None
     _add_note(data, f"Only the first {limit} of {len(items)} {key} are listed ({omitted} omitted). {advice}")
 
 
+def _bound_onsets(data: Dict[str, Any], limit: int, advice: str) -> None:
+    """Cap the audio_onsets list. Main-pass onsets fill it first, in time order, and strength-pass onsets take the
+    slots left over, so a capped list still lists every main-pass onset that fits (the main pass alone would list the same)."""
+    added = set(data.pop("added_times_sec", []))
+    items = data.get("onsets")
+    if not isinstance(items, list) or len(items) <= limit or not added:
+        _bound_list(data, "onsets", limit, advice)
+        return
+    main_items = [item for item in items if float(item["time_sec"]) not in added][:limit]
+    extra_items = [item for item in items if float(item["time_sec"]) in added][:limit - len(main_items)]
+    listed = sorted([*main_items, *extra_items], key=lambda item: float(item["time_sec"]))
+    omitted = len(items) - len(listed)
+    data["onsets"] = listed
+    data["onsets_omitted"] = omitted
+    _add_note(data, f"Only {len(listed)} of {len(items)} onsets are listed ({omitted} omitted; main-pass onsets are listed first, "
+                    f"so the omitted ones are later onsets or extra strength-pass onsets). {advice}")
+
+
 def make_tool_file(image_path: str) -> Dict[str, Any]:
     """Encode an image as an Executor ToolFile structure."""
     p = Path(image_path)
@@ -1183,7 +1201,7 @@ def _dispatch(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
             min_gap_sec=args.get("min_gap_sec", DEFAULT_ONSET_MIN_GAP_SEC),
         )
         data = dict(data)
-        _bound_list(data, "onsets", MAX_ONSETS, "Raise min_strength (up to 1) to keep only stronger onsets, or pass start_sec/end_sec to list a later range.")
+        _bound_onsets(data, MAX_ONSETS, "Raise min_strength (up to 1) to keep only stronger onsets, or pass start_sec/end_sec to list a later range.")
         return {"ok": True, "data": data}
 
     elif name == "loudness_timeline":
