@@ -12,7 +12,7 @@ Pick one route. Each is one command or one click; the steps behind them are in t
 
 - **Claude Code:** `brew install ffmpeg uv`, then `claude mcp add -s user agentic-video -- uvx agentic-video`.
 - **Claude Desktop:** download the `.mcpb` from the [latest release](https://github.com/tlq5l/agentic-video/releases/latest) and double-click it (macOS; run `brew install ffmpeg` first).
-- **Claude Code plugin:** `claude plugin marketplace add tlq5l/agentic-video`, then `claude plugin install agentic-video@agentic-video` ([docs/claude-code-plugin.md](docs/claude-code-plugin.md)).
+- **Claude Code plugin:** `brew install ffmpeg uv` first (the plugin's server runs `uvx`), then `claude plugin marketplace add tlq5l/agentic-video`, then `claude plugin install agentic-video@agentic-video` ([docs/claude-code-plugin.md](docs/claude-code-plugin.md)).
 - **Other clients:** [Run the MCP server](#run-the-mcp-server) has the JSON block.
 
 Then paste this first prompt: "Use agentic-video: make a contact sheet of `/path/to/video.mp4` and list its cuts"
