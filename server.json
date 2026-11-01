@@ -1,0 +1,20 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.tlq5l/agentic-video",
+  "description": "Local video tools for AI agents: contact sheets, transcripts, cuts, loudness and sync checks.",
+  "repository": {
+    "url": "https://github.com/tlq5l/agentic-video",
+    "source": "github"
+  },
+  "version": "0.3.3",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "agentic-video",
+      "version": "0.3.3",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}

@@ -397,7 +397,7 @@
     },
     "search_visual": {
       "name": "search_visual",
-      "description": "Find when a visible object, person, action, or scene appears. Build the local visual index first if needed, then repeat the same query to poll. Returns ranked hits, merged intervals (the one holding rank 1 is at least 15 seconds long, or the whole searched range when that is shorter; a shorter one is widened evenly around its middle and kept inside the searched range; intervals that overlap it are merged into it), and a contact sheet for visual verification. It matches meaning, not letters, so it cannot find on-screen words or numbers (names, scores, jersey or bib numbers): find those with count_occurrences `text`, which reads text in frames, one window of up to 2400 s per call.",
+      "description": "Find when a visible object, person, action, or scene appears. Build the local visual index first if needed, then repeat the same query to poll. Returns ranked hits, merged intervals (the one holding rank 1 grows from its best frames only over neighbouring frames that score close to the best, up to 8 seconds, so it can be shorter; a span already longer than 8 seconds, such as a held frame or hits merged together, is kept whole, so it can be longer and can include lower-scoring hits; intervals that overlap it are merged into it), and a contact sheet for visual verification. It matches meaning, not letters, so it cannot find on-screen words or numbers (names, scores, jersey or bib numbers): find those with count_occurrences `text`, which reads text in frames, one window of up to 2400 s per call.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -586,7 +586,7 @@
             "minimum": 0
           },
           "region": {
-            "description": "Rectangle that contains the repeating motion, as fractions of the frame: x, y (top-left) and w, h (size), with x+w <= 1 and y+h <= 1. Uses w/h; width/height with the same meaning is also accepted. Omit for the whole frame.",
+            "description": "Rectangle that contains the repeating motion, as fractions of the frame: x, y (top-left) and w, h (size), with x+w <= 1 and y+h <= 1. Uses w/h; width/height with the same meaning is also accepted. For example: {\"x\": 0.25, \"y\": 0.1, \"w\": 0.5, \"h\": 0.6}. Omit for the whole frame.",
             "anyOf": [
               {
                 "type": "object",
@@ -652,7 +652,7 @@
                 ],
                 "additionalProperties": false
               }
-            ]
+            , {"type": "object", "properties": {"x": {"type": "number", "minimum": 0, "maximum": 1}, "y": {"type": "number", "minimum": 0, "maximum": 1}, "w": {"type": "number", "minimum": 0, "maximum": 1}, "height": {"type": "number", "minimum": 0, "maximum": 1}}, "required": ["x", "y", "w", "height"], "additionalProperties": false}, {"type": "object", "properties": {"x": {"type": "number", "minimum": 0, "maximum": 1}, "y": {"type": "number", "minimum": 0, "maximum": 1}, "width": {"type": "number", "minimum": 0, "maximum": 1}, "h": {"type": "number", "minimum": 0, "maximum": 1}}, "required": ["x", "y", "width", "h"], "additionalProperties": false}, {"type": "array", "minItems": 4, "maxItems": 4, "items": {"type": "number", "minimum": 0, "maximum": 1}, "description": "Or the four numbers in order: [x, y, w, h]."}]
           },
           "fps": {
             "description": "Sampling rate, default 10. Larger values than 15 are clamped to 15 and the result says so.",
@@ -994,7 +994,7 @@
           "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
           "query": { "type": "string", "minLength": 1, "description": "Words or a phrase to find in the speech, e.g. 'launch date'. Punctuation and case are ignored." },
           "top_k": { "type": "integer", "minimum": 1, "maximum": 50, "default": 5, "description": "Maximum hits (default 5, maximum 50; larger values are clamped to 50 and the result says so)." },
-          "mode": { "type": "string", "enum": ["hybrid", "lexical"], "default": "hybrid", "description": "hybrid (default): keyword matches first, then matches by meaning. lexical: keyword matches only." }
+          "mode": { "type": "string", "enum": ["hybrid", "lexical"], "default": "hybrid", "description": "hybrid (default): keyword matches first, then matches by meaning. lexical: keyword matches only. For example: \"mode\": \"lexical\"." }
         },
         "required": ["source", "query"],
         "additionalProperties": false
@@ -1060,7 +1060,7 @@
     },
     "search_visual": {
       "name": "search_visual",
-      "description": "Find WHEN something visible happens: an object, person, action or scene (semantic match between the query and sampled frames). It matches meaning, not letters, so it cannot find on-screen words or numbers (names, scores, jersey or bib numbers): find those with count_occurrences `text`, which reads text in frames, one window of up to 2400 s per call. Returns up to top_k ranked frame hits (default 5, maximum 20; larger values are clamped and the result says so), merged intervals (the one holding rank 1 is at least 15 seconds long, or the whole searched range when that is shorter; a shorter one is widened evenly around its middle and kept inside the searched range; intervals that overlap it are merged into it), and a contact sheet to verify them. It ranks frames, so it cannot count: to count separate appearances of a symbol or exact on-screen text use count_occurrences, for a repeated action use count_repetitions, for spoken words use search_transcript. Build the local visual index first (build_visual_index), then repeat the same query to poll until complete. Use start_sec/end_sec to search one range at a time.",
+      "description": "Find WHEN something visible happens: an object, person, action or scene (semantic match between the query and sampled frames). It matches meaning, not letters, so it cannot find on-screen words or numbers (names, scores, jersey or bib numbers): find those with count_occurrences `text`, which reads text in frames, one window of up to 2400 s per call. Returns up to top_k ranked frame hits (default 5, maximum 20; larger values are clamped and the result says so), merged intervals (the one holding rank 1 grows from its best frames only over neighbouring frames that score close to the best, up to 8 seconds, so it can be shorter; a span already longer than 8 seconds, such as a held frame or hits merged together, is kept whole, so it can be longer and can include lower-scoring hits; intervals that overlap it are merged into it), and a contact sheet to verify them. It ranks frames, so it cannot count: to count separate appearances of a symbol or exact on-screen text use count_occurrences, for a repeated action use count_repetitions, for spoken words use search_transcript. Build the local visual index first (build_visual_index), then repeat the same query to poll until complete. Use start_sec/end_sec to search one range at a time.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1116,7 +1116,7 @@
     },
     "review_video": {
       "name": "review_video",
-      "description": "First look at a video in ONE call: container metadata (duration, size, fps, codecs, has_audio), a contact sheet image with burned timestamp badges (default 24 samples; `samples` up to 150, larger values are clamped and the result says so), every cut and transition from detect_cuts, and a loudness summary (average and peak level, silence gaps, the strongest band-energy outliers with their times). It runs probe_video, contact_sheet, detect_cuts and loudness_timeline for you, so start here instead of calling them one by one. Finishes in a few seconds on clips up to about 10 minutes. `loudness` is null when the video has no audio track. Use the times it returns to zoom in with inspect_window or spectrogram_window; for a different threshold, window or time range call detect_cuts or loudness_timeline directly. Any step failing fails the whole call with that step's error message.",
+      "description": "First look at a video in ONE call: container metadata (duration, size, fps, codecs, has_audio), a contact sheet image with burned timestamp badges (default 24 samples; `samples` up to 150, larger values are clamped and the result says so), every cut and transition from detect_cuts, every near-black stretch of at least 0.2 s (`black_ranges`: start, end and duration; at most 50 are listed and `black_total` counts them all), and a loudness summary (average and peak level, silence gaps, the strongest band-energy outliers with their times). It runs probe_video, contact_sheet, detect_cuts, the black scan and loudness_timeline for you, so start here instead of calling them one by one. A first call on a 10-minute 1080p clip takes about 35 s (the cuts scan and the black scan share one decode of the file); repeat calls on the same file return from cache. `loudness` is null when the video has no audio track. Use the times it returns to zoom in with inspect_window or spectrogram_window; for a different threshold, window or time range call detect_cuts or loudness_timeline directly. Any step failing fails the whole call with that step's error message.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1210,6 +1210,41 @@
             "minimum": 1,
             "description": "How many cuts entries were left out of the list."
           },
+          "black_ranges": {
+            "type": "array",
+            "description": "Stretches of at least 0.2 s where the picture is near-black, in time order. At most 50 are listed; black_total is the full count.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "start_sec": {
+                  "type": "number"
+                },
+                "end_sec": {
+                  "type": "number"
+                },
+                "duration_sec": {
+                  "type": "number",
+                  "minimum": 0.2
+                }
+              },
+              "required": [
+                "start_sec",
+                "end_sec",
+                "duration_sec"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "black_total": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "How many near-black stretches were found in all."
+          },
+          "black_ranges_omitted": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "How many black_ranges entries were left out of the list."
+          },
           "loudness": {
             "type": [
               "object",
@@ -1300,6 +1335,8 @@
               "contact_sheet",
               "cuts",
               "cuts_total",
+              "black_ranges",
+              "black_total",
               "loudness"
             ]
           },
@@ -1425,7 +1462,7 @@
           "start_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "Start of the range in seconds. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
           "end_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "End of the range in seconds; must be within the video. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
           "region": {
-            "description": "Rectangle to watch, as fractions of the frame: x, y (top-left) and width, height, with x+width <= 1 and y+height <= 1. Uses width/height, not w/h; w/h with the same meaning is also accepted.",
+            "description": "Rectangle to watch, as fractions of the frame: x, y (top-left) and width, height, with x+width <= 1 and y+height <= 1. Uses width/height, not w/h; w/h with the same meaning is also accepted. For example: {\"x\": 0.25, \"y\": 0.1, \"width\": 0.5, \"height\": 0.6}.",
             "anyOf": [
               {
                 "type": "object",
@@ -1491,7 +1528,7 @@
                 ],
                 "additionalProperties": false
               }
-            ]
+            , {"type": "object", "properties": {"x": {"type": "number", "minimum": 0, "maximum": 1}, "y": {"type": "number", "minimum": 0, "maximum": 1}, "w": {"type": "number", "exclusiveMinimum": 0, "maximum": 1}, "height": {"type": "number", "exclusiveMinimum": 0, "maximum": 1}}, "required": ["x", "y", "w", "height"], "additionalProperties": false}, {"type": "object", "properties": {"x": {"type": "number", "minimum": 0, "maximum": 1}, "y": {"type": "number", "minimum": 0, "maximum": 1}, "width": {"type": "number", "exclusiveMinimum": 0, "maximum": 1}, "h": {"type": "number", "exclusiveMinimum": 0, "maximum": 1}}, "required": ["x", "y", "width", "h"], "additionalProperties": false}, {"type": "array", "minItems": 4, "maxItems": 4, "items": {"type": "number", "minimum": 0, "maximum": 1}, "description": "Or the four numbers in order: [x, y, width, height]."}]
           },
           "sample_fps": { "type": "number", "exclusiveMinimum": 0, "maximum": 10, "default": 0.25, "description": "Sampling rate (default 0.25, maximum 10; larger values are clamped and the result says so). Changes shorter than 1/sample_fps can be missed." },
           "frame_width": { "type": "integer", "minimum": 64, "maximum": 1920, "default": 640, "description": "Decoded frame width in pixels (default 640, maximum 1920; larger values are clamped)." },
@@ -1544,7 +1581,7 @@
           "start_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "Start of the range in seconds. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
           "end_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "End of the range in seconds; must be within the video. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
           "region": {
-            "description": "Rectangle to watch, as fractions of the frame: x, y (top-left) and width, height, with x+width <= 1 and y+height <= 1. Uses width/height, not w/h; w/h with the same meaning is also accepted.",
+            "description": "Rectangle to watch, as fractions of the frame: x, y (top-left) and width, height, with x+width <= 1 and y+height <= 1. Uses width/height, not w/h; w/h with the same meaning is also accepted. For example: {\"x\": 0.25, \"y\": 0.1, \"width\": 0.5, \"height\": 0.6}.",
             "anyOf": [
               {
                 "type": "object",
@@ -1610,7 +1647,7 @@
                 ],
                 "additionalProperties": false
               }
-            ]
+            , {"type": "object", "properties": {"x": {"type": "number", "minimum": 0, "maximum": 1}, "y": {"type": "number", "minimum": 0, "maximum": 1}, "w": {"type": "number", "exclusiveMinimum": 0, "maximum": 1}, "height": {"type": "number", "exclusiveMinimum": 0, "maximum": 1}}, "required": ["x", "y", "w", "height"], "additionalProperties": false}, {"type": "object", "properties": {"x": {"type": "number", "minimum": 0, "maximum": 1}, "y": {"type": "number", "minimum": 0, "maximum": 1}, "width": {"type": "number", "exclusiveMinimum": 0, "maximum": 1}, "h": {"type": "number", "exclusiveMinimum": 0, "maximum": 1}}, "required": ["x", "y", "width", "h"], "additionalProperties": false}, {"type": "array", "minItems": 4, "maxItems": 4, "items": {"type": "number", "minimum": 0, "maximum": 1}, "description": "Or the four numbers in order: [x, y, width, height]."}]
           },
           "sample_fps": { "type": "number", "exclusiveMinimum": 0, "maximum": 10, "default": 0.25, "description": "Sampling rate (default 0.25, maximum 10; larger values are clamped and the result says so). Transitions shorter than 1/sample_fps can be missed." },
           "frame_width": { "type": "integer", "minimum": 64, "maximum": 1920, "default": 640, "description": "Decoded frame width in pixels (default 640, maximum 1920; larger values are clamped)." },
@@ -1661,7 +1698,7 @@
         "type": "object",
         "properties": {
           "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
-          "moments": { "type": "array", "minItems": 1, "maxItems": 16, "items": { "type": "object", "properties": { "timestamp_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "Seconds, or a timecode string in MM:SS.mmm form, e.g. 00:14.250." }, "label": { "type": "string", "minLength": 1, "maxLength": 80 } }, "required": ["timestamp_sec"], "additionalProperties": false }, "description": "Instants to inspect, e.g. [{\"timestamp_sec\": 12.5, \"label\": \"door opens\"}], at most 16, each within the video." },
+          "moments": { "type": "array", "minItems": 1, "maxItems": 16, "items": {"anyOf": [{"type": "number", "minimum": 0, "description": "Bare seconds: [12.5] is the same as [{\"timestamp_sec\": 12.5}]."}, {"type": "object", "properties": {"timestamp_sec": {"type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "Seconds, or a timecode string in MM:SS.mmm form, e.g. 00:14.250."}, "label": {"type": "string", "minLength": 1, "maxLength": 80}, "time_sec": {"type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "Seconds, or a timecode string in MM:SS.mmm form, e.g. 00:14.250."}, "time": {"type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "Seconds, or a timecode string in MM:SS.mmm form, e.g. 00:14.250."}, "t": {"type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "Seconds, or a timecode string in MM:SS.mmm form, e.g. 00:14.250."}}, "oneOf": [{"required": ["timestamp_sec"]}, {"required": ["time_sec"]}, {"required": ["time"]}, {"required": ["t"]}], "additionalProperties": false}]}, "description": "Instants to inspect, e.g. [{\"timestamp_sec\": 12.5, \"label\": \"door opens\"}], at most 16, each within the video." },
           "before_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "default": 4.0, "description": "Seconds of context before each moment (default 4). Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
           "after_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "default": 4.0, "description": "Seconds of context after each moment (default 4). Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
           "samples_per_moment": { "type": "integer", "minimum": 3, "maximum": 25, "default": 9, "description": "Frames per moment, an odd number 3-25 (default 9; larger values are clamped to 25)." },
@@ -1793,14 +1830,15 @@
     },
     "inspect_window": {
       "name": "inspect_window",
-      "description": "Dense consecutive frames of ONE short window [start_sec, end_sec] (both required) with timestamp overlays, as a contact sheet plus frame list. Default 4 fps, maximum 30 (larger values are clamped). At most about 150 frames and 600 seconds per call: frames = fps x duration, so a 10 s window allows at most 15 fps; a call over budget fails and says the fps that fits. Use it to verify a moment or a count. For a wide overview use contact_sheet; for several ranges use inspect_windows.",
+      "description": "Dense consecutive frames of ONE short window [start_sec, end_sec] (both required) with timestamp overlays, as a contact sheet plus frame list. Default 4 fps, maximum 30 (larger values are clamped). At most about 150 frames and 600 seconds per call: frames = fps x duration, so a 10 s window allows at most 15 fps; a call over budget fails and says the fps that fits. Use it to verify a moment or a count. For a wide overview use contact_sheet; for several ranges use inspect_windows. With read_text true each frame also lists the on-screen text read from it (Apple Vision, macOS only).",
       "inputSchema": {
         "type": "object",
         "properties": {
           "source": { "type": "string", "minLength": 1, "description": "Local video file path, or a video URL (X/Twitter post, YouTube link, other sites yt-dlp supports, direct .mp4 link). A URL is downloaded once and cached; while it downloads the result is status=in_progress with retry_after_seconds, so call again with the same source." },
           "start_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "Start of the window in seconds. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
           "end_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "End of the window in seconds; must be within the video. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
-          "fps": { "type": "number", "minimum": 0.01, "maximum": 30, "default": 4.0, "description": "Sampling rate (default 4, maximum 30; larger values are clamped). Frames = fps x duration and must stay within about 150." }
+          "fps": { "type": "number", "minimum": 0.01, "maximum": 30, "default": 4.0, "description": "Sampling rate (default 4, maximum 30; larger values are clamped). Frames = fps x duration and must stay within about 150." },
+          "read_text": { "type": "boolean", "default": false, "description": "Also read the on-screen text in each returned frame with Apple Vision OCR (macOS only). Each frame then lists text_lines: the text, confidence and box (x, y, width, height; 0 to 1, top-left origin) of each line, top to bottom then left to right. Default false: no text is read. When true and Apple Vision is unavailable, the call fails before extracting any frame." }
         },
         "required": ["source", "start_sec", "end_sec"],
         "additionalProperties": false
@@ -1831,7 +1869,9 @@
                 "height": { "type": "integer" },
                 "requested_timestamp": { "type": ["number", "null"] },
                 "decoded_timestamp": { "type": ["number", "null"] },
-                "timestamp_delta": { "type": ["number", "null"] }
+                "timestamp_delta": { "type": ["number", "null"] },
+                "text_lines": { "type": "array", "description": "Lines of on-screen text read from this frame by Apple Vision, top to bottom then left to right. Present only when read_text was true. An empty list means OCR found no text in the frame.", "items": { "type": "object", "properties": { "text": { "type": "string" }, "confidence": { "type": "number", "minimum": 0, "maximum": 1 }, "box": { "type": "object", "properties": { "x": { "type": "number", "minimum": 0, "maximum": 1 }, "y": { "type": "number", "minimum": 0, "maximum": 1 }, "width": { "type": "number", "minimum": 0, "maximum": 1 }, "height": { "type": "number", "minimum": 0, "maximum": 1 } }, "required": ["x", "y", "width", "height"], "additionalProperties": false } }, "required": ["text", "confidence", "box"], "additionalProperties": false } },
+                "text_lines_note": { "type": "string", "description": "Present when the frame had more than 40 text lines: lists the first 40 and says how many there were." }
               },
               "required": ["index", "timestamp_sec", "timecode", "file_path", "width", "height", "requested_timestamp", "decoded_timestamp", "timestamp_delta"],
               "additionalProperties": false
@@ -1847,7 +1887,7 @@
     },
     "frame_at": {
       "name": "frame_at",
-      "description": "Use this when you need one exact frame at full size, or a crop to read small text; for many frames use inspect_window or contact_sheet. Returns one PNG of the frame shown at time_sec, at the source's native resolution, with no timestamp drawn on it. An optional crop (x, y, width, height in source pixels) cuts a rectangle out of that frame, and scale (1 to 4, default 1) enlarges the crop with Lanczos so small text is easier to read. frame_time_sec is the start time of the frame actually decoded: the last frame starting at or before time_sec, so on variable-frame-rate video it can be well before time_sec. A repeat call with the same source, time_sec, crop and scale returns the saved file.",
+      "description": "Use this when you need one exact frame at full size, or a crop to read small text; for many frames use inspect_window or contact_sheet. Returns one PNG of the frame shown at time_sec, at the source's native resolution, with no timestamp drawn on it. An optional crop (x, y, width, height in source pixels) cuts a rectangle out of that frame, and scale (1 to 4, default 1) enlarges the crop with Lanczos so small text is easier to read. frame_time_sec is the start time of the frame actually decoded: the last frame starting at or before time_sec, so on variable-frame-rate video it can be well before time_sec. A repeat call with the same source, time_sec, crop and scale returns the saved file. With read_text true it also returns the on-screen text read from that frame (Apple Vision, macOS only).",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1873,6 +1913,7 @@
             "required": ["x", "y", "width", "height"],
             "additionalProperties": false
           },
+          "read_text": { "type": "boolean", "default": false, "description": "Also read the on-screen text in each returned frame with Apple Vision OCR (macOS only). Each frame then lists text_lines: the text, confidence and box (x, y, width, height; 0 to 1, top-left origin) of each line, top to bottom then left to right. Default false: no text is read. When true and Apple Vision is unavailable, the call fails before extracting any frame." },
           "scale": {
             "type": "number",
             "minimum": 1,
@@ -1930,7 +1971,9 @@
               "height": { "type": "integer" }
             }
           },
-          "scale": { "type": "number", "description": "The enlargement applied (1 when none was asked for)." }
+          "scale": { "type": "number", "description": "The enlargement applied (1 when none was asked for)." },
+          "text_lines": { "type": "array", "description": "Lines of on-screen text read from this frame by Apple Vision, top to bottom then left to right. Present only when read_text was true. An empty list means OCR found no text in the frame.", "items": { "type": "object", "properties": { "text": { "type": "string" }, "confidence": { "type": "number", "minimum": 0, "maximum": 1 }, "box": { "type": "object", "properties": { "x": { "type": "number", "minimum": 0, "maximum": 1 }, "y": { "type": "number", "minimum": 0, "maximum": 1 }, "width": { "type": "number", "minimum": 0, "maximum": 1 }, "height": { "type": "number", "minimum": 0, "maximum": 1 } }, "required": ["x", "y", "width", "height"], "additionalProperties": false } }, "required": ["text", "confidence", "box"], "additionalProperties": false } },
+          "text_lines_note": { "type": "string", "description": "Present when the frame had more than 40 text lines: lists the first 40 and says how many there were." }
         }
       }
     },
@@ -2022,7 +2065,7 @@
     },
     "audio_onsets": {
       "name": "audio_onsets",
-      "description": "List non-speech sound attacks (hits, claps, beats) with millisecond timestamps and five-band energy profiles, optionally restricted to a frequency band (band_hz: sub, low_mid, mid, high, air, or [low_hz, high_hz]) and compared with another source (compare_to). min_strength 0-1 (default 0.12): raise it for only strong onsets. At most 500 onsets are listed; `total` is the full count and the result says how to see the rest. Needs an audio track (probe_video has_audio); audio-only files (.m4a, .mp3, .wav) work. For level over time use loudness_timeline; for speech use transcribe. To name what a sound is, use label_sounds (cloud).",
+      "description": "List non-speech sound attacks (hits, claps, beats) with millisecond timestamps and five-band energy profiles, optionally restricted to a frequency band (band_hz: sub, low_mid, mid, high, air, or [low_hz, high_hz]) and compared with another source (compare_to). min_strength 0-1 (default 0.12): raise it for only strong onsets. min_gap_sec (default 0.035 s) merges onsets within that gap of a group's first onset into one onset at the first time with the group's strongest strength; 0 keeps every raw onset. At most 500 onsets are listed; `total` is the full count and the result says how to see the rest. Needs an audio track (probe_video has_audio); audio-only files (.m4a, .mp3, .wav) work. For level over time use loudness_timeline; for speech use transcribe. To name what a sound is, use label_sounds (cloud).",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -2043,6 +2086,12 @@
             "minimum": 0,
             "maximum": 1,
             "default": 0.12
+          },
+          "min_gap_sec": {
+            "description": "Onsets closer than this many seconds to a group's first onset are merged into it: the group keeps the first onset's time and the strongest strength. 0 keeps every raw onset (default 0.035). Also accepts a timecode string in MM:SS.mmm form, e.g. 00:00.035.",
+            "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32,
+            "minimum": 0,
+            "default": 0.035
           },
           "band_hz": {
             "description": "Restrict to a named band (sub, low_mid, mid, high, air) or a [low_hz, high_hz] range.",
@@ -2163,6 +2212,10 @@
           },
           "total": {
             "type": "integer"
+          },
+          "merged_count": {
+            "type": "integer",
+            "description": "How many detected onsets were merged into a neighbouring onset by min_gap_sec."
           },
           "band_hz": {
             "anyOf": [
@@ -2733,7 +2786,7 @@
     },
     "sync_check": {
       "name": "sync_check",
-      "description": "Check audio/video sync: compares visual cuts with measured audio onsets, and optionally with intended sound cues (time_sec, label, optional band_hz), within tolerance_ms (0-5000, default 80). Returns per-cut and per-cue matches and unmatched strong onsets (each list shows at most 500 items; total_cuts and total_cues are the full counts). Needs an audio track. To look at the two signals separately use detect_cuts and audio_onsets.",
+      "description": "Check audio/video sync: compares visual cuts with measured audio onsets, and optionally with intended sound cues (time_sec, label, optional band_hz), within tolerance_ms (0-5000, default 80). Returns per-cut and per-cue matches and unmatched strong onsets (the cuts and unmatched_strong_onsets lists show at most 500 items each; the cues list is never cut short; total_cuts and total_cues are the full counts). Each cue reports candidate_onsets_count, the number of onsets near it; verbose true reports that cue's candidate_onsets list instead of the count. Needs an audio track. To look at the two signals separately use detect_cuts and audio_onsets.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -2804,6 +2857,11 @@
             "type": "number",
             "minimum": 20,
             "maximum": 300
+          },
+          "verbose": {
+            "description": "false (default) gives each cue candidate_onsets_count; true gives each cue candidate_onsets (the onsets near it with time_sec, offset_ms and strength) instead of the count.",
+            "type": "boolean",
+            "default": false
           }
         },
         "required": [
@@ -3200,6 +3258,10 @@
                     "additionalProperties": false
                   }
                 },
+                "candidate_onsets_count": {
+                  "type": "integer",
+                  "minimum": 0
+                },
                 "soft_attack_build": {
                   "type": "object",
                   "properties": {
@@ -3313,8 +3375,7 @@
                 "signature_excess_ratio",
                 "search_window_ms",
                 "match_method",
-                "ambiguous_reason",
-                "candidate_onsets"
+                "ambiguous_reason"
               ],
               "additionalProperties": false
             }

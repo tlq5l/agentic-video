@@ -7,6 +7,7 @@ import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, asdict
+from fractions import Fraction
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Sequence
 
@@ -144,6 +145,8 @@ def detect_scenes(
 
 SOFT_SAMPLE_FPS = 10
 SOFT_GRID = (32, 18)
+# The grid of the near-black test (visual_timing.black_ranges); the cut scan can emit it in its own decode.
+GRID_SIZE = (160, 90)
 SOFT_LAG_SEC = 0.5
 SOFT_MIN_DIFF = 0.045
 SOFT_MIN_PROMINENCE = 0.03
@@ -278,7 +281,8 @@ def _scan_plan(video_path: str, start_sec: float, duration_sec: Optional[float])
     return [(i * length, None if i == parts - 1 else length) for i in range(parts)]
 
 
-def _scan_frames(video_path: str, start_sec: float, duration_sec: Optional[float], timeout: float, with_gray: bool = True):
+def _scan_frames(video_path: str, start_sec: float, duration_sec: Optional[float], timeout: float, with_gray: bool = True,
+                 grid_rate: Optional[float] = None, levels_out: Optional[list] = None):
     """Decode the video once for everything scene-change detection needs.
 
     Returns the time and ffmpeg scene score of every frame, the 32x18 colour
@@ -286,31 +290,52 @@ def _scan_frames(video_path: str, start_sec: float, duration_sec: Optional[float
     gray. Without with_gray the last item is None: scaling every frame down
     costs more than the rest of the scan, so _gray_frames reads only the
     few stretches that need it.
+
+    With grid_rate, the same decode also yields the near-black levels of the
+    GRID_SIZE grid at that rate (see brightest_levels), appended to levels_out.
     """
     plan = _scan_plan(video_path, start_sec, duration_sec)
+    if grid_rate is not None and not float(grid_rate).is_integer():
+        # Parts start on whole seconds; a fractional rate would put their frames off the grid.
+        plan = [(0, None)]
     if len(plan) > 1:
         try:
-            return _scan_parts(video_path, start_sec, duration_sec, timeout, plan, with_gray)
+            return _scan_parts(video_path, start_sec, duration_sec, timeout, plan, with_gray, grid_rate, levels_out)
         except MediaCorruptError:
             # A part that cannot be read on its own (a seek the container
-            # does not support): read the whole range in one go instead.
+            # does not support, or a timestamp gap across its seek point):
+            # read the whole range in one go instead.
             pass
-    return _scan_parts(video_path, start_sec, duration_sec, timeout, [(0, None)], with_gray)
+    return _scan_parts(video_path, start_sec, duration_sec, timeout, [(0, None)], with_gray, grid_rate, levels_out)
 
 
-def _scan_parts(video_path: str, start_sec: float, duration_sec: Optional[float], timeout: float, plan: List[tuple], with_gray: bool = True):
+def brightest_levels(frames) -> Any:
+    """Per frame, the grey level of its brightest 1% of cells: the near-black test of black_ranges."""
+    import numpy as np
+
+    return np.asarray([float(np.percentile(frame, 99)) for frame in frames])
+
+
+def _scan_parts(video_path: str, start_sec: float, duration_sec: Optional[float], timeout: float, plan: List[tuple], with_gray: bool = True,
+                grid_rate: Optional[float] = None, levels_out: Optional[list] = None):
     import numpy as np
 
     width, height = SOFT_GRID
+    with_grid = grid_rate is not None
+    labels = ["[a]", "[b]"] + (["[c]"] if with_gray else []) + (["[d]"] if with_grid else [])
     graph = (
-        f"[0:v]split={3 if with_gray else 2}[a][b]{'[c]' if with_gray else ''};"
+        f"[0:v]split={len(labels)}{''.join(labels)};"
         r"[a]select=gte(scene\,0),metadata=print:key=lavfi.scene_score:file=scene.txt,nullsink;"
         f"[b]fps={SOFT_SAMPLE_FPS}:start_time=0,scale={width}:{height},format=rgb24[soft]"
         + (f";[c]scale={width}:{height},format=gray[native]" if with_gray else "")
+        + (f";[d]fps={Fraction(grid_rate).limit_denominator(1001000)}:start_time=0,scale={GRID_SIZE[0]}:{GRID_SIZE[1]}:flags=area,format=gray[grid]" if with_grid else "")
     )
     outputs = ["-map", "[soft]", "-fps_mode", "passthrough", "-f", "rawvideo", "soft.raw"]
     if with_gray:
         outputs += ["-map", "[native]", "-fps_mode", "passthrough", "-f", "rawvideo", "native.raw"]
+    if with_grid:
+        # No -fps_mode: the same output options as the grid reader, so the frames are the same.
+        outputs += ["-map", "[grid]", "-f", "rawvideo", "grid.raw"]
     threads = max(2, (os.cpu_count() or 2) // len(plan)) if len(plan) > 1 else None
     deadline = time.monotonic() + timeout
     pieces = []
@@ -370,7 +395,23 @@ def _scan_parts(video_path: str, start_sec: float, duration_sec: Optional[float]
                     rgb = rgb[skip: skip + length * SOFT_SAMPLE_FPS]
                 else:
                     rgb = rgb[skip:]
-                pieces.append((times[own], scores[own], rgb, gray[own]))
+                # The grid and the soft samples start at the seek point (see their filters) and repeat the first
+                # decoded frame back to it. If that frame comes after the seam, the start of the own stretch
+                # would show the wrong picture, so such a part is not used.
+                if lead and len(times) and float(times[0]) > begin + lead + 1e-3:
+                    raise MediaCorruptError("FFmpeg scene-change scan starts after its own stretch", {"video_path": video_path})
+                levels = None
+                if with_grid:
+                    # Row lead*rate is the first row of the part's own stretch, and it has length*rate rows.
+                    area = GRID_SIZE[0] * GRID_SIZE[1]
+                    grid = np.fromfile(part_dir / "grid.raw", dtype=np.uint8)
+                    grid = grid[: (len(grid) // area) * area].reshape(-1, area)
+                    first = int(round(lead * grid_rate))
+                    last = len(grid) if length is None else first + int(round(length * grid_rate))
+                    if last > len(grid):
+                        raise MediaCorruptError("FFmpeg scene-change scan returned too few grid frames", {"video_path": video_path})
+                    levels = brightest_levels(frame.astype(np.float32) for frame in grid[first:last])
+                pieces.append((times[own], scores[own], rgb, gray[own], levels))
         except FileNotFoundError as exc:
             raise DependencyNotFoundError(f"ffmpeg binary not found on system PATH: {exc}", {"dependency": "ffmpeg"}) from exc
         except subprocess.TimeoutExpired as exc:
@@ -381,6 +422,8 @@ def _scan_parts(video_path: str, start_sec: float, duration_sec: Optional[float]
                     proc.kill()
                     proc.communicate()
     merged = tuple(np.concatenate([piece[i] for piece in pieces]) for i in range(4))
+    if with_grid and levels_out is not None:
+        levels_out.append(np.concatenate([piece[4] for piece in pieces]))
     return merged if with_gray else (*merged[:3], None)
 
 
@@ -602,7 +645,8 @@ def _scan_is_small(video_path: str, start_sec: float, duration_sec: Optional[flo
         return False
 
 
-def _scan_scene_changes(video_path: str, start_sec: float, duration_sec: Optional[float], timeout: float):
+def _scan_scene_changes(video_path: str, start_sec: float, duration_sec: Optional[float], timeout: float,
+                        grid_rate: Optional[float] = None, levels_out: Optional[list] = None):
     """One decode: every frame's scene score above the floor, and the soft scene changes.
 
     A change comes back as a "transition" or, when it sits in one frame step,
@@ -610,7 +654,8 @@ def _scan_scene_changes(video_path: str, start_sec: float, duration_sec: Optiona
     change carries a "window" (times and scene scores of the frames around it).
     """
     with_gray = _scan_is_small(video_path, start_sec, duration_sec)
-    times, scores, rgb, gray = _scan_frames(video_path, start_sec, duration_sec, timeout, with_gray=with_gray)
+    times, scores, rgb, gray = _scan_frames(video_path, start_sec, duration_sec, timeout, with_gray=with_gray,
+                                            grid_rate=grid_rate, levels_out=levels_out)
     strong = [[round(float(t), 6), round(float(s), 6)] for t, s in zip(times, scores) if s > SCAN_SCORE_FLOOR]
     changes = []
     rescued = []
@@ -705,7 +750,8 @@ def scan_scene_changes(
     cache: Optional[MediaCache] = None,
     timeout_sec: Optional[float] = None,
     defer_echoes: bool = False,
-) -> None:
+    grid_rate: Optional[float] = None,
+) -> Optional[Any]:
     """Decode the video once and fill the cache that detect_scenes and detect_soft_transitions read.
 
     Calling it first lets a caller that wants both hard cuts and soft
@@ -716,6 +762,11 @@ def scan_scene_changes(
     With defer_echoes, soft changes that sit on a hard cut of these
     thresholds are not settled now: detect_soft_transitions drops them when
     given those cuts, and settles them itself if given others.
+
+    With grid_rate, a whole-file scan that runs here also returns the
+    brightest-1% level of each GRID_SIZE grid frame at that rate (see
+    brightest_levels), taken from the same decode; None when nothing was
+    decoded here (the cache already held the scan) or the scan is partial.
     """
     vpath = Path(video_path).resolve()
     if not vpath.exists():
@@ -728,8 +779,13 @@ def scan_scene_changes(
     changes_key = _changes_key(span)
     strong = cache.load_json(fingerprint, f"scenescores_v1_{span}")
     changes = cache.load_json(fingerprint, changes_key)
+    levels_out: Optional[list] = None
     if strong is None or changes is None:
-        strong, changes = _scan_scene_changes(str(vpath), start_sec, duration_sec, timeout)
+        whole = float(start_sec) == 0.0 and duration_sec is None
+        levels_out = [] if grid_rate is not None and whole else None
+        strong, changes = _scan_scene_changes(str(vpath), start_sec, duration_sec, timeout,
+                                              grid_rate=grid_rate if levels_out is not None else None,
+                                              levels_out=levels_out)
         cache.save_json(fingerprint, f"scenescores_v1_{span}", strong)
         cache.save_json(fingerprint, changes_key, changes)
     cut_times: List[float] = []
@@ -748,6 +804,7 @@ def scan_scene_changes(
     skip = _echoes_of(cut_times if defer_echoes else [])
     if _settle_changes(str(vpath), changes, start_sec, duration_sec, timeout, skip):
         cache.save_json(fingerprint, changes_key, changes)
+    return levels_out[0] if levels_out else None
 
 
 def detect_soft_transitions(

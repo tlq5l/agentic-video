@@ -333,8 +333,8 @@ export interface CountRepetitionsInput {
   start_sec?: number | string;
   /** End of the window in seconds; defaults to the end of the video. Also accepts a timecode string in MM:SS.mmm form. */
   end_sec?: number | string | null;
-  /** Fractions of the frame; uses w/h (width/height with the same meaning is also accepted). Omit for the whole frame. */
-  region?: { x: number; y: number; w: number; h: number } | { x: number; y: number; width: number; height: number };
+  /** Fractions of the frame; uses w/h (width/height with the same meaning is also accepted), or the list [x, y, w, h]. Omit for the whole frame. */
+  region?: { x: number; y: number; w: number; h: number } | { x: number; y: number; width: number; height: number } | { x: number; y: number; w: number; height: number } | { x: number; y: number; width: number; h: number } | [number, number, number, number];
   /** Sampling rate (default 10, maximum 15; larger values are clamped and the result says so). */
   fps?: number;
   /** auto (default) picks between motion, embedding and a periodicity check; motion or embedding forces that amplitude counter alone. */
@@ -538,6 +538,8 @@ export interface InspectWindowInput {
   end_sec: number | string;
   /** Sampling rate (default 4, maximum 30; larger values are clamped). Frames = fps x duration and must stay within about 150 (at most 600 s per call). */
   fps?: number;
+  /** Also read the on-screen text in each returned frame with Apple Vision OCR (macOS only). Each frame then lists text_lines: the text, confidence and box (x, y, width, height; 0 to 1, top-left origin) of each line, top to bottom then left to right. Default false: no text is read. When true and Apple Vision is unavailable, the call fails before extracting any frame. */
+  read_text?: boolean;
 }
 
 export interface DenseWindowFrame {
@@ -550,6 +552,10 @@ export interface DenseWindowFrame {
   requested_timestamp: number | null;
   decoded_timestamp: number | null;
   timestamp_delta: number | null;
+  /** Lines of on-screen text read from this frame by Apple Vision, top to bottom then left to right. Present only when read_text was true. An empty list means OCR found no text in the frame. */
+  text_lines?: TextLine[];
+  /** Present when the frame had more than 40 text lines: lists the first 40 and says how many there were. */
+  text_lines_note?: string;
 }
 
 export interface InspectWindowOutput {
@@ -579,6 +585,8 @@ export interface FrameAtInput {
   crop?: { x: number; y: number; width: number; height: number };
   /** Enlargement of the (cropped) frame, 1 to 4 (default 1). Lanczos. */
   scale?: number;
+  /** Also read the on-screen text in each returned frame with Apple Vision OCR (macOS only). Each frame then lists text_lines: the text, confidence and box (x, y, width, height; 0 to 1, top-left origin) of each line, top to bottom then left to right. Default false: no text is read. When true and Apple Vision is unavailable, the call fails before extracting any frame. */
+  read_text?: boolean;
 }
 
 export interface FrameAtOutput {
@@ -603,6 +611,17 @@ export interface FrameAtOutput {
   source_height: number;
   crop: { x: number; y: number; width: number; height: number } | null;
   scale: number;
+  /** Lines of on-screen text read from this frame by Apple Vision, top to bottom then left to right. Present only when read_text was true. An empty list means OCR found no text in the frame. */
+  text_lines?: TextLine[];
+  /** Present when the frame had more than 40 text lines: lists the first 40 and says how many there were. */
+  text_lines_note?: string;
+}
+
+/** A line of on-screen text read by Apple Vision OCR (read_text: true). Box is normalized 0-1, top-left origin. */
+export interface TextLine {
+  text: string;
+  confidence: number;
+  box: { x: number; y: number; width: number; height: number };
 }
 
 // ============================================================================
@@ -649,7 +668,7 @@ export interface TrackRegionChangesInput {
   start_sec: number | string;
   end_sec: number | string;
   /** Fractions of the frame; uses width/height, not w/h (w/h with the same meaning is also accepted). */
-  region: { x: number; y: number; width: number; height: number } | { x: number; y: number; w: number; h: number };
+  region: { x: number; y: number; width: number; height: number } | { x: number; y: number; w: number; h: number } | { x: number; y: number; w: number; height: number } | { x: number; y: number; width: number; h: number } | [number, number, number, number];
   /** Sampling rate (default 0.25, maximum 10; larger values are clamped and the result says so). */
   sample_fps?: number;
   /** Decoded frame width in pixels (default 640, maximum 1920; larger values are clamped). */
@@ -711,7 +730,7 @@ export interface TrackRegionEventsInput {
   start_sec: number | string;
   end_sec: number | string;
   /** Fractions of the frame; uses width/height, not w/h (w/h with the same meaning is also accepted). */
-  region: { x: number; y: number; width: number; height: number } | { x: number; y: number; w: number; h: number };
+  region: { x: number; y: number; width: number; height: number } | { x: number; y: number; w: number; h: number } | { x: number; y: number; w: number; height: number } | { x: number; y: number; width: number; h: number } | [number, number, number, number];
   /** Sampling rate (default 0.25, maximum 10; larger values are clamped and the result says so). */
   sample_fps?: number;
   /** Decoded frame width in pixels (default 640, maximum 1920; larger values are clamped). */
@@ -767,7 +786,8 @@ export interface TrackRegionEventsOutput {
 
 export interface InspectMomentsInput {
   source: string;
-  moments: Array<{ timestamp_sec: number | string; label?: string }>;
+  /** A bare number counts as one moment in seconds; otherwise an object with exactly one of timestamp_sec, time_sec, time or t, and an optional label. */
+  moments: Array<number | { timestamp_sec: number | string; label?: string } | { time_sec: number | string; label?: string } | { time: number | string; label?: string } | { t: number | string; label?: string }>;
   /** Seconds of context before each moment (default 4). Also accepts a timecode string in MM:SS.mmm form. */
   before_sec?: number | string;
   /** Seconds of context after each moment (default 4). Also accepts a timecode string in MM:SS.mmm form. */
@@ -917,6 +937,12 @@ export interface ReviewVideoLoudness {
   }>;
 }
 
+export interface ReviewVideoBlackRange {
+  start_sec: number;
+  end_sec: number;
+  duration_sec: number;
+}
+
 export interface ReviewVideoOutput {
   /** Same fields as probe_video. */
   metadata: ProbeVideoOutput;
@@ -925,6 +951,11 @@ export interface ReviewVideoOutput {
   cuts: SceneCut[];
   cuts_total: number;
   cuts_omitted?: number;
+  /** Near-black stretches of at least 0.2 s, in time order; at most 50 are listed. */
+  black_ranges: ReviewVideoBlackRange[];
+  /** How many near-black stretches were found in all. */
+  black_total: number;
+  black_ranges_omitted?: number;
   /** Null when the video has no audio track. */
   loudness: ReviewVideoLoudness | null;
   note?: string;
@@ -992,6 +1023,8 @@ export interface AudioOnsetsInput {
   end_sec?: number | string;
   /** Minimum normalized spectral-flux strength, from 0 to 1 (default 0.12); raise it to keep only stronger onsets. */
   min_strength?: number;
+  /** Onsets closer than this many seconds to a group's first onset are merged into one; 0 keeps every raw onset (default 0.035). */
+  min_gap_sec?: number | string;
   /** Restrict onset detection to a named band or [low_hz, high_hz]. */
   band_hz?: AudioBandSelection;
   /** Return only source onsets that are new or materially louder in-band than this source (a path or video URL). */
@@ -1020,6 +1053,8 @@ export interface AudioOnsetsOutput {
   compare_min_delta_db: number | null;
   onsets: AudioOnset[];
   total: number;
+  /** How many detected onsets min_gap_sec merged into a neighbouring onset. */
+  merged_count: number;
   /** Plain-English remark about the call: a capped argument, omitted items, or an ignored unknown argument. */
   note?: string;
   /** How many `onsets` entries were left out of the list; `note` says how to see them. */
@@ -1233,6 +1268,8 @@ export interface SyncCheckInput {
   tolerance_ms?: number;
   /** Tempo of the music, 20-300: compares cues with uncued moments at the same beat phase. */
   bpm?: number;
+  /** false (default): each cue gives candidate_onsets_count; true gives its candidate_onsets list instead. */
+  verbose?: boolean;
 }
 
 export interface SyncCutMatch {
@@ -1292,7 +1329,10 @@ export interface SyncCueResult {
   search_window_ms: number;
   match_method: string;
   ambiguous_reason: string | null;
-  candidate_onsets: { time_sec: number; offset_ms: number; strength: number }[];
+  /** Only with verbose true. */
+  candidate_onsets?: { time_sec: number; offset_ms: number; strength: number }[];
+  /** Number of onsets near this cue; reported unless verbose is true. */
+  candidate_onsets_count?: number;
   /** Only for a cue with a gradual build (a swell, not a hit). */
   soft_attack_build?: SyncSoftAttackBuild;
   band_hz?: AudioBandSelection;

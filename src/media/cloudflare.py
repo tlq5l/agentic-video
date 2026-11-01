@@ -14,7 +14,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 from src.core.errors import AgenticVideoError
 
@@ -108,18 +108,24 @@ def reply_excerpt(raw: bytes | str, token: str) -> str:
     return hide_token(text, token)[:ERROR_EXCERPT_CHARS]
 
 
-def run_model(model: str, account: str, token: str, body: bytes, timeout_sec: float, cutoff: Optional[float] = None) -> bytes:
-    """POST one Workers AI run and return the raw reply.
+def run_model(model: str, account: str, token: str, body: bytes, timeout_sec: float, cutoff: Optional[float] = None,
+              allowed: Optional[Callable[[], bool]] = None) -> bytes:
+    """POST one Workers AI run and return the raw reply. `model` is the full model path, for example
+    "@cf/cloudflare/clef" or "@cf/openai/whisper-large-v3-turbo".
 
     One retry after a 429, 5xx or network error, never past `cutoff` (a time.monotonic() value; None means no
-    limit). A 401 or 403 drops the kept command token. Every error text has the token removed.
+    limit). `allowed`, when given, is asked before every attempt, retries included; a False answer means nothing
+    is sent and the call fails. A 401 or 403 drops the kept command token. Every error text has the token removed.
     """
     request = urllib.request.Request(
-        f"{api_base()}/accounts/{account}/ai/run/@cf/cloudflare/{model}", data=body, method="POST",
+        f"{api_base()}/accounts/{account}/ai/run/{model}", data=body, method="POST",
         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
     )
     failure = "no reply"
     for attempt in range(2):
+        if allowed is not None and not allowed():
+            failure = "not sent: the caller refused this attempt" if attempt == 0 else f"{failure} (the retry was refused)"
+            break
         timeout = timeout_sec if cutoff is None else min(timeout_sec, cutoff - time.monotonic())
         if timeout < MIN_REQUEST_SEC:
             failure = "out of time before the call's limit" if attempt == 0 else f"{failure} (no time left to retry)"

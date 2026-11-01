@@ -132,7 +132,7 @@ def test_mcp_cache_miss_returns_retry_status(monkeypatch, tmp_path):
             "requested_model_cached": False,
             "transcription_status": "started",
             "retry_after_seconds": 15,
-            "transcription_message": "The small transcription started in the background. Retry in about 15 seconds.",
+            "transcription_message": "The small transcription started in the background. Call this tool again after about 15 seconds to get the transcript.",
         },
     }
     assert slot.calls == [(str(source), "small")]
@@ -404,6 +404,147 @@ asr._run_memory_capped_worker([sys.executable, "-c", worker, sys.argv[2]],
         time.sleep(0.05)
     else:
         pytest.fail("stale worker lock was not released after its process died")
+
+
+_OUTLIVING_WORKER_SERVER = r'''
+import json, sys, threading
+from pathlib import Path
+from src.core.config import Config
+from src.executor.mcp_server import handle_call
+from src.transcript import asr
+
+cache_dir, marker, source, mode = Path(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4]
+Config.BASE_CACHE_DIR = cache_dir
+asr._installed_whisper_models = lambda: []
+WORKER = "import os, pathlib, sys, time; pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(120)"
+
+def worker_that_outlives_its_server(source_path, model_size, allow_long_run):
+    asr._run_memory_capped_worker([sys.executable, "-c", WORKER, marker], timeout=None)
+    raise RuntimeError("stand-in worker exited")
+
+asr.transcribe_video = worker_that_outlives_its_server
+print(json.dumps(handle_call("transcribe", {"source": source, "model_size": "tiny"})), flush=True)
+if mode == "serve":
+    threading.Event().wait()
+'''
+
+
+def _fresh_server_reply(cache_dir, marker, source, env=None):
+    fresh = subprocess.run(
+        [sys.executable, "-c", _OUTLIVING_WORKER_SERVER, str(cache_dir), str(marker), str(source), "once"],
+        cwd=Path(__file__).resolve().parents[1], stdin=subprocess.DEVNULL,
+        capture_output=True, text=True, timeout=60, env=env,
+    )
+    assert fresh.returncode == 0, fresh.stderr
+    return json.loads(fresh.stdout.strip().splitlines()[-1])["data"]
+
+
+def _assert_orphaned_reply(data):
+    assert data["status"] == "failed"
+    assert data["transcription_status"] == "failed"
+    assert data["retry_after_seconds"] == 15
+    assert "already running" not in data["transcription_message"]
+    assert "Retry this request" not in data["transcription_message"]
+    assert "no new attempt has started" in data["transcription_message"]
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX worker lock: the server is killed with SIGKILL")
+def test_transcribe_after_server_exit_is_not_reported_running(tmp_path):
+    source = tmp_path / "clip.mkv"
+    subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-y",
+         "-f", "lavfi", "-i", "testsrc=size=160x90:rate=5:duration=2",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+         "-c:v", "ffv1", "-c:a", "flac", str(source)],
+        check=True,
+    )
+    cache_dir = tmp_path / "cache"
+    marker = tmp_path / "worker-pid"
+    root = Path(__file__).resolve().parents[1]
+    server = subprocess.Popen(
+        [sys.executable, "-c", _OUTLIVING_WORKER_SERVER, str(cache_dir), str(marker), str(source), "serve"],
+        cwd=root, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    try:
+        first = json.loads(server.stdout.readline())
+        assert first["data"]["transcription_status"] == "started"
+
+        deadline = time.monotonic() + 30
+        while not (marker.exists() and marker.read_text()):
+            assert server.poll() is None, server.stderr.read().decode()
+            assert time.monotonic() < deadline, "the stand-in worker never started"
+            time.sleep(0.05)
+        os.kill(server.pid, signal.SIGKILL)
+        # The killed server stays an unreaped zombie until this test collects it.
+        deadline = time.monotonic() + 10
+        while asr._process_state(server.pid) != "Z":
+            assert time.monotonic() < deadline, "the killed server did not become a zombie"
+            time.sleep(0.05)
+
+        # A ps that is denied cannot tell whether the zombie is gone, so the reply is retryable, not running.
+        ps_denied_dir = tmp_path / "ps-denied"
+        ps_denied_dir.mkdir()
+        for tool in ("ffmpeg", "ffprobe"):
+            os.symlink(shutil.which(tool), ps_denied_dir / tool)
+        (ps_denied_dir / "ps").write_text("#!/bin/sh\necho 'ps: permission denied' >&2\nexit 1\n")
+        (ps_denied_dir / "ps").chmod(0o755)
+        unverified = _fresh_server_reply(
+            cache_dir, marker, source, env=dict(os.environ, PATH=str(ps_denied_dir)))
+        assert unverified["status"] == "start_failed"
+        assert unverified["transcription_status"] == "start_failed"
+        assert unverified["retry_after_seconds"] == 15
+        assert "already running" not in unverified["transcription_message"]
+        assert "could not be checked" in unverified["transcription_message"]
+
+        _assert_orphaned_reply(_fresh_server_reply(cache_dir, marker, source))
+        server.wait(timeout=10)
+        _assert_orphaned_reply(_fresh_server_reply(cache_dir, marker, source))
+    finally:
+        if server.poll() is None:
+            server.kill()
+            server.wait(timeout=10)
+        server.stdout.close()
+        server.stderr.close()
+        if marker.exists() and (worker_pid := marker.read_text()):
+            try:
+                os.killpg(int(worker_pid), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+def test_progress_estimate_follows_the_model_that_is_running(monkeypatch, tmp_path):
+    source = tmp_path / "long.mkv"
+    subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-y",
+         "-f", "lavfi", "-i", "testsrc=size=160x90:rate=1:duration=600",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=600",
+         "-c:v", "ffv1", "-c:a", "flac", str(source)],
+        check=True,
+    )
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(asr, "_installed_whisper_models", lambda: [])
+    lock, _, error = asr._acquire_background_process_lock(
+        Config.BASE_CACHE_DIR, str(source.resolve()), "tiny"
+    )
+    assert lock is not None and error is None
+    try:
+        # A tiny job that started 10 s ago. For this 600 s clip its estimate is 24 s; a small estimate would be 120 s.
+        lock.seek(0)
+        lock.truncate(0)
+        lock.write(json.dumps({
+            "pid": os.getpid(), "source_path": str(source.resolve()), "model_size": "tiny",
+            "started_at": time.time() - 10,
+        }).encode("utf-8"))
+        lock.flush()
+        response = handle_call("transcribe", {"source": str(source), "model_size": "small"})
+    finally:
+        asr._release_background_process_lock(lock)
+
+    data = response["data"]
+    assert data["transcription_status"] == "in_progress"
+    assert data["estimated_total_sec"] == 24
+    assert 40 <= data["estimated_percent"] <= 42
+    assert "A tiny transcription for this video is already running" in data["transcription_message"]
 
 
 def test_mcp_reports_a_failed_background_attempt(monkeypatch, tmp_path):
@@ -728,7 +869,11 @@ os._exit(7)
 
     assert completed.returncode == 7
     assert completed.stdout.strip().isdigit()
-    time.sleep(2.8)
+    child_pid = int(completed.stdout.strip())
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and asr._process_rss_bytes(child_pid):
+        time.sleep(0.05)
+    assert not asr._process_rss_bytes(child_pid), "the child outlived its crashed worker"
     assert not marker.exists()
 
 

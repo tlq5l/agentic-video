@@ -3,17 +3,25 @@ import io
 import re
 import unicodedata
 
-OCR_UNAVAILABLE = ("On-screen text matching needs Apple Vision through pyobjc (macOS only). "
-                   "Run: python -m pip install -r requirements-visual.txt (adds pyobjc-framework-Vision), "
-                   "or omit `text` and describe the object with `description` instead.")
+TEXT_LINE_CAP = 40
 
 
-def ensure_available():
+def _unavailable(feature, alternative):
+    return (f"{feature} needs Apple Vision through pyobjc (macOS only). "
+            "Run: python -m pip install -r requirements-visual.txt (adds pyobjc-framework-Vision), "
+            f"or {alternative}.")
+
+
+OCR_UNAVAILABLE = _unavailable("On-screen text matching", "omit `text` and describe the object with `description` instead")
+READ_TEXT_UNAVAILABLE = _unavailable("read_text", "leave read_text out (the default) to get the frames without text")
+
+
+def ensure_available(message=OCR_UNAVAILABLE):
     """Raise an actionable error before any work is scheduled when OCR cannot run."""
     try:
         import Vision  # noqa: F401
     except ImportError as exc:
-        raise RuntimeError(OCR_UNAVAILABLE) from exc
+        raise RuntimeError(message) from exc
 
 
 def recognize(image):
@@ -44,6 +52,21 @@ def recognize(image):
                           "x": float(box.origin.x), "y": float(1.0 - box.origin.y - box.size.height),
                           "w": float(box.size.width), "h": float(box.size.height)})
         return lines
+
+
+def frame_text(path):
+    """text_lines for one saved frame, top to bottom then left to right; at most TEXT_LINE_CAP lines."""
+    from PIL import Image
+    with Image.open(path) as image:
+        lines = sorted(recognize(image), key=lambda l: (l["y"], l["x"]))
+    out = {"text_lines": [
+        {"text": l["text"], "confidence": round(l["confidence"], 3),
+         "box": {"x": round(l["x"], 4), "y": round(l["y"], 4), "width": round(l["w"], 4), "height": round(l["h"], 4)}}
+        for l in lines[:TEXT_LINE_CAP]]}
+    if len(lines) > TEXT_LINE_CAP:
+        out["text_lines_note"] = (f"Lists the first {TEXT_LINE_CAP} of {len(lines)} text lines in this frame "
+                                  "(top to bottom); the rest are left out.")
+    return out
 
 
 def _normalize(text, case_sensitive):

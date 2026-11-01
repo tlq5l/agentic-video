@@ -19,10 +19,11 @@ from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence
 
 import numpy as np
 
+from src.core.cache import MediaCache
 from src.core.config import Config
 from src.core.errors import MediaCorruptError, MediaNotFoundError
+from src.media.scene import GRID_SIZE as _GRID, brightest_levels, scan_scene_changes
 
-_GRID = (160, 90)
 _CELL_CHANGE = 6.0
 # A frame stands out when its change share is at least this much above the
 # local median, and at least double it.
@@ -78,7 +79,7 @@ def _grid_frames(path: Path, rate: float) -> Iterator[np.ndarray]:
     kept: Optional[bytearray] = bytearray()
     process = subprocess.Popen(
         ["ffmpeg", "-nostdin", "-v", "error", "-filter_threads", "1", "-i", str(path), "-map", "0:v:0", "-an",
-         "-vf", "fps={},scale={}:{}:flags=area,format=gray".format(Fraction(rate).limit_denominator(1001000), width, height), "-f", "rawvideo", "-"],
+         "-vf", "fps={}:start_time=0,scale={}:{}:flags=area,format=gray".format(Fraction(rate).limit_denominator(1001000), width, height), "-f", "rawvideo", "-"],
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
     )
     try:
@@ -92,6 +93,9 @@ def _grid_frames(path: Path, rate: float) -> Iterator[np.ndarray]:
                 if len(kept) > _SHARE_MAX_BYTES:
                     kept = None
             yield np.frombuffer(chunk, dtype=np.uint8).astype(np.float32)
+        exit_code = process.wait(timeout=max(Config.SUBPROCESS_TIMEOUT_SEC * 4, 180.0))
+        if exit_code != 0:
+            raise MediaCorruptError("FFmpeg could not decode the video frames", {"source": str(path), "exit_code": exit_code})
         if kept is not None:
             _shared = (key, np.frombuffer(kept, dtype=np.uint8).reshape(-1, size))
     finally:
@@ -136,6 +140,17 @@ _SPLICE_MIN_FRAME_DELTA = 10.0
 _SPLICE_MIN_FRAME_CHANGED_SHARE = 0.20
 
 
+def _runs(flags: np.ndarray) -> List[tuple]:
+    """(first, last) frame index of each run of True values, in time order."""
+    edges = np.flatnonzero(np.diff(np.r_[False, np.asarray(flags, dtype=bool), False])).tolist()
+    return [(start, end - 1) for start, end in zip(edges[::2], edges[1::2])]
+
+
+def _brightest_percent(path: Path, rate: float) -> np.ndarray:
+    """Per frame, the grey level of its brightest 1% of grid cells (the near-black test)."""
+    return brightest_levels(_grid_frames(path, rate))
+
+
 def blank_flashes(source: str) -> Dict[str, Any]:
     """Runs of at most 0.15 s of near-black frames between two visible pictures.
 
@@ -145,17 +160,10 @@ def blank_flashes(source: str) -> Dict[str, Any]:
     """
     path = _video_path(source)
     rate = _frame_rate(path)
-    bright = np.asarray([float(np.percentile(frame, 99)) for frame in _grid_frames(path, rate)])
+    bright = _brightest_percent(path, rate)
     blank = bright < _BLANK_P99
     flashes: List[Dict[str, Any]] = []
-    index = 0
-    while index < len(blank):
-        if not blank[index]:
-            index += 1
-            continue
-        end = index
-        while end + 1 < len(blank) and blank[end + 1]:
-            end += 1
+    for index, end in _runs(blank):
         frames = end - index + 1
         span = max(1, int(round(_SETTLED_SEC * rate)))
         if (index > 0 and end + 1 < len(blank) and frames / rate <= _MAX_FLASH_SEC + 1e-6
@@ -164,8 +172,73 @@ def blank_flashes(source: str) -> Dict[str, Any]:
             flashes.append({"start_sec": round(index / rate, 3), "end_sec": round((end + 1) / rate, 3),
                             "frames": frames, "brightest_before": round(float(bright[index - 1]), 1),
                             "brightest_after": round(float(bright[end + 1]), 1)})
-        index = end + 1
     return {"frame_rate": rate, "flashes": flashes}
+
+
+_BLACK_MIN_SEC = 0.2
+# Each bound is rounded to the millisecond, so a stored duration may differ from end - start by about 1 ms.
+_BLACK_ROUNDING_SEC = 0.002
+# v2: black scans saved before the grid start was pinned to each decode's start are not trusted.
+# v3: v2 scans from before the seek-point check are not trusted either: a timestamp gap across a scan part's
+# seek point left their stretches at the wrong time, and such a stretch still passes the validator.
+_BLACK_CACHE_KEY = "black_ranges_v3"
+
+
+def _is_number(value: Any) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
+def _cached_black_ranges(cache: MediaCache, fingerprint: str) -> Optional[Dict[str, Any]]:
+    """The saved black scan when it has the shape black_ranges writes; anything else is a cache miss."""
+    cached = cache.load_json(fingerprint, _BLACK_CACHE_KEY)
+    if not isinstance(cached, dict) or not _is_number(cached.get("frame_rate")) or cached["frame_rate"] <= 0:
+        return None
+    ranges = cached.get("ranges")
+    if not isinstance(ranges, list):
+        return None
+    for item in ranges:
+        if not isinstance(item, dict) or not all(_is_number(item.get(key)) for key in ("start_sec", "end_sec", "duration_sec")):
+            return None
+        start, end, duration = item["start_sec"], item["end_sec"], item["duration_sec"]
+        if start < 0 or duration < _BLACK_MIN_SEC or abs(duration - (end - start)) > _BLACK_ROUNDING_SEC:
+            return None
+    return cached
+
+
+def black_ranges(source: str, cache: Optional[MediaCache] = None) -> Dict[str, Any]:
+    """Stretches of at least 0.2 s where every frame is near-black (the blank_flashes test).
+
+    A frame is near-black when its brightest 1% of grid cells stay below
+    _BLANK_P99, so a dim scene that keeps some bright cells is not listed.
+    """
+    path = _video_path(source)
+    if cache is None:
+        cache = MediaCache()
+    fingerprint = cache.compute_fingerprint(str(path))
+    cached = _cached_black_ranges(cache, fingerprint)
+    if cached is not None:
+        return cached
+    rate = _frame_rate(path)
+    # The cut scan decodes the whole file anyway and can emit these grid levels from that decode,
+    # so detect_cuts reads the cache this fills instead of decoding again.
+    levels = scan_scene_changes(str(path), cache=cache, defer_echoes=True, grid_rate=rate)
+    if levels is None:
+        levels = _brightest_percent(path, rate)
+    blank = levels < _BLANK_P99
+    ranges: List[Dict[str, Any]] = []
+    for index, end in _runs(blank):
+        frames = end - index + 1
+        if frames / rate + 1e-9 >= _BLACK_MIN_SEC:
+            ranges.append({"start_sec": round(index / rate, 3), "end_sec": round((end + 1) / rate, 3),
+                           "duration_sec": round(frames / rate, 3)})
+    result = {"frame_rate": rate, "ranges": ranges}
+    cache.save_json(fingerprint, _BLACK_CACHE_KEY, result)
+    return result
 
 
 def frame_splices(source: str) -> Dict[str, Any]:

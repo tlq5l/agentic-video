@@ -148,6 +148,7 @@ def test_wakes_once_when_the_red_box_stays_then_cooldown_holds_the_rest(red_box_
     (lambda n: 15.0, "every reply takes 15 s"),
     (lambda n: 0.0 if n < 6 else 25.0, "the API hangs after 6 good replies"),
 ])
+@pytest.mark.slow
 def test_slow_cloud_returns_finished_samples_within_about_50_s(red_box_video, slow_stand_in, tmp_path, delay_for, label):
     """Real constants: no new sample after 40 s, requests cut at 48 s, so the call stays inside Executor's 60 s limit."""
     base, seen = slow_stand_in(delay_for)

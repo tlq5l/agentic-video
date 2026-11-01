@@ -4,6 +4,9 @@ This document provides operational principles, tool heuristics, and anti-pattern
 
 Feature map: FEATURES.md. Open it for bug reports, vague requests, or before changing a feature.
 
+Fast check after an edit: `scripts/verify.sh` (ruff on changed files, then the tests that import them, model and slow tests left out). Full suite once before a merge, on the box: `box run` with `.venv/bin/python -m pytest -q -p no:cacheprovider tests`.
+Call the tools without MCP: `python -m src.executor.mcp_server list` and `python -m src.executor.mcp_server call <tool> '<json>'`.
+
 ---
 
 ## The Core Interaction Protocol
