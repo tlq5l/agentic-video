@@ -4,8 +4,9 @@ Everything is generated from a seed; nothing is downloaded. All signals are
 48 kHz float arrays. Bed generators take a target RMS in dBFS.
 
 Beds:
-- ``babble``: one speech-like voice. Syllables (120-300 ms, 3-8 per phrase,
-  0.2-0.6 s pauses) of a gliding harmonic source shaped by three moving
+- ``babble``: one speech-like voice. Syllables (120-300 ms, 3-8 per phrase),
+  0-0.06 s apart; phrases end in 0.2-0.6 s pauses, so gaps between phrases
+  run 0.2-0.66 s. A gliding harmonic source shaped by three moving
   formants; some syllables open with a plosive-like noise burst (a decoy).
 - ``crowd``: 10-16 babble voices at random gains over a pink roar, plus random
   low-level transients (claps, thuds).

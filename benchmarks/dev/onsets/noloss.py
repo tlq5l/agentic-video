@@ -7,7 +7,8 @@ or the file given by ``--baseline-audio`` (use that on a box with no git).
 Families (``--family``, default all):
 - legacy: the 60 original clips (score.py) at the band and broadband settings;
 - real: the 156 real-world-like clips (realistic.py) at their settings;
-- short: 1-5 ms clicks (decaying sines and square bursts, peaks -30 to -6 dBFS)
+- short: 1-5 ms clicks (decaying sines and square bursts; peak drawn from -30 to -6 dBFS
+  before the decay, so decayed sines peak lower, measured -32.2 to -6.1 dBFS);
   over silence, white and pink noise at -70 to -40 dBFS RMS;
 - pair: two starts 20-60 ms apart (short clicks or decaying tones) over the same beds;
 - ranged: single starts (loud clicks, quiet beeps 25 dB over steady noise, moderate
