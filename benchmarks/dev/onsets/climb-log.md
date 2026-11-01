@@ -48,3 +48,13 @@ Numbers after the fixes (printed by score.py at the time of this note):
 - No-loss, each family against origin/main: lost=0 (within_gap=0), lost_chance=0, lost_babble=0 for legacy, real, short, pair and ranged.
 - Pytest: tests/test_audio_primitives.py and tests/test_agent_first_tools.py, 113 passed. Ruff: clean on the three edited files.
 
+## Box re-check after the README fix, 2026-11-01
+
+The box has no `.git`, so the no-loss runs passed `--baseline-audio` with main's file copied into the project (origin/main's `src/media/audio.py`, removed before commit). Printed values:
+
+- NOLOSS legacy: `NOLOSS total lost=0 (within_gap=0) lost_chance=0 lost_babble=0` (band and broadband lines each lost=0).
+- NOLOSS real: `NOLOSS total lost=0 (within_gap=0) lost_chance=0 lost_babble=0` (all seven lines lost=0).
+- NOLOSS short, pair and ranged, one run: `NOLOSS total lost=0 (within_gap=0) lost_chance=0 lost_babble=0` (all nine lines lost=0).
+- Climb, both sets: band F1 0.8696 (broadband 0.1930); realistic at 30 ms: click 0.597, beep 0.966, quiet_click 0.659, quiet_beep 0.865; `primary_f1@30ms=0.7718`. Same as row 12.
+- Pytest tests/test_audio_primitives.py: 13 passed. Ruff check src/media/audio.py: passed.
+

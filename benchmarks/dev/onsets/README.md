@@ -13,7 +13,7 @@ Tune on the climb split only. Use held-out to check, not to tune.
 
 - Scores: `python -m benchmarks.dev.onsets.score --split climb --set both`, then the same with `--split heldout`. Each prints `METRIC` lines (F1, precision, recall, timing, tp/fp/fn) per setting. The headline primary is `onsets.real.<split>.primary_f1@30ms`, the mean of the four unrounded realistic F1s at 30 ms.
 - No-loss check: `python -m benchmarks.dev.onsets.score --set noloss`. It runs origin/main's `src/media/audio.py` (read with `git show`, set by `--baseline-ref`) and this tree on the same clips, and lists each planted start that main finds and this tree misses. The last line, `NOLOSS total lost=N`, passes at 0. On a machine without git, pass `--baseline-audio <file>`.
-- Run these on the box with `box run`, not on the laptop.
+- Run these on the box with `box run`, not on the laptop. The box copy of the project has no `.git`, so the default `git show` baseline fails there (exit 128). On the box, put main's file in the project folder and pass it: `--baseline-audio benchmarks/dev/onsets/baseline_main_audio.py`. Make that copy with `git show origin/main:src/media/audio.py > benchmarks/dev/onsets/baseline_main_audio.py` on the laptop, and delete it before committing.
 
 ## Baseline: origin/main 6075109, 2026-11-01
 
