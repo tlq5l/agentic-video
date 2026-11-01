@@ -400,12 +400,13 @@ class FrameJudge:
         return results
 
 
-def _direction(points):
+def _direction(points, mark_brief=False):
     """Travel of the matched region across a span, from its first and last centres (normalized).
 
-    Under three samples the first and last centres are the same point, so the span cannot show travel: "unknown".
+    Under three samples the first and last centres are the same point, so the span cannot show travel and reads as
+    "stationary". With mark_brief (a direction was passed) it is "unknown" instead, because it is counted under any direction.
     """
-    if len(points) < 3:
+    if mark_brief and len(points) < 3:
         return "unknown"
     head, tail = np.mean(points[:2], axis=0), np.mean(points[-2:], axis=0)
     dx, dy = tail - head
@@ -736,7 +737,9 @@ def count_video(engine, progress=lambda done, total: None, **args):
             builder.add(start + index / fps, hit, None)
     spans = builder.finish()
     capped = len(spans) >= MAX_SPANS_LIMIT
-    matched = spans if direction == "any" else [span for span in spans if _direction(span["points"]) in (direction, "unknown")]
+    filtered = direction != "any"
+    travels = [_direction(span["points"], mark_brief=filtered) for span in spans]
+    matched = [span for span, way in zip(spans, travels) if not filtered or way in (direction, "unknown")]
     shown = matched[:max_spans]
     missing_tiles = [span for span in shown[:SHEET_TILES] if span["rep"][3] is None]  # replayed runs, or spans past the builder's tile limit
     if missing_tiles:
@@ -749,7 +752,7 @@ def count_video(engine, progress=lambda done, total: None, **args):
                         "duration_sec": round(span_end - span["start"], 3), "score": round(span["score"], 3),
                         "representative_sec": round(span["rep"][0], 3), "frame_badge": f"#{i + 1}", "weak": span["weak"],
                         "region": {"x": round(x, 3), "y": round(y, 3), "w": round(w, 3), "h": round(h, 3)},
-                        "travel": _direction(span["points"])})
+                        "travel": _direction(span["points"], mark_brief=filtered)})
     omitted = len(matched) - len(shown)
     spec = judge.spec
     result = {"status": "complete", "count": None if capped else len(matched), "spans": entries, "spans_returned": len(shown),
@@ -781,7 +784,7 @@ def count_video(engine, progress=lambda done, total: None, **args):
         result["note"] += (f" min_gap_sec={min_gap:g} joined {len(builder.bridged)} pair(s) of appearances that the default "
                            f"{DEFAULT_MIN_GAP:g} s keeps apart (gaps at {joined}); {unmerged}. "
                            f"Lower min_gap_sec if those were separate appearances.")
-    travel = collections.Counter(_direction(span["points"]) for span in spans)
+    travel = collections.Counter(travels)
     moving = {way: n for way, n in travel.items() if way not in ("stationary", "unknown")}
     if moving:
         result["travel_counts"] = moving
@@ -793,7 +796,7 @@ def count_video(engine, progress=lambda done, total: None, **args):
         result["note"] += (f" {sum(moving.values())} appearance(s) show net motion across the frame ("
                            f"{', '.join(f'{n} {way}' for way, n in moving.items())}), estimated from each span's first and last "
                            f"positions; these are not verified crossings. {outcome}")
-    if direction != "any" and not capped:
+    if filtered and not capped:
         stationary, unknown = travel.get("stationary", 0), travel.get("unknown", 0)
         result["note"] += (f" direction={direction}: counted the {len(matched) - unknown} of {len(spans)} appearance(s) that travel "
                            f"{direction}, and {unknown} too brief to show any direction (counted; verify them); "

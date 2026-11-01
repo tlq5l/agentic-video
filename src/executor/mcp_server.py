@@ -966,10 +966,14 @@ def _dispatch(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
                 detail = (" or direction count. The count includes all directions: for a directional question, "
                           "rerun with direction (e.g. left_to_right) and check those spans with inspect_window before answering.")
             else:
-                detail = (f". The count holds only the appearances that travel {direction}; "
-                          "check them with inspect_window before answering.")
+                detail = ". Check the counted spans with inspect_window before answering."
             data["verify"] += (" Some appearances show net motion across the frame; travel_counts estimates it from first "
                                "and last positions, so it is not a verified crossing" + detail)
+        if direction != "any" and data.get("spans") and not data.get("capped") and "verify" in data:
+            data["verify"] += (f" The count holds the appearances that travel {direction} plus any span with travel "
+                               f"unknown: under three samples, too brief to show motion, so it is counted under any "
+                               f"direction. Check the unknown spans with inspect_window first and drop any that did not "
+                               f"travel {direction}.")
         sheet = data.get("contact_sheet")
         if isinstance(sheet, dict) and sheet.get("file_path"):
             sheet = dict(sheet)

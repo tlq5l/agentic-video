@@ -393,7 +393,7 @@ export interface CountOccurrencesInput {
   min_gap_sec?: number | string;
   /** Maximum spans listed (default 20, maximum 100; larger values are clamped and the result says so); count always includes omitted spans. */
   max_spans?: number;
-  /** Count only appearances moving this way across the frame (estimated from first and last positions; verify the spans). Spans under three samples show no direction and are counted (travel "unknown"); default "any" counts every appearance. */
+  /** Count only appearances moving this way across the frame (estimated from first and last positions; verify the spans). Spans under three samples are too brief to show motion and are counted under any direction (travel "unknown"; check them); default "any" counts every appearance. */
   direction?: "any" | "left_to_right" | "right_to_left" | "top_to_bottom" | "bottom_to_top";
 }
 
@@ -408,7 +408,7 @@ export interface OccurrenceSpan {
   frame_badge?: string;
   /** Normalized box of the match at representative_sec. */
   region?: { x: number; y: number; w: number; h: number };
-  /** Estimated net motion of the match from its first and last positions in the span, not a verified crossing. unknown: the span has under three samples, so no motion was estimated. Verify directional questions visually. */
+  /** Estimated net motion of the match from its first and last positions in the span, not a verified crossing. unknown (only when direction was passed): the span has under three samples, too brief to show motion, and is counted under any direction; without direction such a span reads stationary. Verify directional questions visually. */
   travel?: "stationary" | "left_to_right" | "right_to_left" | "top_to_bottom" | "bottom_to_top" | "unknown";
   /** True for a single detection, a span shorter than 0.5 s, or a score below 75% of the median span score. Still counted; its tile label ends in *. */
   weak?: boolean;
@@ -424,7 +424,7 @@ export interface CountOccurrencesOutput {
   status: "in_progress" | "complete" | "error";
   retry_after_seconds?: number;
   message?: string;
-  /** Number of separate appearances; null when `capped` is true. */
+  /** Number of separate appearances; with `direction`, those travelling that way plus spans too brief to show motion (travel "unknown"), which count under any direction. null when `capped` is true. */
   count?: number | null;
   /** True when 100 or more spans matched: the description is too broad and count is null. Do not report a number. */
   capped?: boolean;
