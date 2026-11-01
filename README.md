@@ -4,6 +4,23 @@
 
 agentic-video lets an AI agent that reads text and images, but not video, work with video files on your own machine. It is a Python library plus a stdio MCP server. The agent asks small, targeted questions ("show me 12 frames from 0:40 to 1:10", "when is 'launch' spoken?") and gets back measurements, transcripts and contact sheets: grids of frames, each with its timestamp burned into the pixels. Everything runs locally with FFmpeg, Whisper and optional local models, except two optional cloud tools (`watch_for`, `label_sounds`), which send frames or audio to Cloudflare Workers AI only when you set credentials and call them. An opt-in shadow transcription trial (off by default, owner machines only) also sends audio to Cloudflare when its switch and credentials are set.
 
+**See it work:** https://agentic-video-gallery.infra-1b7.workers.dev (the gallery: real tasks, including the misses).
+
+## Try it in 2 minutes
+
+Pick one route. Each is one command or one click; the steps behind them are in the sections below.
+
+- **Claude Code:** `brew install ffmpeg uv`, then `claude mcp add -s user agentic-video -- uvx agentic-video`.
+- **Claude Desktop:** download the `.mcpb` from the [latest release](https://github.com/tlq5l/agentic-video/releases/latest) and double-click it (macOS; run `brew install ffmpeg` first).
+- **Claude Code plugin:** `claude plugin marketplace add tlq5l/agentic-video`, then `claude plugin install agentic-video@agentic-video` ([docs/claude-code-plugin.md](docs/claude-code-plugin.md)).
+- **Other clients:** [Run the MCP server](#run-the-mcp-server) has the JSON block.
+
+Then paste this first prompt: "Use agentic-video: make a contact sheet of `/path/to/video.mp4` and list its cuts"
+
+- [Six task recipes with real output](docs/recipes/): each has a prompt and the tool result.
+- Used it for something? Tell us in [Discussions](https://github.com/tlq5l/agentic-video/discussions).
+- Found a miss? [Open an issue](https://github.com/tlq5l/agentic-video/issues/new?template=report-a-miss.yml).
+
 **Install:** `brew install ffmpeg` on macOS, or `sudo apt-get install -y ffmpeg` on Debian or Ubuntu (see [Install](#install-macos-or-linux) for the uv line). Then add it to Claude Code with `claude mcp add -s user agentic-video -- uvx agentic-video` (or `pipx install agentic-video`). Other clients: [Run the MCP server](#run-the-mcp-server).
 
 **Claude Desktop (one click):** download `agentic-video-<version>.mcpb` from the latest [GitHub release](https://github.com/tlq5l/agentic-video/releases/latest) and double-click it. It still needs `brew install ffmpeg`. The first start takes about a minute while Claude Desktop installs the Python packages. macOS only. The bundle does not include local visual search or on-screen text counting; for those, use the git install in the "Optional: visual search (CLIP) and on-screen text" section below. Details: [docs/features/desktop-bundle.md](docs/features/desktop-bundle.md).

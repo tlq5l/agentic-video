@@ -1,0 +1,33 @@
+name: Report a miss
+description: A tool returned something wrong, or missed something that was in the video.
+title: "Miss: "
+body:
+  - type: input
+    id: tool
+    attributes:
+      label: Tool
+      description: The agentic-video tool you called, for example search_transcript, count_occurrences or review_video.
+      placeholder: search_transcript
+    validations:
+      required: true
+  - type: textarea
+    id: input
+    attributes:
+      label: Input
+      description: The call's arguments (JSON), and the video's length and codec. Share a short clip only if you are free to. Leave out private footage.
+    validations:
+      required: true
+  - type: textarea
+    id: returned
+    attributes:
+      label: What it returned
+      description: Paste the result, or the part that was wrong.
+    validations:
+      required: true
+  - type: textarea
+    id: right
+    attributes:
+      label: What was right
+      description: What the answer should have been, and how you checked it (a timecode you watched, a count you made by hand).
+    validations:
+      required: true
