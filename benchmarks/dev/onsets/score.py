@@ -28,6 +28,11 @@ quiet_beep and quiet_broadband (the same three settings on quiet clips: bursts
 at -50 to -30 dBFS, 20-30 dB over their bed). Every detection that is not a
 planted event counts as a false positive, beds included.
 
+``--set noloss --baseline-audio <file>`` runs a baseline detector (main's
+``src/media/audio.py``) and this tree's on the same clips and lists every planted
+start the baseline finds and this tree misses (see ``noloss.py``; ``--family``
+picks the clip families, so slices can run in parallel).
+
 Each run scores two settings: the gallery setting (``band_hz`` [1000, 4000],
 ``min_strength`` 0.36; primary) and the tool default (broadband, 0.12; guard).
 Prints ``METRIC onsets.<split>.<setting>_f1``, ``_precision``, ``_recall``,
@@ -250,15 +255,32 @@ def _rates(counts: Dict[str, int]) -> Dict[str, float]:
 
 def main(argv: Optional[Sequence[str]] = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("--split", choices=["climb", "heldout"], required=True)
-    parser.add_argument("--set", choices=["legacy", "real", "both"], default="both",
-                        help="legacy: the 60 original clips; real: the 120 real-world-like clips (realistic.py)")
+    parser.add_argument("--split", choices=["climb", "heldout"], help="required except with --set noloss")
+    parser.add_argument("--set", choices=["legacy", "real", "both", "noloss"], default="both",
+                        help="legacy: the 60 original clips; real: the 156 real-world-like clips (realistic.py); "
+                             "noloss: list planted starts --baseline-audio finds and this tree misses (noloss.py)")
+    parser.add_argument("--baseline-audio", default=None,
+                        help="--set noloss: the baseline's src/media/audio.py, e.g. from git show origin/main:src/media/audio.py")
+    parser.add_argument("--family", action="append", choices=["legacy", "real", "short", "pair", "ranged"],
+                        help="--set noloss: families to check (repeatable; default all)")
     parser.add_argument("--min-gap-sec", type=float, default=None, help="passed to audio_onsets only when given (legacy set)")
     parser.add_argument("--work", default=None, help="scratch folder for the generated WAVs (default: a new temp folder)")
     parser.add_argument("--breakdown", action="store_true", help="also print tp/fp/fn per sound kind and per bed (legacy set)")
     args = parser.parse_args(argv)
     work = Path(args.work) if args.work else Path(tempfile.mkdtemp(prefix="onsets-score-"))
     work.mkdir(parents=True, exist_ok=True)
+    if args.set == "noloss":
+        if not args.baseline_audio:
+            parser.error("--set noloss needs --baseline-audio")
+        import sys
+
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import noloss
+
+        noloss.run(Path(args.baseline_audio), args.family or ["legacy", "real", "short", "pair", "ranged"], work / "noloss")
+        return
+    if args.split is None:
+        parser.error("--split is required")
     timing_keys = ("timing_median_ms", "timing_p95_ms")
     if args.set in ("legacy", "both"):
         # The reported gallery setting (primary) and the tool's default broadband setting (guard).
