@@ -26,6 +26,7 @@ starts whenever both are timed within it.
 """
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import subprocess
 import sys
@@ -168,6 +169,11 @@ def export_ref(ref: str, dest: Path) -> Path:
     return dest
 
 
+def _digest(path: Path) -> str:
+    """Short hash of a detector file's bytes."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+
+
 def _load(path: Path, name: str) -> Any:
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
@@ -182,7 +188,10 @@ def run(baseline_audio: Path, families: List[str], work: Path) -> Dict[str, Any]
 
     baseline = _load(baseline_audio, "baseline_audio")
     work.mkdir(parents=True, exist_ok=True)
-    caches = {"baseline": MediaCache(work / "cache-baseline"), "current": MediaCache(work / "cache-current")}
+    # Detector results are cached per file; key each cache folder by the detector's own bytes so a reused --work
+    # never serves results from another baseline ref or another edit of this tree.
+    caches = {name: MediaCache(work / f"cache-{name}-{_digest(path)}")
+              for name, path in (("baseline", baseline_audio), ("current", Path(current.__file__)))}
     sources: Dict[str, Callable[[], Iterator[Item]]] = {
         "legacy": _legacy, "real": _real, "short": lambda: _generated("short"),
         "pair": lambda: _generated("pair"), "ranged": lambda: _generated("ranged")}
@@ -234,16 +243,24 @@ def run(baseline_audio: Path, families: List[str], work: Path) -> Dict[str, Any]
 
 
 def _matched(truth: List[float], detected: List[float], tolerance: float) -> set:
-    """Indexes of truth events matched one-to-one (closest pairs first), as score.match_errors does."""
-    pairs = sorted((abs(hit - target), t, d) for t, target in enumerate(truth) for d, hit in enumerate(detected)
-                   if abs(hit - target) <= tolerance)
-    used_truth: set = set()
-    used_hits: set = set()
-    for _, t, d in pairs:
-        if t not in used_truth and d not in used_hits:
-            used_truth.add(t)
-            used_hits.add(d)
-    return used_truth
+    """Indexes of truth events in a maximum one-to-one matching within tolerance.
+
+    Greedy closest-pair matching can take a hit that a second event also needs and
+    count fewer matches than exist, which would hide a loss. Augmenting paths find the maximum.
+    """
+    options = [[d for d, hit in enumerate(detected) if abs(hit - target) <= tolerance] for target in truth]
+    owner: Dict[int, int] = {}
+
+    def assign(t: int, seen: set) -> bool:
+        for d in options[t]:
+            if d not in seen:
+                seen.add(d)
+                if d not in owner or assign(owner[d], seen):
+                    owner[d] = t
+                    return True
+        return False
+
+    return {t for t in range(len(truth)) if assign(t, set())}
 
 
 def _nearest(times: List[float], target: float) -> str:
