@@ -1,5 +1,5 @@
 """Guards audio_onsets through handle_call: loud 1 kHz beeps over speech-like babble at band [900, 1100] and 0.7,
-and clips shorter than one analysis window."""
+quiet starts over a steady noise bed, and clips shorter than one analysis window."""
 import wave
 
 import numpy as np
@@ -62,6 +62,37 @@ def test_beeps_over_babble_are_found_once_each_at_their_start(monkeypatch, tmp_p
     assert len(times) == len(BEEPS), times
     assert all(abs(hit - start) <= 0.03 for hit, start in zip(times, BEEPS)), times
     assert all(0.7 <= onset["strength"] <= 1.0 for onset in result["data"]["onsets"])
+
+
+QUIET_STARTS = [0.5 + 0.5 * index for index in range(8)]
+
+
+@pytest.mark.parametrize("kind, arguments", [
+    ("beep", {}),  # 100 ms 1 kHz sines at -44 dBFS RMS over white noise at -69 dBFS, default min_strength
+    ("click", {"band_hz": [1000, 4000], "min_strength": 0.36}),  # 15 ms 1 kHz squares at -40 dBFS over noise at -65
+])
+def test_quiet_starts_over_a_steady_bed_are_each_found(monkeypatch, tmp_path, kind, arguments):
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    rng = np.random.default_rng(11)
+    event_db = -44.0 if kind == "beep" else -40.0
+    signal = rng.standard_normal(5 * RATE) * 10 ** ((event_db - 25.0) / 20)
+    local = np.arange(int((0.1 if kind == "beep" else 0.015) * RATE)) / RATE
+    if kind == "beep":
+        event = np.sqrt(2) * 10 ** (event_db / 20) * np.sin(2 * np.pi * 1000 * local)
+    else:
+        event = 10 ** (event_db / 20) * np.sign(np.sin(2 * np.pi * 1000 * local + 1e-9))
+    for start in QUIET_STARTS:
+        first = int(start * RATE)
+        signal[first:first + len(event)] += event
+    source = _write_wav(tmp_path / f"quiet-{kind}s.wav", signal)
+
+    result = handle_call("audio_onsets", {"source": source, **arguments})
+
+    assert result["ok"] is True, result
+    times = [onset["time_sec"] for onset in result["data"]["onsets"]]
+    # Each start is found once, within 30 ms, and the steady noise between them never fires.
+    assert len(times) == len(QUIET_STARTS), times
+    assert all(abs(hit - start) <= 0.03 for hit, start in zip(times, QUIET_STARTS)), times
 
 
 @pytest.mark.parametrize("band_hz", [None, [900, 1100], [1000, 4000]])

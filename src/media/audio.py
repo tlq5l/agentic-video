@@ -47,6 +47,17 @@ ONSET_GATE_LEVEL_DB = (-50.0, -35.0)  # in-band mean-square level (dBFS) that op
 ONSET_RISE_DB = (4.0, 16.0)  # in-band rise over which the level-rise term grows from 0 to 1
 ONSET_RISE_LEVEL_DB = (-30.0, -15.0)  # in-band level over which the level-rise term grows from 0 to 1
 ONSET_ENTRY_RISE_DB = 3.0  # level rise that marks where an onset entered the analysis window
+# Steady-bed term: a start over a steady background (noise floor, hum, room tone) scores by how far it rises over it.
+ONSET_BED_SEC = 2.0  # span before a start over which its bed's level and steadiness are measured
+ONSET_BED_BLOCK_SEC = 0.1  # the bed's level is averaged (in dB) over blocks this long
+ONSET_BED_MIN_SEC = 0.3  # shortest clip with a steady bed
+ONSET_BED_FLOOR_DB = (-115.0, -110.0)  # bed level (dBFS) under which it is digital silence, not a steady bed
+ONSET_BED_PERCENTILES = (20.0, 40.0, 60.0)  # low, bed and high percentiles of the block levels
+ONSET_STEADY_SPREAD_DB = (8.0, 12.0)  # high minus low percentile over which a bed stops counting as steady
+ONSET_STEADY_RISE_DB = (8.0, 16.0)  # in-band rise over which the steady-bed term grows
+ONSET_STEADY_CONTRAST_DB = (12.0, 18.0)  # in-band level over the bed over which the steady-bed term grows
+ONSET_STEADY_LASTING_HOPS = (0.5, 1.5)  # hops beyond half a window a start stays within 6 dB of its peak
+ONSET_FLOOR_DB = (-75.0, -70.0)  # in-band level (dBFS) under which the steady-bed term never scores: near-silence
 BANDS: Tuple[Tuple[str, float, float], ...] = (
     ("sub", 0.0, 120.0),
     ("low_mid", 120.0, 500.0),
@@ -385,18 +396,58 @@ def _ramp(values: np.ndarray, low: float, high: float) -> np.ndarray:
     return np.clip((values - low) / (high - low), 0.0, 1.0)
 
 
+def _steady_bed(level_db: np.ndarray, lag: int) -> Tuple[np.ndarray, np.ndarray]:
+    """Per frame, (bed level in dB, steadiness 0..1) of the ONSET_BED_SEC before the frame's window.
+
+    Levels are averaged over ONSET_BED_BLOCK_SEC blocks; only whole blocks that
+    end before the window (frame `lag` back) count, except in the clip's first
+    ONSET_BED_SEC, which all use that first span. The bed is the middle
+    percentile of the block levels; steadiness falls from 1 to 0 as their
+    spread (high minus low percentile) grows over ONSET_STEADY_SPREAD_DB, and
+    is 0 over digital silence (ONSET_BED_FLOOR_DB). Speech swings far between
+    syllables and pauses, so it is not steady; noise floors, hum, room tone and
+    a dense crowd roar are. A clip shorter than ONSET_BED_MIN_SEC has no steady bed.
+    """
+    count = len(level_db)
+    frames_per_sec = SAMPLE_RATE / HOP_SAMPLES
+    block = max(1, int(round(ONSET_BED_BLOCK_SEC * frames_per_sec)))
+    blocks = -(-count // block)
+    if blocks < int(round(ONSET_BED_MIN_SEC * frames_per_sec / block)):
+        return np.zeros(count), np.zeros(count)
+    padded = np.concatenate([level_db, np.full(blocks * block - count, level_db[-1])])
+    means = padded.reshape(blocks, block).mean(axis=1)
+    width = max(1, int(round(ONSET_BED_SEC * frames_per_sec / block)))
+    first = np.percentile(means[:width], ONSET_BED_PERCENTILES)[:, None]
+    stats = np.repeat(first, min(width, blocks), axis=1)
+    if blocks > width:
+        # Row i of the sliding view holds blocks i .. i + width - 1, the bed of block i + width.
+        trailing = np.lib.stride_tricks.sliding_window_view(means, width)[:blocks - width]
+        stats = np.concatenate([stats, np.percentile(trailing, ONSET_BED_PERCENTILES, axis=1)], axis=1)
+    low, bed, high = stats
+    steady = (1.0 - _ramp(high - low, *ONSET_STEADY_SPREAD_DB)) * _ramp(bed, *ONSET_BED_FLOOR_DB)
+    index = np.clip((np.arange(count) - lag) // block, 0, blocks - 1)
+    return bed[index], steady[index]
+
+
 def _onset_strength(flux: np.ndarray, level_db: np.ndarray, lag: int) -> np.ndarray:
     """Onset strength per frame (0..1).
 
     rise = level now minus level `lag` frames (one window) back, so a fade or a
-    tone's end never rises. strength = max(flux * gate, rise_term):
+    tone's end never rises. strength = max(flux * gate, rise_term, steady_term):
     - gate (0..1) needs a rise of ONSET_GATE_RISE_DB to an in-band level of
       ONSET_GATE_LEVEL_DB, so a bed's level-free shape jitter and very quiet
       sounds cannot fire. It looks half a window ahead, because the flux peaks
       as a start enters the window, before the level has risen;
     - rise_term (0..1) grows with the rise (ONSET_RISE_DB) and with the level
       reached (ONSET_RISE_LEVEL_DB), so a loud tone over a busy bed, whose start
-      barely changes the normalized shape of a few bins, still scores high.
+      barely changes the normalized shape of a few bins, still scores high;
+    - steady_term (0..1) finds quiet starts over a steady bed (_steady_bed): it
+      grows with the rise (ONSET_STEADY_RISE_DB) and the level over the bed
+      (ONSET_STEADY_CONTRAST_DB), needs a level above near-silence
+      (ONSET_FLOOR_DB), and needs the start to last: it stays within 6 dB of its
+      peak for ONSET_STEADY_LASTING_HOPS hops beyond half a window, so key clicks
+      and the switch-on tick of an out-of-band tone do not fire. Over speech
+      the bed is not steady, so only the absolute-level terms apply.
     """
     reference = np.full_like(level_db, level_db[0])
     if len(level_db) > lag:  # a clip shorter than one window has nothing a window back
@@ -409,8 +460,13 @@ def _onset_strength(flux: np.ndarray, level_db: np.ndarray, lag: int) -> np.ndar
     level_ahead = np.lib.stride_tricks.sliding_window_view(padded, ahead).max(axis=1)
     gate = _ramp(rise_ahead, *ONSET_GATE_RISE_DB) * _ramp(level_ahead, *ONSET_GATE_LEVEL_DB)
     rise_term = _ramp(rise, *ONSET_RISE_DB) * _ramp(level_db, *ONSET_RISE_LEVEL_DB)
-    gated_flux = flux * gate
-    return np.maximum(gated_flux, rise_term).astype(np.float32)
+    bed_db, steady = _steady_bed(level_db, lag)
+    around = np.concatenate([np.full(lag, level_db[0]), level_db, np.full(lag, level_db[-1])])
+    spans = np.lib.stride_tricks.sliding_window_view(around, 2 * lag + 1)
+    lasting = np.count_nonzero(spans >= spans.max(axis=1, keepdims=True) - 6.0, axis=1) - lag / 2.0
+    steady_term = (steady * _ramp(rise, *ONSET_STEADY_RISE_DB) * _ramp(level_db - bed_db, *ONSET_STEADY_CONTRAST_DB)
+                   * _ramp(level_db, *ONSET_FLOOR_DB) * _ramp(lasting, *ONSET_STEADY_LASTING_HOPS))
+    return np.maximum.reduce([flux * gate, rise_term, steady_term]).astype(np.float32)
 
 
 def _span_chunks(starts: np.ndarray, ends: np.ndarray, rows: int = 512) -> List[Tuple[int, np.ndarray]]:
@@ -609,7 +665,7 @@ def audio_onsets(
         "min_strength": threshold, "band_hz": band,
         "min_gap_sec": gap, "compare_fingerprint": compare_fingerprint,
     }
-    result_key = _cache_tag("audio_onsets_v12", options)
+    result_key = _cache_tag("audio_onsets_v13", options)
     cached = cache.load_json(fingerprint, result_key)
     if isinstance(cached, dict):
         return cached
