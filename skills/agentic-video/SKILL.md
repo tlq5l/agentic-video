@@ -15,7 +15,7 @@ Pass each tool an absolute local path or a video URL as `source`. Start with `re
 - **When does something appear on screen**: `build_visual_index` (repeat until complete), then `search_visual`. Example: `{"source": "/abs/path/clip.mp4", "query": "red car"}`. It cannot find words or numbers.
 - **How many times something appears**: `count_occurrences`. Example: `{"source": "/abs/path/clip.mp4", "text": "RELEASE"}` for on-screen text, or pass `description` for an object.
 - **Where the cuts are**: `detect_cuts`. Example: `{"source": "/abs/path/clip.mp4", "threshold": 0.25}`.
-- **Check a moment closely**: `inspect_window` for dense frames of a short span, with `read_text: true` to read on-screen text. Example: `{"source": "/abs/path/clip.mp4", "start_sec": 12, "end_sec": 15, "fps": 4}`. `frame_at` gives one full-size frame, with `crop` and `scale` to read small text.
+- **Check a moment closely**: `inspect_window` for dense frames of a short span, with `read_text: true` to read on-screen text (macOS only; the call fails on Linux or Windows, so leave it out there). Example: `{"source": "/abs/path/clip.mp4", "start_sec": 12, "end_sec": 15, "fps": 4}`. `frame_at` gives one full-size frame, with `crop` and `scale` to read small text.
 - **Sound**: `audio_onsets` for hits and claps, `loudness_timeline` for loudness over time, `spectrogram_window` for one sound. Example: `{"source": "/abs/path/clip.mp4", "start_sec": 0, "end_sec": 30}`.
 - **Audio and picture sync**: `sync_check`. Example: `{"source": "/abs/path/clip.mp4"}`. It needs an audio track.
 
