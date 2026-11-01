@@ -609,7 +609,7 @@ def audio_onsets(
         "min_strength": threshold, "band_hz": band,
         "min_gap_sec": gap, "compare_fingerprint": compare_fingerprint,
     }
-    result_key = _cache_tag("audio_onsets_v10", options)
+    result_key = _cache_tag("audio_onsets_v11", options)
     cached = cache.load_json(fingerprint, result_key)
     if isinstance(cached, dict):
         return cached

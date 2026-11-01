@@ -16,4 +16,4 @@ Gotchas:
 - The default comes from the original 60-clip climb set, measured with the v9 detector: 0.04 s lost one recall hit on the broadband setting and 0.05 s lost recall on both settings.
 - Onsets are timed where the start entered the analysis window (the first frame 3 dB over the level just before), so a decaying click no longer shows a second onset about 40 ms later. Two real attacks closer than the window (a flam) still show as two; `min_gap_sec` about 0.05 merges them.
 - `sync_check` and its internal cue-analysis calls (`_cue_onset_candidates`, `_simple_dominant_band_check`) pass `min_gap_sec=0`, so their results do not change. The standalone checker (`check_video` in `src/loop.py`) calls `audio_onsets` with the default, so its onset list and strongest-onset summary can change.
-- The result cache key is versioned (`audio_onsets_v10`) and holds the exact start, end, `min_strength` and `min_gap_sec`, not rounded copies; bump the version when the output changes.
+- The result cache key is versioned (`audio_onsets_v11`) and holds the exact start, end, `min_strength` and `min_gap_sec`, not rounded copies; bump the version when the output changes.
