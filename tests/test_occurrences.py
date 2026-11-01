@@ -50,10 +50,10 @@ def live(t, *windows):
     return any(a <= t < b for a, b in windows)
 
 
-def make_clip(path, seconds, paint):
-    """Render frames with Pillow and encode them like an ordinary lossy video."""
+def make_clip(path, seconds, paint, crf="20"):
+    """Render frames with Pillow and encode them like an ordinary lossy video (crf 0 is lossless)."""
     proc = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}",
-                             "-r", str(FPS), "-i", "-", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "20",
+                             "-r", str(FPS), "-i", "-", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", crf,
                              "-preset", "ultrafast", "-threads", "1", str(path)], stdin=subprocess.PIPE)
     for i in range(int(seconds * FPS)):
         image = Image.new("RGB", (W, H), (30, 30, 40))
@@ -487,3 +487,50 @@ def test_batched_clip_judging_matches_one_frame_at_a_time():
     assert not occurrence.FrameJudge("purple diamond", None, False).batchable
     assert not occurrence.FrameJudge("a person waving", "claude", False).batchable
     assert not occurrence.FrameJudge("a red thing", None, False).batchable
+
+
+@needs_ffmpeg
+def test_direction_narrows_the_count_through_the_mcp_tool(tmp_path, monkeypatch):
+    """Guards count_occurrences(direction=...): through handle_call on a real clip, only that direction is counted, a
+    span too brief to show motion is counted under any direction and verify says so, and without direction it reads
+    stationary as on main."""
+    from src.core.config import Config
+    from src.executor import mcp_server
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+
+    def crossings(d, t):  # two left-to-right passes and one right-to-left pass of one green diamond, then a blink
+        for start, (x0, x1) in ((0.5, (-20, W + 20)), (4.0, (-20, W + 20)), (7.5, (W + 20, -20))):
+            if start <= t < start + 1.5:
+                shape(d, "diamond", x0 + (x1 - x0) * (t - start) / 1.5, 100, 14, GREEN)
+        if 9.25 <= t < 9.55:  # three clip frames around the 9.4 s sample only: a span of one sample at the default 5 fps
+            shape(d, "diamond", W / 2, 140, 14, GREEN)
+
+    clip = make_clip(tmp_path / "crossings.mp4", 10, crossings, crf="0")
+
+    def call(**args):
+        for _ in range(600):
+            data = mcp_server.handle_call("count_occurrences", {"source": str(clip), "description": "green diamond", **args})["data"]
+            if data["status"] != "in_progress":
+                return data
+            time.sleep(0.5)
+        raise AssertionError("count_occurrences did not finish")
+
+    everything = call()
+    assert everything["count"] == 4 and everything["travel_counts"] == {"left_to_right": 2, "right_to_left": 1}
+    assert [span["travel"] for span in everything["spans"]] == ["left_to_right", "left_to_right", "right_to_left", "stationary"]
+    assert "count includes every direction" in everything["note"] and "unknown" not in everything["verify"]
+    passes = call(direction="left_to_right")
+    assert passes["count"] == 3 and passes["spans_returned"] == 3
+    assert [span["travel"] for span in passes["spans"]] == ["left_to_right", "left_to_right", "unknown"]
+    assert passes["travel_counts"] == {"left_to_right": 2, "right_to_left": 1}
+    assert "and 1 too brief to show any direction" in passes["note"]
+    assert "1 moved another way and 0 stayed still" in passes["note"]
+    assert "count includes every direction" not in passes["note"]
+    back = call(direction="right_to_left")
+    assert back["count"] == 2 and [span["travel"] for span in back["spans"]] == ["right_to_left", "unknown"]
+    down = call(direction="top_to_bottom")  # nothing moves down; only the brief span is counted
+    assert down["count"] == 1 and [span["travel"] for span in down["spans"]] == ["unknown"]
+    assert "plus any span with travel unknown" in down["verify"] and "too brief to show motion" in down["verify"]
+    assert "holds only" not in down["verify"]
+    with pytest.raises(ValueError, match="argument 'direction'"):
+        mcp_server.handle_call("count_occurrences", {"source": str(clip), "description": "green diamond", "direction": "up"})

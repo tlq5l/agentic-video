@@ -389,10 +389,12 @@ export interface CountOccurrencesInput {
   end_sec?: number | string | null;
   /** Sampling rate (default 5, maximum 15; larger values are clamped and the result says so); lowered automatically on long windows. */
   fps?: number;
-  /** Absence of at least this long starts a new span (default 0.3). A larger value JOINS separate appearances whose gap is shorter than it; the result then sets gaps_merged and count_without_merges. Also accepts a timecode string in MM:SS.mmm form. */
+  /** Absence of at least this long starts a new span (default 0.3). A larger value JOINS separate appearances whose gap is shorter than it; the result then sets gaps_merged, and count_without_merges too when no direction is passed. Also accepts a timecode string in MM:SS.mmm form. */
   min_gap_sec?: number | string;
   /** Maximum spans listed (default 20, maximum 100; larger values are clamped and the result says so); count always includes omitted spans. */
   max_spans?: number;
+  /** Count the appearances moving this way across the frame (estimated from first and last positions; verify the spans). Spans under three samples are too brief to show motion and are counted under any direction (travel "unknown"; check them); default "any" counts every appearance. */
+  direction?: "any" | "left_to_right" | "right_to_left" | "top_to_bottom" | "bottom_to_top";
 }
 
 export interface OccurrenceSpan {
@@ -406,8 +408,8 @@ export interface OccurrenceSpan {
   frame_badge?: string;
   /** Normalized box of the match at representative_sec. */
   region?: { x: number; y: number; w: number; h: number };
-  /** Estimated net motion of the match from its first and last positions in the span, not a verified crossing. Verify directional questions visually. */
-  travel?: "stationary" | "left_to_right" | "right_to_left" | "top_to_bottom" | "bottom_to_top";
+  /** Estimated net motion of the match from its first and last positions in the span, not a verified crossing. unknown (only when direction was passed): the span has under three samples, too brief to show motion, and is counted under any direction; without direction such a span reads stationary. Verify directional questions visually. */
+  travel?: "stationary" | "left_to_right" | "right_to_left" | "top_to_bottom" | "bottom_to_top" | "unknown";
   /** True for a single detection, a span shorter than 0.5 s, or a score below 75% of the median span score. Still counted; its tile label ends in *. */
   weak?: boolean;
 }
@@ -422,7 +424,7 @@ export interface CountOccurrencesOutput {
   status: "in_progress" | "complete" | "error";
   retry_after_seconds?: number;
   message?: string;
-  /** Number of separate appearances; null when `capped` is true. */
+  /** Number of separate appearances; with `direction`, those travelling that way plus spans too brief to show motion (travel "unknown"), which count under any direction. null when `capped` is true. */
   count?: number | null;
   /** True when 100 or more spans matched: the description is too broad and count is null. Do not report a number. */
   capped?: boolean;
@@ -430,9 +432,9 @@ export interface CountOccurrencesOutput {
   spans_found?: number;
   /** Appearance pairs joined because min_gap_sec is above the default 0.3; only set when it joined some. */
   gaps_merged?: number;
-  /** The count if the joined pairs were kept apart. */
+  /** The count if the joined pairs were kept apart; set only when no direction was passed. */
   count_without_merges?: number;
-  /** Net motion of appearances across the frame, by direction; only set when some move. Each value is an estimate from a span's first and last positions, not a verified crossing or direction count. The count includes every direction; directional counting is unsupported, so verify any directional answer visually before reporting it. */
+  /** Net motion of moving appearances across the frame, by direction; only set when some move. Each value is an estimate from a span's first and last positions, not a verified crossing or direction count. Without `direction`, the count includes every direction; for a directional question, pass `direction` and verify its spans visually before reporting it. With `direction`, this lists every moving appearance, including the ones the count keeps; stationary and unknown ones are not listed (the note says how many stayed still or were too brief to show a direction). */
   travel_counts?: Record<string, number>;
   spans?: OccurrenceSpan[];
   spans_returned?: number;
