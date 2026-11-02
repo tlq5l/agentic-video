@@ -21,7 +21,8 @@ from src.media.audio import (audio_onsets, clipping_runs, loudness_timeline, spe
                              sync_check)
 from src.media.contact_sheet import build_contact_sheet
 from src.media.probe import probe_video
-from src.media.visual_timing import blank_flashes, frame_cadence, frame_splices, frozen_pictures, text_cue_timing, text_overflow
+from src.media.visual_timing import (black_ranges, blank_flashes, frame_cadence, frame_splices, frozen_pictures,
+                                     text_cue_timing, text_overflow)
 from src.jev import decide as jev_decide
 from src.jev import scrub as scrub_jev
 
@@ -1002,6 +1003,86 @@ def _copy_evidence(
         item["evidence"] = evidence
 
 
+_CUT_NEIGHBOURHOOD_SEC = 0.1  # a black, flash or frozen picture this close to a cut is marked intended?
+
+
+def _loudness_summary(video: Path) -> Dict[str, Any]:
+    """Integrated loudness (LUFS) and true peak (dBTP) of the first audio stream, from FFmpeg's EBU R128 filter."""
+    proc = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-nostats", "-i", str(video), "-map", "0:a:0",
+         "-af", "ebur128=peak=true", "-f", "null", "-"],
+        capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError("ffmpeg loudness scan failed")
+    summary = proc.stderr.rsplit("Summary:", 1)[-1]
+    integrated = re.search(r"I:\s+(-?[\d.]+) LUFS", summary)
+    peak = re.search(r"True peak:\s+Peak:\s+(-?[\d.]+) dBFS", summary)
+    if not integrated or not peak:
+        raise RuntimeError("ebur128 summary has no integrated loudness or true peak")
+    return {"integrated_lufs": float(integrated.group(1)), "true_peak_dbtp": float(peak.group(1))}
+
+
+def _checked_section(meta: Any, cut_times: Sequence[float], black: Sequence[Mapping[str, Any]],
+                     visual: Mapping[str, Any], silence: Sequence[Mapping[str, Any]],
+                     loudness: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
+    """What the check looked at, with numbers, so an empty problem list still says what ran."""
+    def intended(*points: float) -> bool:
+        return any(abs(point - cut) <= _CUT_NEIGHBOURHOOD_SEC for point in points for cut in cut_times)
+
+    def span(item: Mapping[str, Any]) -> Dict[str, Any]:
+        return {"start_sec": item["start_sec"], "end_sec": item["end_sec"],
+                "intended": intended(item["start_sec"], item["end_sec"])}
+
+    flashes = [dict(span(item), kind="blank_flash") for item in visual.get("flashes", [])]
+    flashes += [dict(span(item), kind="flash_frame") for item in visual.get("frame_splices", [])]
+    return {
+        "duration_sec": meta.duration_sec,
+        "resolution": "{}x{}".format(meta.width, meta.height),
+        "fps": round(float(meta.fps), 3),
+        "has_audio": bool(meta.has_audio),
+        "loudness": loudness,
+        "cuts": [{"time_sec": round(float(time), 3)} for time in cut_times],
+        "black_frames": [span(item) for item in black],
+        "flash_frames": flashes,
+        "frozen_frames": [span(item) for item in visual.get("frozen_pictures", [])],
+        "silence_gaps": [{"start_sec": item["start_sec"], "end_sec": item["end_sec"]} for item in silence],
+        "errored_checks": sorted(key for key in visual if key.endswith("_error")),
+    }
+
+
+def _checked_lines(checked: Mapping[str, Any]) -> List[str]:
+    def times(items: Sequence[Mapping[str, Any]]) -> str:
+        return ", ".join("{:.3f}–{:.3f} s{}".format(item["start_sec"], item["end_sec"],
+                                                    " (intended?)" if item["intended"] else "")
+                         for item in items) or "none"
+    loudness = checked.get("loudness")
+    if not checked.get("has_audio"):
+        loudness_line = "no audio stream"
+    elif loudness and "error" in loudness:
+        loudness_line = "not measured ({})".format(loudness["error"])
+    elif loudness:
+        loudness_line = "{:.1f} LUFS integrated, true peak {:.1f} dBTP".format(
+            loudness["integrated_lufs"], loudness["true_peak_dbtp"])
+    else:
+        loudness_line = "not measured"
+    cuts = checked.get("cuts", [])
+    errored = checked.get("errored_checks", [])
+    return [
+        "- Duration: {:.3f} s; resolution {} at {} fps.".format(
+            checked["duration_sec"], checked["resolution"], checked["fps"]),
+        "- Loudness: {}.".format(loudness_line),
+        "- Cuts ({}): {}.".format(len(cuts), ", ".join("{:.3f} s".format(c["time_sec"]) for c in cuts) or "none"),
+        "- Black frames: {}.".format(times(checked.get("black_frames", []))),
+        "- Flash frames: {}.".format(
+            ", ".join("{} {}".format(item["kind"], times([item])) for item in checked.get("flash_frames", [])) or "none"),
+        "- Frozen frames: {}.".format(times(checked.get("frozen_frames", []))),
+        "- Silence gaps: {}.".format(", ".join("{:.3f}–{:.3f} s".format(g["start_sec"], g["end_sec"])
+                                               for g in checked.get("silence_gaps", [])) or "none"),
+        "- Errored checks: {}.".format(", ".join(errored) if errored else "none"),
+    ]
+
+
 def _markdown_report(report: Mapping[str, Any]) -> str:
     candidates = list(report.get("candidates", []))
     confirmed = [item for item in candidates if item.get("confirmed")]
@@ -1019,6 +1100,9 @@ def _markdown_report(report: Mapping[str, Any]) -> str:
         lines.extend(["", "Jev agreement with rules: **{}/{} ({:.1f}%)**".format(
             agreement["agreed"], agreement["total"], 100.0 * agreement["rate"],
         )])
+    if report.get("checked"):
+        lines.extend(["", "## Checked", ""])
+        lines.extend(_checked_lines(report["checked"]))
     if not candidates:
         lines.extend(["", "No candidate problems found."])
         return "\n".join(lines) + "\n"
@@ -1167,6 +1251,21 @@ def check_video(
     except Exception as exc:
         visual["frozen_picture_error"] = scrub_jev(exc)[:300]
 
+    black = []
+    try:
+        black = black_ranges(str(video), cache=cache)["ranges"]
+    except Exception as exc:
+        visual["black_error"] = scrub_jev(exc)[:300]
+    loudness_info = None
+    if meta.has_audio:
+        try:
+            loudness_info = _loudness_summary(video)
+        except Exception as exc:
+            visual["loudness_error"] = scrub_jev(exc)[:300]
+            loudness_info = {"error": visual["loudness_error"]}
+    checked = _checked_section(meta, [cut["time_sec"] for cut in sync.get("cuts", [])], black, visual,
+                               loudness.get("silence_gaps", []), loudness_info)
+
     candidates = _build_candidates(sync, loudness, onsets, cues, intent=intent, balance=balance, visual=visual,
                                    clipping=clipping)
     _copy_evidence(candidates, video, meta.duration_sec, meta.has_audio, output / "evidence", cache)
@@ -1181,6 +1280,7 @@ def check_video(
         "judge": judge,
         "judge_notice": judge_notice,
         "judge_agreement": agreement,
+        "checked": checked,
         "candidates": candidates,
     }
     _archive_existing(output / "report.json")
