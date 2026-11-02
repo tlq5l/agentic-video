@@ -1093,7 +1093,8 @@ def _checked_lines(checked: Mapping[str, Any]) -> List[str]:
                                                for g in checked.get("silence_gaps", [])) or "none"),
         "- Errored checks: {}.".format(", ".join(errored) if errored else "none"),
     ] + ([
-        "- Sound files matched: {} of {} cues.".format(checked["sound_files"]["matched"], checked["sound_files"]["cues"]),
+        "- Sound files matched: {} of {} cues.".format(checked["sound_files"]["matched"], checked["sound_files"]["cues"])
+        + (" ({} unreadable)".format(checked["sound_files"]["errors"]) if checked["sound_files"].get("errors") else ""),
     ] if "sound_files" in checked else [])
 
 
@@ -1292,6 +1293,7 @@ def check_video(
         checked["sound_files"] = {
             "cues": sum(1 for cue in cues if cue.get("sound_file")),
             "matched": sum(1 for cue in sync.get("cues", []) if (cue.get("sound_file") or {}).get("present")),
+            "errors": sum(1 for cue in sync.get("cues", []) if (cue.get("sound_file") or {}).get("error")),
         }
 
     candidates = _build_candidates(sync, loudness, onsets, cues, intent=intent, balance=balance, visual=visual,

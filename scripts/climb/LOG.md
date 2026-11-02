@@ -216,7 +216,7 @@ Decisions:
 - D2: matching uses the mix decoded at 48 kHz mono (_decode_pcm) and FFT cross-correlation over starts within search_window_ms (500 ms) of the cue.
 - D3: a cue's file verdict replaces its mix verdict: absent gives missing (cue_missing); present with |lag| over tolerance gives early or late; else ok. Applied after shared-displacement attribution, before the uncued-sound check.
 - D4: the Checked line "Sound files matched: N of M cues." appears only when a cue carries sound_file; M counts those cues, N counts those whose file is present.
-- D5: candidate numbers gain a sound_file entry only for file cues; the report holds gain, correlation and lag_ms per cue.
+- D5: the sync cue report (sync.cues[].sound_file) gains an entry only for file cues: path, present, gain, correlation and lag_ms, or path, present false and error when the file cannot be read. Candidates do not carry it.
 - D6: bench sound files are the generator's signal argument before pan and level, mixed to mono by the channel mean, written as float32 so peaks above 1.0 survive.
 - D7: a one-off cue maps to a placement only when exactly one call lies within 0.02 s and names it, with the pick_case skip-word rule; the map is built from the pristine cues.
 - D8: score --split dev added so tuning never computes held-out rows; held-out ran once, at the end.
@@ -225,3 +225,13 @@ Decisions:
 - D11: left as is: the twin rule in the scorer and the author-note rule in the checker (owner rules, not changed here).
 - Checks: ruff clean; pytest -k subset 138 passed, 1 skipped; score.py vs trim dev 12, held_out 12, floor 0 (COMPARE +0 +0 +0).
 - Spend: one Haiku worker run for this climb; token count not reported to the worker.
+
+## Sound-file climb, review round 2 fixes (2026-11-02)
+
+- Sol review 1 of 782c6b5 failed on two points; fixed:
+  1. A cue whose sound_file is missing or unreadable gets `sound_file: {path, present: false, error}` in the sync report and keeps its mix verdict; other cues are still checked; the Checked line adds "(N unreadable)". Before, `loop check` exited 2 with no report.
+  2. The best start is chosen among starts passing BOTH thresholds (gain >= 0.08, correlation >= 0.10), ranked by gain; with none passing, the highest-correlation start is reported. Before, noise with gain 0.32 and correlation 0.05 could beat the real sound and give a false cue_missing.
+- Advice applied: missing_bench.py no longer overwrites the requested split in the score file; D5 above now names the sync cue report (sync.cues[].sound_file), not candidates.
+- Thresholds not re-tuned: the fix changes only which start is picked, and dev moved the right way with t2 unchanged.
+- Results (run on a Cloudflare box; media copied once, about 260 MB, upload ~70 s): dev 12/19 caught, FA 2 (was FA 6; score 8, was 0). Held-out run once: 8/8 caught, FA 1 (was FA 2). score.py: dev 12, held_out 12, floor 0.
+- D12 (author-note sections): the 3 dev misses inside author-note sections (newtest5 13.3, 18.7; newtest6 17.1) stay unreported. The author's note says that section is deliberate, and the existing note rule is an owner rule; a sound-file verdict does not override it.
