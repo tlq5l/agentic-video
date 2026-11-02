@@ -136,3 +136,19 @@ Row 2 is the baseline the checker climb is measured against (score.py --label v2
 
 - Gain: 8 to 13 of 19 Song-round joins now listed (plus the scene-score cuts), 0 false cuts on the four clips.
 - Still missed: 6 joins (1-clean 4.6, 6.833, 9.0, 11.3, 18.3; 3-ally-down 11.3). These are weak cuts (ratio under 5).
+
+## Missing-sound bench (2026-11-02)
+
+- Scored check for the next climb step: `scripts/climb/missing_bench.py` (subcommands `trace`, `build`, `score`; `pick` writes the removals and a hidden `_render` runs one render per process). Removals are in `scripts/climb/missing_bench.json`: 19 dev variants and 8 held-out variants over the 10 cases.
+- Baseline (checker as committed on this branch, label `baseline`): dev caught 4, strict 3, FA 6, score -8; held-out caught 3, strict 2, FA 2, score -1. Per-variant results: `.climb-tmp/missing/score/baseline.json`.
+- Caught kinds: `cue_missing`, `cue_early`, `cue_late` (the cue kinds `src/loop.py` emits). Strict: `cue_missing` only. `cue_ambiguous` is left out (review item, not a verdict). `cue_mismatch` and `cue_weak` do not exist in the checker, so they are not in the set.
+- FA: any confirmed candidate in the variant with no same-kind twin within 0.5 s in the baseline. Literal, so a removal that makes the checker flip another real fault counts as FA. Seen: newtest2 (cue_missing at 4.36 and 22.91) and newtest5 (uncued_sound at 11.01). These are cross effects of the removal, reported as they are.
+- Placement times are seconds in all ten generators (none takes samples). Time parameter: `start_sec` (newtest, newtest7), `time_sec` (newtest2-4), `t0` (newtest5, newtest10), `start` (newtest6, newtest8), `t` (newtest9).
+- Sound identity: the sound makers named on the placement line (a local holding a sound-maker function resolves to that function's name); if none, the caller's sound-name strings (loop variables such as `name = "stamp"`). Logged per call in `.climb-tmp/missing/<case>/trace.json`.
+- Pick rules: one cue within 0.02 s whose label shares a word (4-letter prefix) with the sound; no skip word in the label or in the call's sound names; no other call at that time for the same sound; no answer-key fault within 0.5 s; one removal per sound type per case; removals at least 1 s apart, spread over the case.
+- Skip words: the brief's list, plus `ostinato`, `arpeggio`, `tom`, `drum`, `beat`, `loop`, `thump`, `sub` (patterns and drums; when unsure, skip). Matching is substring, as the brief words it.
+- Shortfalls (wanted 4 dev / 2 held-out): newtest found 3, newtest2 2, newtest3 2. The rest met their count. No removal was dropped as a no-op.
+- Sanity: the wrapped no-skip render is byte-identical to the unwrapped generator for all 10 cases, and every variant render differs from its baseline.
+- Muxing: pristine `out.mp4` video with the variant wav (AAC 192 kbps, 48 kHz stereo); `cues.json` and `INTENT.md` copied beside each video. Pristine folders were only read.
+- Checker runs go through `score.run_check` and `score.TOL_SEC` (imported, not copied). 37 runs, 4 at a time.
+- Not checked: ruff (not installed in `.venv`); `py_compile` passes.
