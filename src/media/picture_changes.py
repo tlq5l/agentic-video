@@ -128,8 +128,8 @@ def bright_flash_runs(video_path: str, fps: float, timeout_sec: float = 900.0) -
         while last + 1 < count and level[last + 1] >= half:
             last += 1
         if last - first + 1 <= _FLASH_MAX_FRAMES:
-            end = times[j + 1] if j + 1 < count else times[j] + 1.0 / float(fps)
-            runs.append({"start_sec": round(times[i], 3), "end_sec": round(end, 3),
+            end = times[last + 1] if last + 1 < count else times[last] + 1.0 / float(fps)
+            runs.append({"start_sec": round(times[first], 3), "end_sec": round(end, 3),
                          "lift": round(float(lift[i:j + 1].max()), 1)})
         i = j + 1
     return runs

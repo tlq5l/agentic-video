@@ -159,3 +159,13 @@ Row 2 is the baseline the checker climb is measured against (score.py --label v2
 - score.py: a checker run that fails with no output now carries "exit code N, no output", so it always counts as
   failed.
 - Checks: ruff pass, pytest 89 passed 1 skipped, score dev 12 held_out 12 floor 0 (+0), cuts 13/19 extra 0.
+
+## PR 58 review round 3 fixes (2026-11-02)
+
+- score.py deletes the old report.json before each checker run, so a reused label never scores a stale report
+  (checked: a failing interpreter now gives "exit code 1, no output").
+- bright_flash_runs reports the whole bright stretch (first..last), so flashes at clip edges keep their frames
+  (7 dark, 3 bright, 30 dark at 30 FPS: 0.233-0.333 s).
+- STATE.md bright-run count updated to 2 (1 unkeyed).
+- Checks: ruff pass, pytest 89 passed 1 skipped, score dev 12 held_out 12 floor 0 (+0).
+- Review count: 3 failed Sol reviews (6, 2, 3 findings). Stopped here; merge waits for the owner.

@@ -31,7 +31,7 @@ Remaining blockers:
 3. Pan phrase shift. newtest3 at 17.143 reported at 18.0 (outside 0.5 s), so a false alarm.
 4. Same-footage cuts: 6 of 19 joins still missed (1-clean 4.6, 6.833, 9.0, 11.3, 18.3; 3-ally-down 11.3). Weak
    cuts, isolation ratio under 5.
-5. Bright flashes are listed, not scored. Faulted files show 3 bright runs since the PR 58 round 1 fix (was 7): newtest10 11.9 s and newtest6 21.333 s are not in the key; newtest9 19.667 s is keyed (LOG.md, PR 58 round 1).
+5. Bright flashes are listed, not scored. Faulted files show 2 bright runs since the PR 58 round 2 fix (7 before round 1, 3 after it): newtest10 11.9 s is not in the key; newtest9 19.667 s is keyed (LOG.md, PR 58 rounds 1-2).
 
 Open side effect: an absent one-off cue near an unrelated onset now comes out early (newtest10 ding), accepted.
 

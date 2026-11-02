@@ -62,6 +62,8 @@ def floor_clips():
 
 def run_check(video: Path, cues: Path, intent: Path, out: Path, use_inputs: bool = True) -> dict:
     out.mkdir(parents=True, exist_ok=True)
+    report_path = out / "report.json"
+    report_path.unlink(missing_ok=True)  # a reused label must never score an old report
     cmd = [str(PY), "-m", "src.loop", "check", str(video), "--out", str(out)]
     if use_inputs:
         if cues.exists():
@@ -69,7 +71,6 @@ def run_check(video: Path, cues: Path, intent: Path, out: Path, use_inputs: bool
         if intent.exists():
             cmd += ["--intent", str(intent)]
     proc = subprocess.run(cmd, cwd=str(REPO), capture_output=True, text=True)
-    report_path = out / "report.json"
     if proc.returncode not in (0, 1) or not report_path.exists():
         return {"error": (proc.stderr or proc.stdout)[-400:] or "exit code {}, no output".format(proc.returncode), "confirmed": [], "checked_ok": False}
     report = json.loads(report_path.read_text(encoding="utf-8"))
