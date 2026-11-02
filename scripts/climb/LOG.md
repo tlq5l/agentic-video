@@ -217,3 +217,16 @@ Row 2 is the baseline the checker climb is measured against (score.py --label v2
 - Alignment: decoded video audio matches its WAV at lag 0 in all 41 files (cross-correlation), so no shift was applied. Pristine files were aligned to the base WAV of the same case.
 - Thresholds: a single signal flags below the lowest dev negative (0 dev FA by construction). A pair flags when both are below their thresholds; thresholds are searched jointly on dev for zero dev FA, most dev catches, ties to the larger threshold sum. Pairs are ranked by dev catches, then dev AUC (AUC on the min of pooled z-scores).
 - Conclusion: no signal or pair catches a held-out variant at zero dev FA (0 of 8 in every row). The checker's current 4/19 dev and 3/8 held-out baseline is not improved by any of these four scores as specified.
+
+## Rebuild verdict (coordinator, 2026-11-02)
+
+- The one rebuild for blocker 1 (missing one-off sound) ran as an offline signal study on the new bench.
+- No signal holds up: at 0 false alarms on dev, the best (S4 matched onset) catches 4/19 dev and 0/8 held-out;
+  S1-S3 catch 0-1/19. Held-out AUC 0.17-0.82. About half the one-off cues occur once, so leave-one-out has no peers.
+- Cause: one-off sounds land on the same instants as drum hits, so a mix-only template cannot tell them apart.
+- Stop rule reached for this climb (rebuild failed, no blocker fix left in the mix-only design).
+- Next climb proposal (not started): let the checker take the sound files the video was built from (an optional
+  input listing each cue's audio file) and match each file in the mix. The bench can export each removed sound
+  as that file, so the test is cheap.
+- Key entry newtest 8.0 ("text pop click 04") reads as present in the faulted audio (S1 1.33, S4 0.99); the key
+  entry is likely wrong. Left unchanged until checked by ear or by the generator diff.
