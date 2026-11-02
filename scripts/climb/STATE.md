@@ -9,9 +9,9 @@ Check command (about 3 minutes, real end-to-end runs):
 
 Keep a change only if: dev goes up, held_out does not drop, and floor stays 0. Record each try in LOG.md.
 
-Current best: the code on this branch.
-- dev 9, held_out 12, floor 0 (score.py --label v2).
-- Checked section present in every report (checked_ok True on all 24 faulted and plain runs).
+Current best: exp 1 (score.py --label exp1).
+- dev 12, held_out 12, floor 0.
+- Checked section present in every report (checked_ok True on all faulted and plain runs).
 
 Biggest blockers (from the v2 run, per-case misses and false alarms):
 1. Late sound reported as missing. newtest6 whistle at 6.429 (+214 ms) and newtest9 clank at 8.64 (+480 ms) are
@@ -25,7 +25,10 @@ Biggest blockers (from the v2 run, per-case misses and false alarms):
 6. Bright white flash frames (2-kill-rush, 5 of them) are not detected by any check, so the Checked section
    reports none. Intended by the plan, so not a floor problem, but a reader cannot see them.
 
-Next idea (not started): blocker 1. Let the simple check accept a band attack 80-500 ms after the cue
-inside the cue slot when the template is ambiguous, and report it as cue_late. Measure with score.py.
+Done in exp 1 (kept): blocker 1, one-off late sounds reported as late (see LOG.md).
 
-Not done: same-footage cut detection, bright-flash listing, rebuilt-from-scratch attempt, ruff (not installed).
+Open side effect: an absent one-off cue near an unrelated onset now comes out early/late (newtest10 ding).
+
+Next: bright-flash listing in the Checked section (informational only); same-footage cut detection; one
+rebuilt-from-scratch attempt for the weakest kind. Floor has no cues, so new cue-path changes need the faulted
+and plain runs as their false-alarm check.
