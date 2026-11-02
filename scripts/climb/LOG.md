@@ -61,11 +61,78 @@ Row 2 is the baseline the checker climb is measured against (score.py --label v2
 - PR title: renamed to "Checker: report what it checked (climb)" (exp 0 gave no detection change). Renamed again
   to add "+ better catch rate" after exp 1, which is a kept detection change.
 
-## Same-footage cut detection (not solved yet)
+## Coordinator decisions (message 3, 2026-11-02)
 
-- The checker's cut list comes from `AgenticVideoEngine.detect_cuts` (threshold 0.25, plus soft transitions).
-  At 0.25, 3-ally-down and 4-replay give 0 cuts; 1-clean gives 3 (plan 4).
-- A lower threshold (0.15) adds extra cuts. The counts were not recorded in this log, so they are not
-  quoted here. Treat "lower threshold" as untested for precision until a measured run is logged.
-- Next idea (not started): a same-footage cut needs a change in framing or colour with the same content. A detector
-  on a coarse grid of local colour histograms should separate that from motion. Not built in this session.
+- Newtest10 ding regression accepted (option a). It meets the keep rule (dev up, held-out flat, floor 0). Revisit it
+  in the rebuild attempt.
+- "Rakan-style case" for same-footage cuts: the four Rakan edits (no planted same-footage cut exists in newtest).
+  Truth = the joins in each edit's latest Song-round notes (`scripts/climb/cut_truth.json`), not the PLAN.md counts
+  (PLAN 4/5/4/1 was the Music round). Song round joins: 1-clean 10, 2-kill-rush 5, 3-ally-down 3, 4-replay 1 = 19.
+  Joins were checked against the pixels: 3-ally-down and 4-replay by the frame-change peak at each join. For
+  1-clean and 2-kill-rush the peaks were found with the same measure, but 1-clean 18.300 has no peak in the top 14,
+  so it is a join on paper only (not confirmed on the pixels).
+- The cut-count report (`scripts/climb/cut_report.py`) is the metric for these experiments, not the detection score.
+  New cut and flash output goes only into the Checked section, not into candidates, so the scorer is the
+  regression check.
+- Pyright: `uvx pyright src/loop.py src/media/audio.py src/media/picture_changes.py` gives 0 errors and 0 warnings.
+  No line my commits touched has an error, so nothing was changed.
+
+## Exp 3 (Checked section, same-footage cuts): spike isolation
+
+- Problem: the scene score at the real joins is 0.145-0.224 (3-ally-down 6.833 0.145, 11.300 0.169, 15.967 0.224;
+  4-replay 6.867 0.153). Motion inside a segment reaches 0.18 (3-ally-down 12.07-12.70 s). A threshold on the scene
+  score cannot separate them.
+- Rule (src/media/picture_changes.py, `same_footage_cut_times`): a local peak of the mean gray change on a 54x96
+  grid, at least 8, and at least 6 times the median change of the 14 frames around it (the 2 next to it are skipped).
+  Peaks within 0.3 s keep the strongest. Known scene cuts (within 0.1 s) are not repeated.
+- Threshold table (`.climb-tmp/cuts/thresholds.py`, same grid, all four clips, no scene cuts excluded):
+  4.0: 16/19 found, 6 extra. 5.0: 11/19, 3 extra. 6.0: 11/19, 0 extra. 8.0: 8/19, 0 extra.
+  Kept 6.0: the only threshold with no false cuts on any clip.
+- Result with the scene-score cuts (cut-count report, `.climb-tmp/cuts/cuts-thr6`): scene only 8/19 found;
+  scene plus same-footage 13/19 found, 0 extra. Misses: 1-clean 4.600, 6.833, 9.000, 11.300, 18.300; 3-ally-down 11.300.
+  The misses score 3.4-4.9 on the isolation ratio, under the 6.0 line.
+- Scorer (`exp3-same-footage`): dev 12, held-out 12, floor 0, all checked_ok True. Unchanged from exp 1, as intended.
+- Not a detection gain: this is a report. The score rule is flat (dev +0, held-out +0).
+
+## Exp 4 (Checked section, bright flashes): listing only
+
+- Rule (`bright_flash_runs`): 1 to 3 frames whose mean luma is at least 60 above the median of the frames 3 to 9 away
+  on each side. Listed as kind `bright_flash`; "intended" when within 0.1 s of any cut (scene or same-footage).
+- 2-kill-rush: 5 of 5 flashes listed, all intended (each within 0.04 s of its cut). 1-clean, 3-ally-down and
+  4-replay: none.
+- Faulted files (not part of the cut report): bright runs at newtest 12.5 s, newtest10 11.9 and 22.2 s,
+  newtest6 21.3 s, newtest8 27.4 s, newtest9 19.67 s (the planted endcard insert, already a candidate) and 23.07 s.
+  Only 19.67 is in the answer key. The others are listed for the owner to read, not scored.
+- Scorer (`exp4-flash`): dev 12, held-out 12, floor 0, all checked_ok True. Compare vs exp3: +0, +0, +0.
+- Not a detection gain: a report only.
+
+## Flat rounds and the stop rule (2026-11-02)
+
+- Flat rounds: exp 2 (probe, no change), exp 3 (same-footage report), exp 4 (bright-flash report). Scores unchanged
+  in each (dev 12, held-out 12, floor 0). That is 3 flat rounds, so the stop rule applies: fix the biggest blocker,
+  then one rebuilt attempt with 3 tries.
+- Biggest blocker (scorer misses, exp4): 6 misses in dev and held-out. Three are cue_missing entries (absent
+  sounds) that the checker reports as cue_ambiguous, a review item that does not count as caught: newtest2 text pop
+  4.364, newtest5 clap 25.333, and newtest10 ding 6.667 (now cue_early, the accepted regression). A fourth cue_missing
+  entry, newtest 8.0, is covered below. One is a stereo kind (newtest3 phrase pan 17.143), one is early/late
+  (newtest2 DOORS OPEN 22.909).
+- newtest 8.0 text pop click 04 (cue_missing in the key): the checker's sync record for that cue is status ok with
+  a matched onset at 8.000 s. This is not a classification miss, so the key entry or the faulted audio is the thing
+  to check next. Not changed here.
+- Why the cue_missing class is stuck: the sound's own band is "at the group's usual level" at the cue, and
+  the template match is below its null floor for present sounds too (present kicks in newtest10 at 11.111, 20.0,
+  24.444 have the same fields as the absent ones). Present and absent cues share the same fields.
+- Blocker fix tries, scored offline on the logged fields (`cue_ambiguous` cues, truth from the answer key):
+  A. template missing and ambiguous -> cue_missing: caught 2, false 8 (net about -14).
+  B. as A and on-cue score under 0.01: caught 1, false 5 (net about -9).
+  C. as A and the simple band level within 1 dB of its reference: caught 0, false 4 (net about -8).
+  All three rejected. None of the existing per-cue fields separates an absent sound from a present one.
+- Rebuild: not built. A from-scratch rebuild needs a new signal (for example, a leave-one-out comparison of the
+  cue's own band after subtracting its companions' contribution). That is not designed or measured yet, so the
+  rebuild attempt did not run. Stopping here, as the stop rule says when the blocker fix fails.
+- Scored state at stop: dev 12, held-out 12, floor 0 (exp 1 kept; exp 3 and exp 4 are reports with no score change).
+
+## Same-footage cut detection, status
+
+- Gain: 8 to 13 of 19 Song-round joins now listed (plus the scene-score cuts), 0 false cuts on the four clips.
+- Still missed: 6 joins (1-clean 4.6, 6.833, 9.0, 11.3, 18.3; 3-ally-down 11.3). These are weak cuts (ratio under 5).

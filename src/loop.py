@@ -21,6 +21,7 @@ from src.media.audio import (audio_onsets, clipping_runs, loudness_timeline, spe
                              sync_check)
 from src.media.contact_sheet import build_contact_sheet
 from src.media.probe import probe_video
+from src.media.picture_changes import bright_flash_runs, same_footage_cut_times
 from src.media.visual_timing import (black_ranges, blank_flashes, frame_cadence, frame_splices, frozen_pictures,
                                      text_cue_timing, text_overflow)
 from src.jev import decide as jev_decide
@@ -1025,10 +1026,12 @@ def _loudness_summary(video: Path) -> Dict[str, Any]:
 
 def _checked_section(meta: Any, cut_times: Sequence[float], black: Sequence[Mapping[str, Any]],
                      visual: Mapping[str, Any], silence: Sequence[Mapping[str, Any]],
-                     loudness: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
+                     loudness: Optional[Mapping[str, Any]], same_footage: Sequence[float] = ()) -> Dict[str, Any]:
     """What the check looked at, with numbers, so an empty problem list still says what ran."""
+    all_cuts = list(cut_times) + list(same_footage)
+
     def intended(*points: float) -> bool:
-        return any(abs(point - cut) <= _CUT_NEIGHBOURHOOD_SEC for point in points for cut in cut_times)
+        return any(abs(point - cut) <= _CUT_NEIGHBOURHOOD_SEC for point in points for cut in all_cuts)
 
     def span(item: Mapping[str, Any]) -> Dict[str, Any]:
         return {"start_sec": item["start_sec"], "end_sec": item["end_sec"],
@@ -1036,6 +1039,7 @@ def _checked_section(meta: Any, cut_times: Sequence[float], black: Sequence[Mapp
 
     flashes = [dict(span(item), kind="blank_flash") for item in visual.get("flashes", [])]
     flashes += [dict(span(item), kind="flash_frame") for item in visual.get("frame_splices", [])]
+    flashes += [dict(span(item), kind="bright_flash") for item in visual.get("bright_flashes", [])]
     return {
         "duration_sec": meta.duration_sec,
         "resolution": "{}x{}".format(meta.width, meta.height),
@@ -1043,6 +1047,7 @@ def _checked_section(meta: Any, cut_times: Sequence[float], black: Sequence[Mapp
         "has_audio": bool(meta.has_audio),
         "loudness": loudness,
         "cuts": [{"time_sec": round(float(time), 3)} for time in cut_times],
+        "same_footage_cuts": [{"time_sec": round(float(time), 3)} for time in same_footage],
         "black_frames": [span(item) for item in black],
         "flash_frames": flashes,
         "frozen_frames": [span(item) for item in visual.get("frozen_pictures", [])],
@@ -1073,6 +1078,8 @@ def _checked_lines(checked: Mapping[str, Any]) -> List[str]:
             checked["duration_sec"], checked["resolution"], checked["fps"]),
         "- Loudness: {}.".format(loudness_line),
         "- Cuts ({}): {}.".format(len(cuts), ", ".join("{:.3f} s".format(c["time_sec"]) for c in cuts) or "none"),
+        "- Same-footage cuts (scene score missed): {}.".format(
+            ", ".join("{:.3f} s".format(c["time_sec"]) for c in checked.get("same_footage_cuts", [])) or "none"),
         "- Black frames: {}.".format(times(checked.get("black_frames", []))),
         "- Flash frames: {}.".format(
             ", ".join("{} {}".format(item["kind"], times([item])) for item in checked.get("flash_frames", [])) or "none"),
@@ -1263,8 +1270,18 @@ def check_video(
         except Exception as exc:
             visual["loudness_error"] = scrub_jev(exc)[:300]
             loudness_info = {"error": visual["loudness_error"]}
-    checked = _checked_section(meta, [cut["time_sec"] for cut in sync.get("cuts", [])], black, visual,
-                               loudness.get("silence_gaps", []), loudness_info)
+    scene_cut_times = [cut["time_sec"] for cut in sync.get("cuts", [])]
+    same_footage: List[float] = []
+    try:
+        same_footage = same_footage_cut_times(str(video), float(meta.fps), scene_cut_times)
+    except Exception as exc:
+        visual["same_footage_error"] = scrub_jev(exc)[:300]
+    try:
+        visual["bright_flashes"] = bright_flash_runs(str(video), float(meta.fps))
+    except Exception as exc:
+        visual["bright_flash_error"] = scrub_jev(exc)[:300]
+    checked = _checked_section(meta, scene_cut_times, black, visual, loudness.get("silence_gaps", []),
+                               loudness_info, same_footage=same_footage)
 
     candidates = _build_candidates(sync, loudness, onsets, cues, intent=intent, balance=balance, visual=visual,
                                    clipping=clipping)

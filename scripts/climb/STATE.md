@@ -13,22 +13,27 @@ Current best: exp 1 (score.py --label exp1).
 - dev 12, held_out 12, floor 0.
 - Checked section present in every report (checked_ok True on all faulted and plain runs).
 
-Biggest blockers (from the v2 run, per-case misses and false alarms):
-1. Late sound reported as missing. newtest6 whistle at 6.429 (+214 ms) and newtest9 clank at 8.64 (+480 ms) are
-   classified cue_missing, template_status "ambiguous", evidence "no_band_beyond_companions", simple check not on
-   time. Counts as one miss and one false alarm each. Code: src/media/audio.py around lines 3400-3600.
-2. Absent cued sound not flagged. newtest base click at 8.0, newtest2 pop at 4.364, newtest5 clap at 25.333.
-3. Early pop not flagged. newtest2 pop at 22.909 (-120 ms) missed.
-4. Pan phrase shift. newtest3 at 17.143 reported at 18.0 (outside 0.5 s), so counted as false alarm.
-5. Same-footage cut detection (from the Rakan dry run, not in the score yet): 3-ally-down 0 cuts (plan 4),
-   4-replay 0 (plan 1), 1-clean 3 (plan 4).
-6. Bright white flash frames (2-kill-rush, 5 of them) are not detected by any check, so the Checked section
-   reports none. Intended by the plan, so not a floor problem, but a reader cannot see them.
+Current best: exp 1 (score.py --label exp1), unchanged by exp 3 and exp 4 (both are reports).
+- dev 12, held_out 12, floor 0 (exp4-flash run: same).
+- Checked section lists scene cuts, same-footage cuts (picture_changes.py) and bright flashes (kind bright_flash).
+  checked_ok True on all faulted and plain runs.
+- Cut-count report: `.venv/bin/python -u scripts/climb/cut_report.py --label NAME` (19 measured joins in
+  cut_truth.json). Latest: scene only 8/19, plus same-footage 13/19, 0 extra.
 
-Done in exp 1 (kept): blocker 1, one-off late sounds reported as late (see LOG.md).
+Stop rule reached (see LOG.md "Flat rounds and the stop rule"): three flat rounds (exp 2 probe, exp 3, exp 4).
+The blocker fix (three cue-missing rules, all scored offline) was rejected, and the rebuild was not built.
 
-Open side effect: an absent one-off cue near an unrelated onset now comes out early/late (newtest10 ding).
+Remaining blockers:
+1. Absent one-off or pop sounds not flagged (cue_missing). Present and absent cues share the same template and band
+   fields, so a rule on those fields loses score (LOG.md). Needs a new signal. Entries: newtest2 pop 4.364,
+   newtest5 clap 25.333, newtest10 ding 6.667 (accepted regression: now cue_early), newtest 8.0 (checker status ok).
+2. Early pop not flagged. newtest2 pop at 22.909 (-120 ms).
+3. Pan phrase shift. newtest3 at 17.143 reported at 18.0 (outside 0.5 s), so a false alarm.
+4. Same-footage cuts: 6 of 19 joins still missed (1-clean 4.6, 6.833, 9.0, 11.3, 18.3; 3-ally-down 11.3). Weak
+   cuts, isolation ratio under 5.
+5. Bright flashes are listed, not scored. Faulted files show 7 bright runs not in the key (LOG.md, Exp 4).
 
-Next: bright-flash listing in the Checked section (informational only); same-footage cut detection; one
-rebuilt-from-scratch attempt for the weakest kind. Floor has no cues, so new cue-path changes need the faulted
-and plain runs as their false-alarm check.
+Open side effect: an absent one-off cue near an unrelated onset now comes out early (newtest10 ding), accepted.
+
+Next: the blockers above need a new signal. Floor has no cues, so new cue-path changes need the faulted and plain
+runs as their false-alarm check. Waiting for the owner's call on whether to design the new signal.
