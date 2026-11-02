@@ -192,3 +192,10 @@ Row 2 is the baseline the checker climb is measured against (score.py --label v2
 - Muxing: pristine `out.mp4` video with the variant wav (AAC 192 kbps, 48 kHz stereo); `cues.json` and `INTENT.md` copied beside each video. Pristine folders were only read.
 - Checker runs go through `score.run_check` and `score.TOL_SEC` (imported, not copied). 37 runs, 4 at a time.
 - Not checked: ruff (not installed in `.venv`); `py_compile` passes.
+
+## Missing-sound signals (2026-11-02)
+
+- Gain pin (bench): applied to the written int16 audio, not the float mix, because the ten generators do not expose the mix the same way (some keep it local, some write float32 buffers). Rounding costs at most about 1 LSB; the 2 LSB limit was not widened.
+- Span: start = round(t x 48000), length = the shortest ndarray argument of the placement call (the bus is always the longest). Recorded per call in each trace.json, with gain and residual per variant.
+- Pre-check before the rebuild: newtest 10.000 (reveal impact) had gain 0.8676 (about 1/1.153) and 4078 LSB raw residual outside the span, 1 LSB after the pin. The other 26 variants: gain 1.000, residual 0-1 LSB. Baseline bytes unchanged (no-skip render check passed). Trace times match missing_bench.json to the 4-decimal rounding.
+- baseline2 score: dev caught 4/19, FA 6 (score -8); held caught 3/8, FA 2 (score -1). Same as baseline on all 27 rows. The pin moved no verdict.
