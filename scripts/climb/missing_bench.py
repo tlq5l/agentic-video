@@ -25,6 +25,7 @@ import re
 import shutil
 import subprocess
 import sys
+import wave
 from pathlib import Path
 
 import numpy as np
@@ -37,6 +38,8 @@ KEY = HERE / "answer_key.json"
 BENCH = HERE / "missing_bench.json"
 PY = REPO / ".venv" / "bin" / "python"
 MAX_PARALLEL = 4
+SAMPLE_RATE = 48000  # the ten generators place sounds at round(t * 48000)
+MAX_RESIDUAL_LSB = 2  # a variant must equal its baseline outside the removed span to within this
 FAULT_TOL = 0.5  # seconds: a removal may not sit this close to an answer-key fault
 MIN_GAP_SEC = 1.0  # removals in one case are at least this far apart
 # Checker kinds that count as "caught" (the cue family in src/loop.py). cue_ambiguous is a review
@@ -129,7 +132,13 @@ def run_render(argv: list[str]) -> None:
                 elif is_maker(v):
                     tags.append(v.__name__)
         skip_names = call_names + ([first_arg.group(1)] if first_arg else [])
-        log.append({"call_index": idx, "time_sec": float(bound.arguments[a.param]),
+        # The removed sound's span: the generator rounds start * SR like this (all ten do), and the
+        # signal is the shortest array argument (the bus is always the longest one).
+        t_sec = float(bound.arguments[a.param])
+        arrays = [v for v in bound.arguments.values() if isinstance(v, np.ndarray)]
+        sig_len = int(max(min(arrays, key=lambda v: v.size).shape)) if arrays else 0
+        log.append({"call_index": idx, "time_sec": t_sec,
+                    "span_start": int(round(t_sec * SAMPLE_RATE)), "span_len": sig_len,
                     "caller_line": line, "caller_fn": caller.f_code.co_name,
                     "tags": sorted(set(tags)), "skip_names": sorted(set(skip_names))})
         if idx in skip:
@@ -262,7 +271,60 @@ def mux_variant(case: str, split: str, variant: str, wav: Path, pristine: Path,
     manifest.append({"case": case, "split": split, "variant": variant, "baseline": rem is None,
                      "call_index": rem and rem["call_index"], "time_sec": rem and rem["time_sec"],
                      "cue_label": rem and rem["cue_label"], "caller_line": rem and rem["caller_line"],
+                     "gain": rem and rem["gain"], "max_residual_lsb": rem and rem["max_residual_lsb"],
+                     "span": rem and rem["span"],
                      "video": str(video), "cues": str(vdir / "cues.json"), "intent": str(vdir / "INTENT.md")})
+
+
+def read_pcm(path: Path) -> tuple:
+    with wave.open(str(path), "rb") as w:
+        params = w.getparams()
+        raw = w.readframes(params.nframes)
+    if params.sampwidth != 2:
+        raise SystemExit(f"{path}: expected 16-bit PCM, got {params.sampwidth} bytes per sample")
+    return np.frombuffer(raw, dtype="<i2").reshape(params.nframes, params.nchannels), params
+
+
+def write_pcm(path: Path, pcm: np.ndarray, params) -> None:
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(params.nchannels)
+        w.setsampwidth(2)
+        w.setframerate(params.framerate)
+        w.writeframes(np.ascontiguousarray(pcm, dtype="<i2").tobytes())
+
+
+def pin_gain(base_wav: Path, var_wav: Path, trace_path: Path, idx: int) -> tuple:
+    """Fit one gain g so g x variant matches the baseline outside the removed sound's span, rewrite
+    the variant with it, and fail loudly when any sample outside the span is off by more than
+    MAX_RESIDUAL_LSB. Why: the generators re-normalise the whole mix after a removal (peak
+    normalisation), so the variant is otherwise a gain away from its baseline everywhere.
+    The gain is applied to the written int16 audio (the mix is not reachable the same way in all ten
+    generators), so the rounding costs at most about one LSB more."""
+    base, params = read_pcm(base_wav)
+    var, var_params = read_pcm(var_wav)
+    if base.shape != var.shape or params.framerate != var_params.framerate:
+        raise SystemExit(f"{var_wav}: shape or rate differs from the baseline")
+    trace = json.loads(trace_path.read_text(encoding="utf-8"))
+    rec = next(c for c in trace["calls"] if c["call_index"] == idx)
+    n = base.shape[0]
+    s0 = int(rec["span_start"])
+    s1 = min(n, s0 + int(rec["span_len"]))
+    keep = np.ones(n, dtype=bool)
+    keep[s0:s1] = False
+    b = base[keep].astype(np.float64).ravel()
+    v = var[keep].astype(np.float64).ravel()
+    g = float(np.dot(v, b) / np.dot(v, v))
+    scaled = np.round(np.clip(var.astype(np.float64) / 32767.0 * g, -1.0, 1.0) * 32767.0).astype(np.int64)
+    diff = int(np.max(np.abs(scaled[keep] - base[keep].astype(np.int64))))
+    if diff > MAX_RESIDUAL_LSB:
+        raise SystemExit(f"{var_wav}: max difference outside the removed span is {diff} LSB "
+                         f"(> {MAX_RESIDUAL_LSB}) after gain {g:.6f}; span [{s0}, {s1})")
+    write_pcm(var_wav, scaled, params)
+    rec["gain"] = g
+    rec["max_residual_lsb"] = diff
+    rec["span"] = [s0, s1]
+    trace_path.write_text(json.dumps(trace, indent=1), encoding="utf-8")
+    return g, diff, (s0, s1)
 
 
 def cmd_build() -> None:
@@ -283,12 +345,15 @@ def cmd_build() -> None:
         for r in spec["removals"]:
             idx = r["call_index"]
             vwav = d / f"skip{idx}" / "audio.wav"
-            render(src, vwav, fn, param, {idx}, None)
+            vtrace = d / f"skip{idx}" / "trace.json"
+            render(src, vwav, fn, param, {idx}, vtrace)
             if same_render(vwav, base_wav):
                 print(f"{case} call {idx}: render unchanged (sound placed outside the audio); dropped")
                 continue
+            g, diff, span = pin_gain(base_wav, vwav, vtrace, idx)
+            r = dict(r, gain=g, max_residual_lsb=diff, span=list(span))
             mux_variant(case, split, f"skip{idx}", vwav, pristine, manifest, r)
-            print(f"{case} call {idx}: variant rendered")
+            print(f"{case} call {idx}: variant rendered, gain {g:.6f}, max residual outside span {diff} LSB")
     (WORK / "manifest.json").write_text(json.dumps(manifest, indent=1), encoding="utf-8")
     n = {s: sum(1 for m in manifest if m["split"] == s and not m["baseline"]) for s in ("dev", "held_out")}
     print(f"variants dev {n['dev']} held_out {n['held_out']}; baselines {sum(m['baseline'] for m in manifest)}")
