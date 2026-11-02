@@ -190,3 +190,10 @@ Row 2 is the baseline the checker climb is measured against (score.py --label v2
   as that file, so the test is cheap.
 - Key entry newtest 8.0 ("text pop click 04") reads as present in the faulted audio (S1 1.33, S4 0.99); the key
   entry is likely wrong. Left unchanged until checked by ear or by the generator diff.
+
+## Spend (2026-11-02, Claude plan and Codex plan; tokens from the agent results)
+
+- Sol fresh check of PR 58, review 1 (Haiku wrapper 29k tokens + 1 Sol job): FAIL, 6 findings.
+- PR 58 fix round 1 (Haiku fixer + Sol review 2, 188k tokens): 6 fixed, 2 new findings.
+- Missing-sound bench (Haiku builder + checker, 240k tokens): 27-variant bench; baseline 4/19 dev, 3/8 held-out.
+- Signal study (Haiku, 235k tokens): 4 signals, none holds on held-out; rebuild verdict.
