@@ -455,14 +455,14 @@ def cmd_score(label: str, sounds: bool = False, split: str = "all") -> None:
         print(f"{row['case']} {row['time_sec']:.3f} \"{row['cue_label']}\" caught={'yes' if row['caught'] else 'no'} "
               f"strict={'yes' if row['strict'] else 'no'} kind={row['kind_found']} FA={fa}")
     totals = {}
-    for split in ("dev", "held_out"):
-        rs = [x for x in rows if x["split"] == split]
+    for part in ("dev", "held_out"):
+        rs = [x for x in rows if x["split"] == part]
         caught = sum(x["caught"] for x in rs)
         strict = sum(x["strict"] for x in rs)
         fa = sum(len(x["false_alarms"]) for x in rs)
-        totals[split] = {"variants": len(rs), "caught": caught, "strict": strict, "false_alarms": fa,
+        totals[part] = {"variants": len(rs), "caught": caught, "strict": strict, "false_alarms": fa,
                          "score": caught - 2 * fa}
-        print(f"TOTAL {split}: variants {len(rs)} caught {caught} strict {strict} FA {fa} score {caught - 2 * fa}")
+        print(f"TOTAL {part}: variants {len(rs)} caught {caught} strict {strict} FA {fa} score {caught - 2 * fa}")
     base_counts = {c: len(v) for c, v in base.items()}
     out = {"label": label, "sounds": sounds, "split": split, "totals": totals, "rows": rows, "baseline_confirmed_per_case": base_counts,
            "kinds_caught": sorted(CAUGHT_KINDS), "kinds_strict": sorted(STRICT_KINDS)}

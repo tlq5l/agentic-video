@@ -3142,7 +3142,14 @@ def _sound_file_match(samples: np.ndarray, cue_time: float, sound: np.ndarray, w
     energy = np.maximum(squares[index + length] - squares[index], 1e-30)
     gains = cross / sound_energy
     correlations = cross / np.sqrt(sound_energy * energy)
-    best = int(np.argmax(gains))
+    # The best start must clear BOTH thresholds: noise can have a bigger gain than the real sound
+    # while its correlation is near zero. Starts that pass are ranked by gain; with none passing, the
+    # report shows the start with the highest correlation.
+    passing = np.flatnonzero((gains >= _SOUND_FILE_MIN_GAIN) & (correlations >= _SOUND_FILE_MIN_CORRELATION))
+    if len(passing):
+        best = int(passing[np.argmax(gains[passing])])
+    else:
+        best = int(np.argmax(correlations))
     return {"gain": float(gains[best]), "correlation": float(correlations[best]),
             "lag_sec": ((lo + best) - p0) / float(SAMPLE_RATE)}
 
@@ -3157,9 +3164,16 @@ def _apply_sound_file_verdicts(
         cue = with_file.get((float(report["time_sec"]), report["label"]))
         if cue is None:
             continue
-        sound, _, _ = _decode_pcm(str(cue["sound_file"]), cache)
         cue_time = float(report["time_sec"])
-        match = _sound_file_match(samples, cue_time, sound, search_window_ms / 1000.0)
+        try:
+            sound, _, _ = _decode_pcm(str(cue["sound_file"]), cache)
+            match = _sound_file_match(samples, cue_time, sound, search_window_ms / 1000.0)
+        except Exception as exc:
+            # A missing or unreadable sound file is an error on this cue only; the mix-based verdict
+            # stays and the other cues are still checked.
+            report["sound_file"] = {"path": str(cue["sound_file"]), "present": False,
+                                    "error": f"{type(exc).__name__}: {exc}"[:300]}
+            continue
         present = match["gain"] >= _SOUND_FILE_MIN_GAIN and match["correlation"] >= _SOUND_FILE_MIN_CORRELATION
         lag_ms = match["lag_sec"] * 1000.0
         report["sound_file"] = {"path": str(cue["sound_file"]), "present": present,
