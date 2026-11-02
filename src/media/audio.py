@@ -3060,19 +3060,21 @@ def _simple_supports_time(simple: Mapping[str, Any], at: float, tolerance_sec: f
 
 
 def _one_off_displaced(broad_onsets: Sequence[Mapping[str, Any]], cue_time: float, tolerance_sec: float,
-                       cue_times: Sequence[float]) -> Optional[float]:
+                       search_window_sec: float, cue_times: Sequence[float]) -> Optional[float]:
     """Where a one-off cue's sound lands when it is a clear broadband attack away from the cue.
 
-    The nearest onset up to _ONE_OFF_SLOT_SEC either side of the cue, outside tolerance,
+    The nearest onset up to the search window either side of the cue (capped at
+    _ONE_OFF_SLOT_SEC, so a wider window does not widen this fallback), outside tolerance,
     at least _ONE_OFF_MIN_STRENGTH strong, and not within 0.1 s of any cue (an onset that
     sits on another cue belongs to that cue). Nearest, not strongest: a louder sound
     that lands on the other side of the cue is more likely a different sound.
     """
+    reach = min(_ONE_OFF_SLOT_SEC, search_window_sec)
     best = None
     for onset in broad_onsets:
         time = float(onset["time_sec"])
         distance = abs(time - cue_time)
-        if distance <= tolerance_sec or distance > _ONE_OFF_SLOT_SEC:
+        if distance <= tolerance_sec or distance > reach:
             continue
         if float(onset.get("strength", 0.0)) < _ONE_OFF_MIN_STRENGTH or any(
                 abs(time - other) <= 0.1 for other in cue_times):
@@ -3508,7 +3510,8 @@ def sync_check(
                       60.0 / bpm_value if bpm is not None else None, len(samples) / SAMPLE_RATE,
                       coincidence / 1000.0)) is not None and excess_one_off < _SIMPLE_EXCESS_DB
                   and (displaced_one_off := _one_off_displaced(
-                      broad_onsets, cue_time, tolerance / 1000.0, [float(other["time_sec"]) for other in normalized]))
+                      broad_onsets, cue_time, tolerance / 1000.0, search_window / 1000.0,
+                      [float(other["time_sec"]) for other in normalized]))
                   is not None):
                 # A one-off sound whose own band attacks a little away from the cue
                 # (a late whistle or clank): report it there, not as missing.

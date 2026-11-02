@@ -1052,7 +1052,7 @@ def _checked_section(meta: Any, cut_times: Sequence[float], black: Sequence[Mapp
         "flash_frames": flashes,
         "frozen_frames": [span(item) for item in visual.get("frozen_pictures", [])],
         "silence_gaps": [{"start_sec": item["start_sec"], "end_sec": item["end_sec"]} for item in silence],
-        "errored_checks": sorted(key for key in visual if key.endswith("_error")),
+        "errored_checks": sorted(key for key in visual if key == "error" or key.endswith("_error")),
     }
 
 

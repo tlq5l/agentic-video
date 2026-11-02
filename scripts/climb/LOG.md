@@ -136,3 +136,17 @@ Row 2 is the baseline the checker climb is measured against (score.py --label v2
 
 - Gain: 8 to 13 of 19 Song-round joins now listed (plus the scene-score cuts), 0 false cuts on the four clips.
 - Still missed: 6 joins (1-clean 4.6, 6.833, 9.0, 11.3, 18.3; 3-ally-down 11.3). These are weak cuts (ratio under 5).
+
+## PR 58 review round 1 fixes (2026-11-02)
+
+- Finding 1 (same-footage times on a variable-frame-rate clip): new in PR (picture_changes.py is new). Fixed: frames now carry their showinfo pts_time (passthrough, as scene.py reads them) and a cut is the time of the frame after the change. Repro (30 fps then 10 fps, cut at 1.000 s, no known cuts): before 1.72 s, after 1.0 s; with the 1.0 s scene cut known, before 1.72 s extra, after none.
+- Finding 2 (bright flash on a sustained scene): new in PR. Fixed: a frame's lift is measured against the brighter of its two side medians, so only a brief spike above both sides counts. Repro: 40 to 220 to 40 at 30 fps, before 1.0-1.1 and 1.9-2.0 s, after none; a 3-frame blip is still listed at 1.0-1.1 s.
+- Finding 3 (one-off fallback ignores search_window_ms): new in PR (origin/main has no one-off fallback and reports the newtest6 whistle as missing). Fixed: _one_off_displaced takes the search window, reach = min(0.5 s slot, window). Repro (newtest6-pristine, search_window_ms=80): before "late" at +232.333 ms, after "missing" (same as main).
+- Finding 4 (text-timing failure not in errored_checks): new in PR. Fixed: the key "error" counts too. Repro: visual error gives errored_checks ['error'] and "Errored checks: error."; a *_error key still works.
+- Finding 5 (score.py reports zeros and exits 0 with media missing): new in PR (score.py is new). Fixed: score.py checks every case input and the four cut_truth floor clips before running and exits 1 listing what is missing; it also exits 1 on a failed checker run or a report without Checked fields. Repro: HOME with no media, before exit 0 with zero totals, after exit 1 with 64 missing inputs listed and no scores written.
+- Finding 6 (STATE.md count): new in PR. Re-counted after fixes 1 and 2: faulted files show 3 bright runs (was 7): newtest10 11.9 s and newtest6 21.333 s unkeyed, newtest9 19.667 s keyed. The six-unkeyed count was the pre-fix number; STATE.md now gives the measured one.
+- Checks: ruff passes; pytest -k "loop or picture or audio or check" 89 passed, 1 skipped; score dev 12, held_out 12, floor 0 (compare to trim: +0, +0, +0); cut report 13/19, extra 0 (unchanged). The Rakan clips are constant 30 fps, so fix 1 does not move the cut report.
+- Decision: same_footage_cut_times and bright_flash_runs keep their fps argument (guard and last-frame length), so loop.py's callers are unchanged.
+- Decision: the one-off fallback keeps its 0.5 s cap, so a search window above 500 ms does not widen it; defaults are unchanged.
+- Decision: the no-audio branch in check_video sets empty balance and clipping on purpose (no audio), not an error, so it is not counted.
+- Spend: claude-haiku-5-5 (review fix worker, one run); tokens not reported by the harness. Bought: the six PR 58 round 1 fixes.
