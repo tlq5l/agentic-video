@@ -26,7 +26,7 @@ The blocker fix (three cue-missing rules, all scored offline) was rejected, and 
 Remaining blockers:
 1. Absent one-off or pop sounds not flagged (cue_missing). Present and absent cues share the same template and band
    fields, so a rule on those fields loses score (LOG.md). Needs a new signal. Entries: newtest2 pop 4.364,
-   newtest5 clap 25.333, newtest10 ding 6.667 (accepted regression: now cue_early), newtest 8.0 (checker status ok).
+   newtest5 clap 25.333, newtest10 ding 6.667 (accepted regression: now cue_early), newtest 8.0 (checker status ok; the generator confirms the click is really absent, masked by the whoosh moved to 7.75-8.11 s; key entry kept, see LOG.md "Key entry newtest 8.0 checked").
 2. Early pop not flagged. newtest2 pop at 22.909 (-120 ms).
 3. Pan phrase shift. newtest3 at 17.143 reported at 18.0 (outside 0.5 s), so a false alarm.
 4. Same-footage cuts: 6 of 19 joins still missed (1-clean 4.6, 6.833, 9.0, 11.3, 18.3; 3-ally-down 11.3). Weak

@@ -197,3 +197,12 @@ Row 2 is the baseline the checker climb is measured against (score.py --label v2
 - PR 58 fix round 1 (Haiku fixer + Sol review 2, 188k tokens): 6 fixed, 2 new findings.
 - Missing-sound bench (Haiku builder + checker, 240k tokens): 27-variant bench; baseline 4/19 dev, 3/8 held-out.
 - Signal study (Haiku, 235k tokens): 4 signals, none holds on held-out; rebuild verdict.
+
+## Key entry newtest 8.0 checked against the generator (2026-11-02, blockers session)
+
+- Question: is "text pop click 04" at 8.0 really absent from the faulted audio, as the key says, or present, as the signal study read it (S1 1.33, S4 0.99)?
+- Generator: newtest-pristine/make_audio.py places click_sound() at 0.5, 3.0, 5.5, 10.5, 13.0, 15.375, 18.0 only. The fixed version (newtest/project/make_audio.py) adds `place(click_sound(), 8.0, 0.24, 0.12)`. cues.json lists the cue at 8.0 in both. So the planted change is a removed click.
+- Render check: the generator's faulted output matches the faulted out.mp4 audio at 7.95-8.10 s (correlation 0.967 over the best lag within 62 ms); the plain output (with the click) matches less well (0.84).
+- Why the signals read present: the same faulted file moves the cut whoosh from 7.5 to 7.75 s; that whoosh (0.36 s of loud noise) covers 7.75-8.11 s, so a 35 ms click at 8.0 sits inside it and any band or onset signal at 8.0 reads the whoosh.
+- Decision: the key entry stays (the sound really is absent). It is not moved to out_of_scope. It is a true miss that mix-only signals cannot see because another sound masks the spot.
+- Where run: media decoded and compared on the MacBook (two 20 s decodes, light); no scorer re-run needed because the key did not change.
