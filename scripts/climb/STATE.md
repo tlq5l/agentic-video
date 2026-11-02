@@ -35,8 +35,9 @@ Remaining blockers:
 
 Open side effect: an absent one-off cue near an unrelated onset now comes out early (newtest10 ding), accepted.
 
-Next: the one rebuild (owed under the long-climb rule): a leave-one-out band signal for blocker 1, on branch
-climb/missing-sound-2026-11-02. Floor has no cues, so cue-path changes use the faulted and plain runs as their
+Rebuild done and failed (LOG.md "Rebuild verdict"): no mix-only signal flags removed one-off sounds on held-out.
+Bench: `scripts/climb/missing_bench.py` (27 one-sound-removed variants; current checker 4/19 dev, 3/8 held-out).
+Next climb, not started: an optional input with each cue's sound file, matched in the mix. Floor has no cues, so cue-path changes use the faulted and plain runs as their
 false-alarm check.
 
 ## Standing grant and run rules (owner 2026-11-02, "Long climbs"; away mode until 2026-11-03 20:29 UTC)
