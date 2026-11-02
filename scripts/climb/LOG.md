@@ -150,3 +150,12 @@ Row 2 is the baseline the checker climb is measured against (score.py --label v2
 - Decision: the one-off fallback keeps its 0.5 s cap, so a search window above 500 ms does not widen it; defaults are unchanged.
 - Decision: the no-audio branch in check_video sets empty balance and clipping on purpose (no audio), not an error, so it is not counted.
 - Spend: claude-haiku-5-5 (review fix worker, one run); tokens not reported by the harness. Bought: the six PR 58 round 1 fixes.
+
+## PR 58 review round 2 fixes (2026-11-02)
+
+- bright_flash_runs: a lifted run is measured over its whole bright stretch (frames at or above the side level
+  plus half the lift); stretches over 3 frames are scenes. Synthetic 40/220/40 clips: 1-3 frames listed, 4, 9, 10,
+  11 and 30 frames not listed.
+- score.py: a checker run that fails with no output now carries "exit code N, no output", so it always counts as
+  failed.
+- Checks: ruff pass, pytest 89 passed 1 skipped, score dev 12 held_out 12 floor 0 (+0), cuts 13/19 extra 0.

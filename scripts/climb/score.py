@@ -71,7 +71,7 @@ def run_check(video: Path, cues: Path, intent: Path, out: Path, use_inputs: bool
     proc = subprocess.run(cmd, cwd=str(REPO), capture_output=True, text=True)
     report_path = out / "report.json"
     if proc.returncode not in (0, 1) or not report_path.exists():
-        return {"error": (proc.stderr or proc.stdout)[-400:], "confirmed": [], "checked_ok": False}
+        return {"error": (proc.stderr or proc.stdout)[-400:] or "exit code {}, no output".format(proc.returncode), "confirmed": [], "checked_ok": False}
     report = json.loads(report_path.read_text(encoding="utf-8"))
     confirmed = [{"kind": c.get("kind"), "start_sec": c.get("start_sec"),
                   "end_sec": c.get("end_sec"), "id": c.get("id")}

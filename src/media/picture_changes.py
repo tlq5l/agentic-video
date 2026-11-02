@@ -119,7 +119,15 @@ def bright_flash_runs(video_path: str, fps: float, timeout_sec: float = 900.0) -
         j = i
         while j + 1 < count and lifted[j + 1]:
             j += 1
-        if j - i + 1 <= _FLASH_MAX_FRAMES:
+        # The lifted frames can be only the middle of a longer bright scene (its sides reach
+        # back into the scene), so measure the whole bright stretch at half the lift.
+        half = float(np.nanmin(side_max[i:j + 1])) + _FLASH_LIFT / 2.0
+        first, last = i, j
+        while first > 0 and level[first - 1] >= half:
+            first -= 1
+        while last + 1 < count and level[last + 1] >= half:
+            last += 1
+        if last - first + 1 <= _FLASH_MAX_FRAMES:
             end = times[j + 1] if j + 1 < count else times[j] + 1.0 / float(fps)
             runs.append({"start_sec": round(times[i], 3), "end_sec": round(end, 3),
                          "lift": round(float(lift[i:j + 1].max()), 1)})
