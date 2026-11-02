@@ -159,3 +159,21 @@ Row 2 is the baseline the checker climb is measured against (score.py --label v2
 - Span: start = round(t x 48000), length = the shortest ndarray argument of the placement call (the bus is always the longest). Recorded per call in each trace.json, with gain and residual per variant.
 - Pre-check before the rebuild: newtest 10.000 (reveal impact) had gain 0.8676 (about 1/1.153) and 4078 LSB raw residual outside the span, 1 LSB after the pin. The other 26 variants: gain 1.000, residual 0-1 LSB. Baseline bytes unchanged (no-skip render check passed). Trace times match missing_bench.json to the 4-decimal rounding.
 - baseline2 score: dev caught 4/19, FA 6 (score -8); held caught 3/8, FA 2 (score -1). Same as baseline on all 27 rows. The pin moved no verdict.
+
+### Missing-sound signal study (scripts/climb/signal_study.py, offline, no checker code changed)
+
+- Labels: 27 removed cues (19 dev, 8 held) are ABSENT; 90 scored one-offs in the baseline files (58 dev, 32 held; not key faults, not removed) are PRESENT. Four answer-key cue_missing entries scored on the pristine files as extras. Output: .climb-tmp/missing/signals.json.
+- Results (dev AUC / held AUC / NaN of 117 / dev caught at 0 dev FA / held caught / held FA / key flagged):
+  - S1 leave-one-out template: 0.83 / 0.17 / 61 / 0 of 19 / 0 of 8 / 0 of 32 / 0 of 4.
+  - S2 bar-phase control: 0.61 / 0.69 / 44 / 1 of 19 / 0 of 8 / 0 of 32 / 0 of 4.
+  - S3 occurrence outlier: 0.87 / 0.82 / 90 / 0 of 19 / 0 of 8 / 0 of 32 / 0 of 4.
+  - S4 matched onset: 0.94 / 0.67 / 62 / 4 of 19 / 0 of 8 / 0 of 32 / 0 of 4.
+  - S1+S4 pair: 0.94 / 0.33 / 62 / 4 of 19 / 0 of 8 / 0 of 32 / 0 of 4.
+  - S2+S4 pair: 1.00 / 0.67 / 96 / 1 of 19 / 0 of 8 / 0 of 32 / 0 of 4.
+- Key entries (pristine): newtest 8.0 text pop click 04 reads PRESENT (S1 1.33, S4 0.99), so that key entry is suspect. The other three read as absent or NaN, but no threshold flags them.
+- Paired check (removed cue, baseline vs variant, median): S1 0.23 to 0.00, S2 0.98 to 0.06, S3 -0.68 to -0.98, S4 -0.41 to -0.74. S1 is not near 1 on baseline pairs.
+- Cause (S1, S2 NaN): the one-off groups share their onset instants with drum or kick groups in every case (for example newtest "cut whoosh" lands on each "downbeat kick"). Their overlap template is not identifiable, and leave-one-out makes it worse. Most groups have 1-2 occurrences. Kept as specified; not a fixed result.
+- S2 control: no bpm reaches the checker run, so the bar is 4 x the median spacing of the most frequent cue group. Labels carry serial numbers, so counting labels gave 1 each and was not used. In newtest the bar lands on the same whoosh instants, which leaves no uncued bar (NaN).
+- Alignment: decoded video audio matches its WAV at lag 0 in all 41 files (cross-correlation), so no shift was applied. Pristine files were aligned to the base WAV of the same case.
+- Thresholds: a single signal flags below the lowest dev negative (0 dev FA by construction). A pair flags when both are below their thresholds; thresholds are searched jointly on dev for zero dev FA, most dev catches, ties to the larger threshold sum. Pairs are ranked by dev catches, then dev AUC (AUC on the min of pooled z-scores).
+- Conclusion: no signal or pair catches a held-out variant at zero dev FA (0 of 8 in every row). The checker's current 4/19 dev and 3/8 held-out baseline is not improved by any of these four scores as specified.
