@@ -43,8 +43,15 @@ Row 2 is the baseline the checker climb is measured against (score.py --label v2
   alarm. Held-out is flat only because of the gain on newtest9.
 - Floor limit: the Rakan clips have no cues.json, so this code path never runs on the floor. The floor is
   unchanged by construction, not measured. The faulted and plain runs are the only check of new false alarms.
-- Checks: ruff (uvx) clean; pytest 88 passed, 1 skipped (test_cue_signature_matching, test_audio_primitives,
-  test_media_loop, test_loop_followups).
+- Checks: ruff (uvx) clean; related pytest 88 passed, 1 skipped.
+
+### Exp 2 (probe only, no code change): can the newtest10 ding be separated from the whistle and clank?
+- Probe: broadband onsets within 0.5 s of each one-off cue, with strength and band levels.
+  whistle (newtest6): onset 6.437 s strength 0.399 (kick-like, sub heavy) and 6.661 s strength 0.223 (high band
+  -35 dB, air -31 dB). clank (newtest9): onset 9.125 s strength 0.354 (low-mid heavy). ding removed (newtest10):
+  onset 6.400 s strength 0.284 (mid -26 dB, high -43 dB).
+- Result: strength does not separate the ding's onset from the real one-offs (0.284 vs 0.223 and 0.354). Simple
+  spacing rules do not either. No gate was tested. Experiment 2 is open; it needs a decision on which feature to use.
 
 ## Decisions (2026-11-02, coordinator's open questions)
 
@@ -58,7 +65,7 @@ Row 2 is the baseline the checker climb is measured against (score.py --label v2
 
 - The checker's cut list comes from `AgenticVideoEngine.detect_cuts` (threshold 0.25, plus soft transitions).
   At 0.25, 3-ally-down and 4-replay give 0 cuts; 1-clean gives 3 (plan 4).
-- A lower threshold (0.15) finds 7 cuts on 3-ally-down (plan 4), 1 on 4-replay (plan 1), and 8 on 1-clean (plan 4).
-  Most of the extra cuts are not cuts, so lowering the threshold is not the fix.
+- A lower threshold (0.15) adds extra cuts. The counts were not recorded in this log, so they are not
+  quoted here. Treat "lower threshold" as untested for precision until a measured run is logged.
 - Next idea (not started): a same-footage cut needs a change in framing or colour with the same content. A detector
   on a coarse grid of local colour histograms should separate that from motion. Not built in this session.
