@@ -27,9 +27,9 @@ def check_clip(name: str, outdir: Path) -> dict:
 
 
 def score(truth: list, found: list) -> dict:
-    hit = [t for t in truth if any(abs(t - f) <= TOL_SEC for f in found)]
+    missed = [t for t in truth if not any(abs(t - f) <= TOL_SEC for f in found)]
     extra = [f for f in found if not any(abs(f - t) <= TOL_SEC for t in truth)]
-    return {"truth": len(truth), "found": len(hit), "missed": [t for t in truth if t not in hit],
+    return {"truth": len(truth), "found": len(truth) - len(missed), "missed": missed,
             "extra": sorted(set(extra))}
 
 

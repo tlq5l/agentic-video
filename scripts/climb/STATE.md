@@ -35,5 +35,18 @@ Remaining blockers:
 
 Open side effect: an absent one-off cue near an unrelated onset now comes out early (newtest10 ding), accepted.
 
-Next: the blockers above need a new signal. Floor has no cues, so new cue-path changes need the faulted and plain
-runs as their false-alarm check. Waiting for the owner's call on whether to design the new signal.
+Next: the one rebuild (owed under the long-climb rule): a leave-one-out band signal for blocker 1, on branch
+climb/missing-sound-2026-11-02. Floor has no cues, so cue-path changes use the faulted and plain runs as their
+false-alarm check.
+
+## Standing grant and run rules (owner 2026-11-02, "Long climbs"; away mode until 2026-11-03 20:29 UTC)
+
+- No questions mid-run. Decide alone, log the choice and why in LOG.md, keep going.
+- Stop only when: the scored check fails (keep rule above), the rebuild's third review fails, no blocker fix is
+  left, or the finish line is reached.
+- Decisions already made: score = caught minus 2 x false alarms; held-out set newtest7-10 is never tuned on;
+  one rebuild per climb; a planted clip with one removed one-off sound must be flagged and its clean twin must pass;
+  landing goes through `away-ship merge` after a fresh Sol PASS on the exact commit.
+- Load gate: start no worker while the 1-minute load is over 60 or free memory under 25%; at most 2 side agents.
+- Log one spend line per run in LOG.md: date, model, tokens, what it bought.
+

@@ -86,8 +86,7 @@ def bright_flash_runs(video_path: str, fps: float, timeout_sec: float = 900.0) -
     base = np.full(count, np.nan, dtype=np.float32)
     for k in range(hi, count - hi):
         base[k] = np.median(np.concatenate([level[k - hi:k - lo + 1], level[k + lo:k + hi + 1]]))
-    lifted = np.zeros(count, dtype=bool)
-    lifted[hi:count - hi] = (level[hi:count - hi] - base[hi:count - hi]) >= _FLASH_LIFT
+    lifted = (level - base) >= _FLASH_LIFT
     runs: List[Dict[str, Any]] = []
     i = 0
     while i < count:

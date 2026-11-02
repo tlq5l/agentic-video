@@ -1028,7 +1028,7 @@ def _checked_section(meta: Any, cut_times: Sequence[float], black: Sequence[Mapp
                      visual: Mapping[str, Any], silence: Sequence[Mapping[str, Any]],
                      loudness: Optional[Mapping[str, Any]], same_footage: Sequence[float] = ()) -> Dict[str, Any]:
     """What the check looked at, with numbers, so an empty problem list still says what ran."""
-    all_cuts = list(cut_times) + list(same_footage)
+    all_cuts = [*cut_times, *same_footage]
 
     def intended(*points: float) -> bool:
         return any(abs(point - cut) <= _CUT_NEIGHBOURHOOD_SEC for point in points for cut in all_cuts)
@@ -1108,8 +1108,7 @@ def _markdown_report(report: Mapping[str, Any]) -> str:
             agreement["agreed"], agreement["total"], 100.0 * agreement["rate"],
         )])
     if report.get("checked"):
-        lines.extend(["", "## Checked", ""])
-        lines.extend(_checked_lines(report["checked"]))
+        lines.extend(["", "## Checked", "", *_checked_lines(report["checked"])])
     if not candidates:
         lines.extend(["", "No candidate problems found."])
         return "\n".join(lines) + "\n"

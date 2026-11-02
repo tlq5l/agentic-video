@@ -64,13 +64,13 @@ def run_check(video: Path, cues: Path, intent: Path, out: Path, use_inputs: bool
     if proc.returncode not in (0, 1) or not report_path.exists():
         return {"error": (proc.stderr or proc.stdout)[-400:], "confirmed": [], "checked_ok": False}
     report = json.loads(report_path.read_text(encoding="utf-8"))
-    confirmed = [c for c in report.get("candidates", []) if c.get("confirmed")]
+    confirmed = [{"kind": c.get("kind"), "start_sec": c.get("start_sec"),
+                  "end_sec": c.get("end_sec"), "id": c.get("id")}
+                 for c in report.get("candidates", []) if c.get("confirmed")]
     checked = report.get("checked")
-    checked_ok = isinstance(checked, dict) and all(f in checked for f in CHECKED_FIELDS)
-    return {"confirmed": [{"kind": c.get("kind"), "start_sec": c.get("start_sec"),
-                           "end_sec": c.get("end_sec"), "id": c.get("id")} for c in confirmed],
-            "checked_ok": checked_ok, "checked_missing": [f for f in CHECKED_FIELDS
-                                                          if not (isinstance(checked, dict) and f in checked)]}
+    available = checked if isinstance(checked, dict) else {}
+    missing = [f for f in CHECKED_FIELDS if f not in available]
+    return {"confirmed": confirmed, "checked_ok": not missing, "checked_missing": missing}
 
 
 def match_entries(entries, confirmed):
@@ -170,8 +170,8 @@ def main() -> int:
                     len(res["shared_not_scored"]), len(res["duplicates_not_scored"]), res["score"],
                     res["checked_ok"]))
     for group in ("dev", "held_out"):
-        scores = [r["score"] for r in summary[group].values() if r.get("score") is not None]
-        summary[group + "_total"] = sum(scores)
+        summary[group + "_total"] = sum(
+            r["score"] for r in summary[group].values() if r.get("score") is not None)
     summary["floor"] = floor_check(label_dir)
     print("TOTAL dev {}  held_out {}  floor confirmed {}".format(
         summary["dev_total"], summary["held_out_total"], summary["floor"]["confirmed_total"]))
