@@ -70,6 +70,7 @@ def _load_cues(path: Optional[str]) -> List[Dict[str, Any]]:
         data = data.get("cues", [])
     if not isinstance(data, list):
         raise ValueError("cues.json must contain an array or an object with a 'cues' array")
+    folder = Path(path).expanduser().resolve().parent
     deduped: List[Dict[str, Any]] = []
     for item in data:
         t = float(item.get("time_sec", item.get("t", 0.0)))
@@ -78,7 +79,11 @@ def _load_cues(path: Optional[str]) -> List[Dict[str, Any]]:
         if any(_label_key(kept.get("label", "cue")) == label and abs(_cue_time(kept) - t) <= 0.002
                for kept in deduped):
             continue
-        deduped.append(dict(item))
+        entry = dict(item)
+        if entry.get("sound_file"):
+            # A relative sound_file is read from the folder that holds cues.json.
+            entry["sound_file"] = str(folder / Path(str(entry["sound_file"])).expanduser())
+        deduped.append(entry)
     return deduped
 
 
@@ -1088,7 +1093,9 @@ def _checked_lines(checked: Mapping[str, Any]) -> List[str]:
         "- Silence gaps: {}.".format(", ".join("{:.3f}–{:.3f} s".format(g["start_sec"], g["end_sec"])
                                                for g in checked.get("silence_gaps", [])) or "none"),
         "- Errored checks: {}.".format(", ".join(errored) if errored else "none"),
-    ]
+    ] + ([
+        "- Sound files matched: {} of {} cues.".format(checked["sound_files"]["matched"], checked["sound_files"]["cues"]),
+    ] if "sound_files" in checked else [])
 
 
 def _markdown_report(report: Mapping[str, Any]) -> str:
@@ -1282,6 +1289,11 @@ def check_video(
         visual["bright_flash_error"] = scrub_jev(exc)[:300]
     checked = _checked_section(meta, scene_cut_times, black, visual, loudness.get("silence_gaps", []),
                                loudness_info, same_footage=same_footage)
+    if any(cue.get("sound_file") for cue in cues):
+        checked["sound_files"] = {
+            "cues": sum(1 for cue in cues if cue.get("sound_file")),
+            "matched": sum(1 for cue in sync.get("cues", []) if (cue.get("sound_file") or {}).get("present")),
+        }
 
     candidates = _build_candidates(sync, loudness, onsets, cues, intent=intent, balance=balance, visual=visual,
                                    clipping=clipping)

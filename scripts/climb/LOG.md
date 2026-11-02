@@ -237,3 +237,31 @@ Row 2 is the baseline the checker climb is measured against (score.py --label v2
 - PR 58 fix round 1 (Haiku fixer + Sol review 2, 188k tokens): 6 fixed, 2 new findings.
 - Missing-sound bench (Haiku builder + checker, 240k tokens): 27-variant bench; baseline 4/19 dev, 3/8 held-out.
 - Signal study (Haiku, 235k tokens): 4 signals, none holds on held-out; rebuild verdict.
+
+## Sound-file climb (2026-11-02)
+
+Tries (dev = newtest, newtest2-6; FA = false alarms; held-out not used for tuning):
+
+| try | gain / corr | dev caught | dev FA | dev score | note |
+|-----|-------------|-----------|--------|-----------|------|
+| t1 | 0.35 / 0.30 (spec defaults) | 5/19 | 6 | -7 | present sounds read gain near 0.1 |
+| t2 | 0.08 / 0.10 | 12/19 | 6 | 0 | kept: best dev score, FA not up |
+| t3 | 0.15 / 0.10 | 11/19 | 6 | -1 | |
+
+- Offline sweep of the dev reports (gain and correlation only) suggested 16-17 caught at several settings; end to end gave 12 at best, because the scorer's twin rule and the author-note rule are not in the sweep.
+- Final, all splits, run once with t2: dev 12/19 FA 6 score 0; held_out 8/8 FA 2 score 4. nosounds: dev 4/19 FA 6, held_out 3/8 FA 2 (matches baseline2).
+
+Decisions:
+- D1: sound_file is read from the cues.json folder when relative, or taken as absolute; resolved in _load_cues; no other cue field changes.
+- D2: matching uses the mix decoded at 48 kHz mono (_decode_pcm) and FFT cross-correlation over starts within search_window_ms (500 ms) of the cue.
+- D3: a cue's file verdict replaces its mix verdict: absent gives missing (cue_missing); present with |lag| over tolerance gives early or late; else ok. Applied after shared-displacement attribution, before the uncued-sound check.
+- D4: the Checked line "Sound files matched: N of M cues." appears only when a cue carries sound_file; M counts those cues, N counts those whose file is present.
+- D5: candidate numbers gain a sound_file entry only for file cues; the report holds gain, correlation and lag_ms per cue.
+- D6: bench sound files are the generator's signal argument before pan and level, mixed to mono by the channel mean, written as float32 so peaks above 1.0 survive.
+- D7: a one-off cue maps to a placement only when exactly one call lies within 0.02 s and names it, with the pick_case skip-word rule; the map is built from the pristine cues.
+- D8: score --split dev added so tuning never computes held-out rows; held-out ran once, at the end.
+- D9: thresholds tuned on dev only (t1-t3); t2 kept.
+- D10: .climb-tmp was empty in this worktree, so trace and build were rerun here; the no-skip render check passed in build.
+- D11: left as is: the twin rule in the scorer and the author-note rule in the checker (owner rules, not changed here).
+- Checks: ruff clean; pytest -k subset 138 passed, 1 skipped; score.py vs trim dev 12, held_out 12, floor 0 (COMPARE +0 +0 +0).
+- Spend: one Haiku worker run for this climb; token count not reported to the worker.

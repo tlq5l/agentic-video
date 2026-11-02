@@ -3112,6 +3112,69 @@ def _simple_confirms_stronger_displaced_attack(
     return False
 
 
+_SOUND_FILE_MIN_GAIN = 0.08
+_SOUND_FILE_MIN_CORRELATION = 0.10
+
+
+def _sound_file_match(samples: np.ndarray, cue_time: float, sound: np.ndarray, window_sec: float) -> Dict[str, float]:
+    """Gain and correlation of one cue's sound file in the mix, at its best start inside the window.
+
+    Start positions run from cue_time - window_sec to cue_time + window_sec. For each start the
+    least-squares gain is <file, mix> / <file, file>, and the normalised correlation is
+    <file, mix> / (|file| |mix segment|). One FFT cross-correlation gives every start at once.
+    """
+    length = len(sound)
+    sound_energy = float(np.dot(sound, sound))
+    p0 = int(round(cue_time * SAMPLE_RATE))
+    radius = int(round(window_sec * SAMPLE_RATE))
+    lo = max(0, p0 - radius)
+    hi = min(len(samples) - 1, p0 + radius)
+    if length == 0 or sound_energy <= 0.0 or hi < lo:
+        return {"gain": 0.0, "correlation": 0.0, "lag_sec": 0.0}
+    starts = hi - lo + 1
+    segment = np.zeros(starts + length - 1, dtype=np.float64)
+    available = min(len(segment), len(samples) - lo)
+    segment[:available] = samples[lo:lo + available]
+    size = 1 << int(np.ceil(np.log2(len(segment) + length)))
+    cross = np.fft.irfft(np.fft.rfft(segment, size) * np.conj(np.fft.rfft(sound, size)), size)[:starts]
+    squares = np.concatenate(([0.0], np.cumsum(segment * segment)))
+    index = np.arange(starts)
+    energy = np.maximum(squares[index + length] - squares[index], 1e-30)
+    gains = cross / sound_energy
+    correlations = cross / np.sqrt(sound_energy * energy)
+    best = int(np.argmax(gains))
+    return {"gain": float(gains[best]), "correlation": float(correlations[best]),
+            "lag_sec": ((lo + best) - p0) / float(SAMPLE_RATE)}
+
+
+def _apply_sound_file_verdicts(
+    cue_reports: List[Dict[str, Any]], normalized: Sequence[Mapping[str, Any]], samples: np.ndarray,
+    cache: Optional[MediaCache], search_window_ms: float, tolerance_ms: float,
+) -> None:
+    """A cue that names its sound file gets its verdict from that file in the mix, not from the mix alone."""
+    with_file = {(float(cue["time_sec"]), cue["label"]): cue for cue in normalized if cue.get("sound_file")}
+    for report in cue_reports:
+        cue = with_file.get((float(report["time_sec"]), report["label"]))
+        if cue is None:
+            continue
+        sound, _, _ = _decode_pcm(str(cue["sound_file"]), cache)
+        cue_time = float(report["time_sec"])
+        match = _sound_file_match(samples, cue_time, sound, search_window_ms / 1000.0)
+        present = match["gain"] >= _SOUND_FILE_MIN_GAIN and match["correlation"] >= _SOUND_FILE_MIN_CORRELATION
+        lag_ms = match["lag_sec"] * 1000.0
+        report["sound_file"] = {"path": str(cue["sound_file"]), "present": present,
+                                "gain": round(match["gain"], 4), "correlation": round(match["correlation"], 4),
+                                "lag_ms": round(lag_ms, 3)}
+        report["ambiguous_reason"] = None
+        if not present:
+            report.update(status="missing", matched_onset_time_sec=None, offset_ms=None,
+                          evidence="sound_file_absent")
+        else:
+            status = "ok" if abs(lag_ms) <= tolerance_ms else ("early" if lag_ms < 0.0 else "late")
+            report.update(status=status, matched_onset_time_sec=cue_time + match["lag_sec"],
+                          offset_ms=round(lag_ms, 3), evidence="sound_file_matched")
+
+
 def sync_check(
     source: str,
     cues: Optional[Sequence[Dict[str, Any]]] = None,
@@ -3172,11 +3235,14 @@ def sync_check(
         seen_cues.append((timestamp, cue_label.casefold()))
         band = _normalize_band_hz(cue.get("band_hz"))
         band_key = None if band is None else "{:.6f}:{:.6f}".format(band["low_hz"], band["high_hz"])
-        normalized.append({
+        entry = {
             "time_sec": round(timestamp, 6), "label": cue_label,
             "input_index": index, "band": band, "band_key": band_key,
             "group": _cue_group_name(cue_label),
-        })
+        }
+        if cue.get("sound_file"):
+            entry["sound_file"] = str(cue["sound_file"])
+        normalized.append(entry)
 
     # The cut scan is mostly an FFmpeg video decode, so run it beside the
     # audio work. Decode the audio first: beside the scan's FFmpeg processes
@@ -3696,6 +3762,7 @@ def sync_check(
         cue_reports.append(report)
     cue_reports.sort(key=lambda item: item["time_sec"])
     _attribute_shared_displacement(cue_reports)
+    _apply_sound_file_verdicts(cue_reports, normalized, samples, cache, search_window, tolerance)
 
     # An uncued instance also needs the simple check: an attack in the
     # group's own band at its usual level, beyond what the backing explains.
