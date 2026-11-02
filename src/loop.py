@@ -1018,10 +1018,10 @@ def _loudness_summary(video: Path) -> Dict[str, Any]:
         raise RuntimeError("ffmpeg loudness scan failed")
     summary = proc.stderr.rsplit("Summary:", 1)[-1]
     integrated = re.search(r"I:\s+(-?[\d.]+) LUFS", summary)
-    peak = re.search(r"True peak:\s+Peak:\s+(-?[\d.]+) dBFS", summary)
+    peak = re.search(r"True peak:\s+Peak:\s+(-?[\d.]+|-inf) dBFS", summary)
     if not integrated or not peak:
         raise RuntimeError("ebur128 summary has no integrated loudness or true peak")
-    return {"integrated_lufs": float(integrated.group(1)), "true_peak_dbtp": float(peak.group(1))}
+    return {"integrated_lufs": float(integrated.group(1)), "true_peak_dbtp": None if peak.group(1) == "-inf" else float(peak.group(1))}  # None: silent audio
 
 
 def _checked_section(meta: Any, cut_times: Sequence[float], black: Sequence[Mapping[str, Any]],
@@ -1067,8 +1067,9 @@ def _checked_lines(checked: Mapping[str, Any]) -> List[str]:
     elif loudness and "error" in loudness:
         loudness_line = "not measured ({})".format(loudness["error"])
     elif loudness:
-        loudness_line = "{:.1f} LUFS integrated, true peak {:.1f} dBTP".format(
-            loudness["integrated_lufs"], loudness["true_peak_dbtp"])
+        peak_db = loudness["true_peak_dbtp"]
+        loudness_line = "{:.1f} LUFS integrated, true peak {}".format(
+            loudness["integrated_lufs"], "silent (-inf dBTP)" if peak_db is None else "{:.1f} dBTP".format(peak_db))
     else:
         loudness_line = "not measured"
     cuts = checked.get("cuts", [])

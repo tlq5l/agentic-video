@@ -131,5 +131,5 @@ def bright_flash_runs(video_path: str, fps: float, timeout_sec: float = 900.0) -
             end = times[last + 1] if last + 1 < count else times[last] + 1.0 / float(fps)
             runs.append({"start_sec": round(times[first], 3), "end_sec": round(end, 3),
                          "lift": round(float(lift[i:j + 1].max()), 1)})
-        i = j + 1
+        i = max(j, last) + 1  # the expanded stretch is one run; do not scan its frames again
     return runs

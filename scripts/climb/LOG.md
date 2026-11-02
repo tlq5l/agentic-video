@@ -169,3 +169,11 @@ Row 2 is the baseline the checker climb is measured against (score.py --label v2
 - STATE.md bright-run count updated to 2 (1 unkeyed).
 - Checks: ruff pass, pytest 89 passed 1 skipped, score dev 12 held_out 12 floor 0 (+0).
 - Review count: 3 failed Sol reviews (6, 2, 3 findings). Stopped here; merge waits for the owner.
+
+## PR 58 review round 4 fixes (2026-11-02)
+
+- Sol review 4 (owner OK quoted: "let claude code not claude desktop sonnet 5.5 to solve these blcokers and utilize imac pro and boxes") found 3 P2s on bda85ae; all fixed:
+  1. score.py: items the plain render also confirms are removed before matching, so a shared item is never a catch.
+  2. loop.py: `Peak: -inf dBFS` (silent audio) is read; true_peak_dbtp is None and the Checked line says "silent".
+  3. picture_changes.py: the scan resumes after the expanded bright stretch, so one flash is one record.
+- Checks (on a Cloudflare box): silent AAC clip gives integrated -70.0, peak None; synthetic 220/80/220 flash gives one run; score.py dev 12, held_out 12, floor 0 (same as before).

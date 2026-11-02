@@ -120,13 +120,19 @@ def score_case(key_name: str, entries, label_dir: Path) -> dict:
     plain = run_check(pv, pc, pi, label_dir / (key_name + "-plain"))
     if "error" in fault:
         return {"case": key_name, "error": fault["error"], "score": None}
-    results, leftovers, duplicates = match_entries(entries, fault["confirmed"])
     plain_items = plain.get("confirmed", [])
-    false_alarms, shared = [], []
-    for c in leftovers:
+    # An item the plain (fixed) render also confirms is shared: neither a catch nor a false alarm.
+    # Remove those before matching so a shared item cannot be credited as a catch.
+    own, shared = [], []
+    for c in fault["confirmed"]:
         twin = any(p["kind"] == c["kind"] and abs(float(p["start_sec"]) - float(c["start_sec"])) <= TOL_SEC
                    for p in plain_items)
-        (shared if twin else false_alarms).append({"kind": c["kind"], "time": c["start_sec"]})
+        if twin:
+            shared.append({"kind": c["kind"], "time": c["start_sec"]})
+        else:
+            own.append(c)
+    results, leftovers, duplicates = match_entries(entries, own)
+    false_alarms = [{"kind": c["kind"], "time": c["start_sec"]} for c in leftovers]
     caught = sum(r["caught"] for r in results)
     return {
         "case": key_name,
