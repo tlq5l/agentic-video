@@ -7,8 +7,11 @@ that sound at its cue, and does it stay quiet otherwise?
 Subcommands (run with .venv/bin/python from the worktree root):
   trace CASE...    log every placement call of each case's make_audio.py
   pick             choose the removals and write scripts/climb/missing_bench.json
-  build            render the baseline and one variant per removal, mux each onto out.mp4
+  build            render the baseline and one variant per removal, mux each onto out.mp4; also write
+                   each one-off sound as a wav and a cues_sounds.json whose cues name it (sound_file)
   score [--label]  run the checker on every baseline and variant and print the totals
+  score --sounds   the same, but each case uses its cues_sounds.json (cues carry sound_file)
+  score --split dev  only the dev cases (tuning; held-out rows are never computed)
 
 Temp output lives in .climb-tmp/missing/ (gitignored). The pristine case folders are only read.
 """
@@ -23,6 +26,7 @@ import linecache
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import wave
@@ -78,13 +82,16 @@ def copy_src(case: str) -> Path:
     return dst
 
 
-def render(src: Path, out_wav: Path, fn: str, param: str, skip: set, trace: Path | None) -> None:
+def render(src: Path, out_wav: Path, fn: str, param: str, skip: set, trace: Path | None,
+           sigdir: Path | None = None, sigcalls: frozenset = frozenset()) -> None:
     """One render in its own process: the generators build a module-level mix, so they run once each."""
     out_wav.parent.mkdir(parents=True, exist_ok=True)
     cmd = [str(PY), str(Path(__file__).resolve()), "_render", "--src", str(src), "--out", str(out_wav),
            "--fn", fn, "--param", param, "--skip", ",".join(str(i) for i in sorted(skip)) or "-"]
     if trace is not None:
         cmd += ["--trace", str(trace)]
+    if sigdir is not None:
+        cmd += ["--sigdir", str(sigdir), "--sigcalls", ",".join(str(i) for i in sorted(sigcalls)) or "-"]
     proc = subprocess.run(cmd, capture_output=True, text=True, cwd=str(src.parent))
     if proc.returncode != 0 or not out_wav.exists():
         raise SystemExit("render failed ({} skip={}):\n{}".format(src, sorted(skip), proc.stderr[-1500:]))
@@ -99,8 +106,11 @@ def run_render(argv: list[str]) -> None:
     ap.add_argument("--param", required=True)
     ap.add_argument("--skip", default="-")
     ap.add_argument("--trace", default=None)
+    ap.add_argument("--sigdir", default=None)
+    ap.add_argument("--sigcalls", default="-")
     a = ap.parse_args(argv)
     skip = set() if a.skip == "-" else {int(x) for x in a.skip.split(",")}
+    sigcalls = set() if a.sigcalls == "-" else {int(x) for x in a.sigcalls.split(",")}
     spec = importlib.util.spec_from_file_location("make_audio_copy", a.src)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -141,6 +151,11 @@ def run_render(argv: list[str]) -> None:
                     "span_start": int(round(t_sec * SAMPLE_RATE)), "span_len": sig_len,
                     "caller_line": line, "caller_fn": caller.f_code.co_name,
                     "tags": sorted(set(tags)), "skip_names": sorted(set(skip_names))})
+        if a.sigdir and idx in sigcalls and arrays:
+            # The placed signal before the mix's pan and level (the generator's own arguments).
+            placed = min(arrays, key=lambda v: v.size)
+            mono = placed if placed.ndim == 1 else placed.mean(axis=0 if placed.shape[0] <= placed.shape[1] else 1)
+            write_float_wav(Path(a.sigdir) / f"call{idx}.wav", mono, SAMPLE_RATE)
         if idx in skip:
             return None
         return orig(*args, **kwargs)
@@ -253,6 +268,35 @@ def cmd_pick() -> None:
     BENCH.write_text(json.dumps(doc, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+def write_float_wav(path: Path, mono: np.ndarray, rate: int) -> None:
+    """Mono 32-bit float WAV: a placed signal can exceed 1.0 before the mix's level and pan."""
+    data = np.ascontiguousarray(mono, dtype="<f4").tobytes()
+    fmt = struct.pack("<HHIIHH", 3, 1, rate, rate * 4, 4, 32)
+    body = (b"WAVE" + b"fmt " + struct.pack("<I", len(fmt)) + fmt
+            + b"data" + struct.pack("<I", len(data)) + data)
+    path.write_bytes(b"RIFF" + struct.pack("<I", len(body)) + body)
+
+
+def cue_sound_map(case: str) -> dict:
+    """Cue index -> placement call index, for each one-off cue (the same skip-word rule as pick_case).
+
+    A cue maps to a placement when exactly one call is within 0.02 s of it and names the same sound.
+    """
+    calls = json.loads((WORK / case / "trace.json").read_text(encoding="utf-8"))["calls"]
+    cues = json.loads((MEDIA / (case + "-pristine") / "cues.json").read_text(encoding="utf-8"))
+    tws = {c["call_index"]: tag_words(c) for c in calls}
+    out = {}
+    for index, cue in enumerate(cues):
+        label, t = str(cue["label"]), float(cue["time_sec"])
+        if has_skip(label):
+            continue
+        rel = [c for c in calls if abs(float(c["time_sec"]) - t) <= 0.02 and tws[c["call_index"]]
+               and overlaps(label, tws[c["call_index"]]) and not has_skip(" ".join(c["skip_names"]))]
+        if len(rel) == 1:
+            out[index] = rel[0]["call_index"]
+    return out
+
+
 def same_render(a: Path, b: Path) -> bool:
     x = np.frombuffer(a.read_bytes(), dtype=np.uint8)
     y = np.frombuffer(b.read_bytes(), dtype=np.uint8)
@@ -260,7 +304,7 @@ def same_render(a: Path, b: Path) -> bool:
 
 
 def mux_variant(case: str, split: str, variant: str, wav: Path, pristine: Path,
-                manifest: list, rem: dict | None) -> None:
+                manifest: list, rem: dict | None, sounds_cues: Path) -> None:
     vdir = wav.parent
     for name in ("cues.json", "INTENT.md"):
         shutil.copy2(pristine / name, vdir / name)
@@ -273,7 +317,8 @@ def mux_variant(case: str, split: str, variant: str, wav: Path, pristine: Path,
                      "cue_label": rem and rem["cue_label"], "caller_line": rem and rem["caller_line"],
                      "gain": rem and rem["gain"], "max_residual_lsb": rem and rem["max_residual_lsb"],
                      "span": rem and rem["span"],
-                     "video": str(video), "cues": str(vdir / "cues.json"), "intent": str(vdir / "INTENT.md")})
+                     "video": str(video), "cues": str(vdir / "cues.json"),
+                     "cues_sounds": str(sounds_cues), "intent": str(vdir / "INTENT.md")})
 
 
 def read_pcm(path: Path) -> tuple:
@@ -336,12 +381,20 @@ def cmd_build() -> None:
         d = WORK / case
         pristine = MEDIA / (case + "-pristine")
         base_wav = d / "base" / "audio.wav"
-        render(src, base_wav, fn, param, set(), None)
+        smap = cue_sound_map(case)
+        sigdir = d / "signals"
+        sigdir.mkdir(parents=True, exist_ok=True)
+        render(src, base_wav, fn, param, set(), None, sigdir, frozenset(smap.values()))
+        sounds_cues = d / "cues_sounds.json"
+        cues_doc = json.loads((pristine / "cues.json").read_text(encoding="utf-8"))
+        for index, call in smap.items():
+            cues_doc[index]["sound_file"] = str(sigdir / f"call{call}.wav")
+        sounds_cues.write_text(json.dumps(cues_doc, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
         orig_wav = d / "orig_audio.wav"
         proc = subprocess.run([str(PY), str(src), str(orig_wav)], cwd=str(d), capture_output=True, text=True)
         if proc.returncode != 0 or not same_render(base_wav, orig_wav):
             raise SystemExit(f"{case}: wrapped no-skip render differs from the unwrapped generator {proc.stderr[-500:]}")
-        mux_variant(case, split, "base", base_wav, pristine, manifest, None)
+        mux_variant(case, split, "base", base_wav, pristine, manifest, None, sounds_cues)
         for r in spec["removals"]:
             idx = r["call_index"]
             vwav = d / f"skip{idx}" / "audio.wav"
@@ -352,7 +405,7 @@ def cmd_build() -> None:
                 continue
             g, diff, span = pin_gain(base_wav, vwav, vtrace, idx)
             r = dict(r, gain=g, max_residual_lsb=diff, span=list(span))
-            mux_variant(case, split, f"skip{idx}", vwav, pristine, manifest, r)
+            mux_variant(case, split, f"skip{idx}", vwav, pristine, manifest, r, sounds_cues)
             print(f"{case} call {idx}: variant rendered, gain {g:.6f}, max residual outside span {diff} LSB")
     (WORK / "manifest.json").write_text(json.dumps(manifest, indent=1), encoding="utf-8")
     n = {s: sum(1 for m in manifest if m["split"] == s and not m["baseline"]) for s in ("dev", "held_out")}
@@ -363,14 +416,16 @@ def twin(c: dict, pool: list, tol: float) -> bool:
     return any(p["kind"] == c["kind"] and abs(float(p["start_sec"]) - float(c["start_sec"])) <= tol for p in pool)
 
 
-def cmd_score(label: str) -> None:
+def cmd_score(label: str, sounds: bool = False, split: str = "all") -> None:
     sys.path.insert(0, str(HERE))
     import score as S  # scripts/climb/score.py: run_check and TOL_SEC are reused, not copied
-    manifest = json.loads((WORK / "manifest.json").read_text(encoding="utf-8"))
+    manifest = [e for e in json.loads((WORK / "manifest.json").read_text(encoding="utf-8"))
+                if split == "all" or e["split"] == split]
+    cues_key = "cues_sounds" if sounds else "cues"
     root = WORK / "score_runs" / label
 
     def job(e: dict) -> dict:
-        return S.run_check(Path(e["video"]), Path(e["cues"]), Path(e["intent"]), root / e["case"] / e["variant"])
+        return S.run_check(Path(e["video"]), Path(e[cues_key]), Path(e["intent"]), root / e["case"] / e["variant"])
 
     with cf.ThreadPoolExecutor(max_workers=MAX_PARALLEL) as pool:
         results = list(pool.map(job, manifest))
@@ -409,7 +464,7 @@ def cmd_score(label: str) -> None:
                          "score": caught - 2 * fa}
         print(f"TOTAL {split}: variants {len(rs)} caught {caught} strict {strict} FA {fa} score {caught - 2 * fa}")
     base_counts = {c: len(v) for c, v in base.items()}
-    out = {"label": label, "totals": totals, "rows": rows, "baseline_confirmed_per_case": base_counts,
+    out = {"label": label, "sounds": sounds, "split": split, "totals": totals, "rows": rows, "baseline_confirmed_per_case": base_counts,
            "kinds_caught": sorted(CAUGHT_KINDS), "kinds_strict": sorted(STRICT_KINDS)}
     (WORK / "score").mkdir(parents=True, exist_ok=True)
     (WORK / "score" / f"{label}.json").write_text(json.dumps(out, indent=1, ensure_ascii=False), encoding="utf-8")
@@ -429,6 +484,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("build")
     s = sub.add_parser("score")
     s.add_argument("--label", default="run")
+    s.add_argument("--sounds", action="store_true", help="use each case's cues_sounds.json")
+    s.add_argument("--split", choices=["all", "dev"], default="all")
     a = ap.parse_args(argv)
     WORK.mkdir(parents=True, exist_ok=True)
     if a.cmd == "trace":
@@ -438,7 +495,7 @@ def main(argv: list[str] | None = None) -> int:
     elif a.cmd == "build":
         cmd_build()
     else:
-        cmd_score(a.label)
+        cmd_score(a.label, a.sounds, a.split)
     return 0
 
 
