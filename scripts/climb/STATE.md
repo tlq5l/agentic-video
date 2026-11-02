@@ -6,13 +6,13 @@
   score.py gives dev 12, held_out 12, floor 0 (same as trim; COMPARE +0 +0 +0).
 - Thresholds (src/media/audio.py): gain >= 0.08 and correlation >= 0.10 mean present. Spec defaults 0.35 / 0.30 were tried and
   failed on dev (5/19); the mix is peak-normalised, so present sounds read a gain near 0.1 (LOG.md, Sound-file climb).
-- Bench, final thresholds: dev caught 12/19, FA 6 (score 0; the nosounds baseline also has FA 6); held_out caught 8/8, FA 2 (score 4).
+- Bench, final (review round 2 fix): dev caught 12/19, FA 2 (score 8; the nosounds baseline has FA 6); held_out caught 8/8, FA 1 (score 6; nosounds FA 2).
   nosounds unchanged: dev 4/19 FA 6, held_out 3/8 FA 2.
-- Targets not reached: dev >= 17/19 with 0 FA, held_out >= 7/8 with 0 FA (held FA 2 is the same as nosounds).
+- Targets not reached: dev >= 17/19 with 0 FA, held_out >= 7/8 with 0 FA (held FA 1, nosounds 2).
 - How to run: `missing_bench.py trace CASE...`, then `build`, then `score --label NAME` (mix only) or `score --sounds --label NAME`
   (cues carry sound_file). `--split dev` runs only the dev cases (use it for tuning).
 - Left (not changed): 3 dev misses are inside author-note sections (newtest5 13.3 and 18.7, newtest6 17.1), which the checker
-  reports as informational; 13.0 text pop click 06 reads present in both mixes (corr 0.05); 14.4 deep drop shares its time
+  reports as informational; 13.0 text pop click 06 reads present in both mixes (before the round 2 fix, noise at corr 0.05 won the start pick; now only starts with corr >= 0.10 count; status after the fix not re-diagnosed); 14.4 deep drop shares its time
   and kind with a baseline cue_missing (scorer twin rule); 10.0 reveal impact still matches its file after removal
   (gain 0.32, corr 0.48); 19.2 glass tick not diagnosed.
 
