@@ -1,5 +1,24 @@
 # Climb state: render checker
 
+## Sound-file climb (2026-11-02): current best sounds-v2
+
+- Optional cues.json "sound_file" (relative to the cues.json folder, or absolute). Without it the checker output is unchanged:
+  score.py gives dev 12, held_out 12, floor 0 (same as trim; COMPARE +0 +0 +0).
+- Thresholds (src/media/audio.py): gain >= 0.08 and correlation >= 0.10 mean present. Spec defaults 0.35 / 0.30 were tried and
+  failed on dev (5/19); the mix is peak-normalised, so present sounds read a gain near 0.1 (LOG.md, Sound-file climb).
+- Bench, rerun on this Mac 2026-11-04 after rebasing onto main (label `rebase`; the pre-rebase head c46c20e gives the same):
+  dev caught 12/19, FA 6 (score 0); held_out caught 8/8, FA 2 (score 4). nosounds: dev 4/19 FA 6, held_out 3/8 FA 2.
+  Sound files remove newtest10 cue_missing@18.89 and add newtest9 cue_missing@14.40, so FA is flat.
+  The round 2 box run recorded dev FA 2 and held_out FA 1; that does not reproduce here (cause not yet found).
+- Targets not reached: dev >= 17/19 with 0 FA, held_out >= 7/8 with 0 FA (held FA 2, nosounds 2).
+- How to run: `missing_bench.py trace CASE...`, then `build`, then `score --label NAME` (mix only) or `score --sounds --label NAME`
+  (cues carry sound_file). `--split dev` runs only the dev cases (use it for tuning).
+- Left (not changed): 3 dev misses are inside author-note sections (newtest5 13.3 and 18.7, newtest6 17.1), which the checker
+  reports as informational; 13.0 text pop click 06 reads present in both mixes (before the round 2 fix, noise at corr 0.05 won the start pick; now only starts with corr >= 0.10 count; status after the fix not re-diagnosed); 14.4 deep drop shares its time
+  and kind with a baseline cue_missing (scorer twin rule); 10.0 reveal impact still matches its file after removal
+  (gain 0.32, corr 0.48); 19.2 glass tick not diagnosed.
+
+
 Goal: the checker (`python -m src.loop check <video>`) catches more planted faults with fewer false alarms, and
 its report always says what it checked.
 
@@ -35,8 +54,9 @@ Remaining blockers:
 
 Open side effect: an absent one-off cue near an unrelated onset now comes out early (newtest10 ding), accepted.
 
-Next: the one rebuild (owed under the long-climb rule): a leave-one-out band signal for blocker 1, on branch
-climb/missing-sound-2026-11-02. Floor has no cues, so cue-path changes use the faulted and plain runs as their
+Rebuild done and failed (LOG.md "Rebuild verdict"): no mix-only signal flags removed one-off sounds on held-out.
+Bench: `scripts/climb/missing_bench.py` (27 one-sound-removed variants; current checker 4/19 dev, 3/8 held-out).
+Done (sound-file climb, above): an optional input with each cue's sound file, matched in the mix. Floor has no cues, so cue-path changes use the faulted and plain runs as their
 false-alarm check.
 
 ## Standing grant and run rules (owner 2026-11-02, "Long climbs"; away mode until 2026-11-03 20:29 UTC)
