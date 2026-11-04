@@ -31,3 +31,6 @@ dist/
 
 # Local session markers.
 :memory:*
+
+# Scratch output of the climb (scripts/climb), never committed.
+.climb-tmp/
