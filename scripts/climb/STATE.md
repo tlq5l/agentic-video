@@ -6,9 +6,11 @@
   score.py gives dev 12, held_out 12, floor 0 (same as trim; COMPARE +0 +0 +0).
 - Thresholds (src/media/audio.py): gain >= 0.08 and correlation >= 0.10 mean present. Spec defaults 0.35 / 0.30 were tried and
   failed on dev (5/19); the mix is peak-normalised, so present sounds read a gain near 0.1 (LOG.md, Sound-file climb).
-- Bench, final (review round 2 fix): dev caught 12/19, FA 2 (score 8; the nosounds baseline has FA 6); held_out caught 8/8, FA 1 (score 6; nosounds FA 2).
-  nosounds unchanged: dev 4/19 FA 6, held_out 3/8 FA 2.
-- Targets not reached: dev >= 17/19 with 0 FA, held_out >= 7/8 with 0 FA (held FA 1, nosounds 2).
+- Bench, rerun on this Mac 2026-11-04 after rebasing onto main (label `rebase`; the pre-rebase head c46c20e gives the same):
+  dev caught 12/19, FA 6 (score 0); held_out caught 8/8, FA 2 (score 4). nosounds: dev 4/19 FA 6, held_out 3/8 FA 2.
+  Sound files remove newtest10 cue_missing@18.89 and add newtest9 cue_missing@14.40, so FA is flat.
+  The round 2 box run recorded dev FA 2 and held_out FA 1; that does not reproduce here (cause not yet found).
+- Targets not reached: dev >= 17/19 with 0 FA, held_out >= 7/8 with 0 FA (held FA 2, nosounds 2).
 - How to run: `missing_bench.py trace CASE...`, then `build`, then `score --label NAME` (mix only) or `score --sounds --label NAME`
   (cues carry sound_file). `--split dev` runs only the dev cases (use it for tuning).
 - Left (not changed): 3 dev misses are inside author-note sections (newtest5 13.3 and 18.7, newtest6 17.1), which the checker
