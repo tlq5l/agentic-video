@@ -39,19 +39,6 @@ Takes about 2 minutes. Output: one line per case, a TOTAL line, and `.climb-tmp/
 - Clean floor: the four Rakan clips only. The white flashes in 2-kill-rush are intended and must not be
   confirmed.
 
-## Missing-sound bench (scripts/climb/missing_bench.py)
-
-Removes one one-off sound per case and checks whether the checker flags it at its cue. Subcommands:
-
-    .venv/bin/python scripts/climb/missing_bench.py trace newtest newtest2 ...   # log placement calls
-    .venv/bin/python scripts/climb/missing_bench.py build                        # renders, muxes, sound wavs, cues_sounds.json
-    .venv/bin/python scripts/climb/missing_bench.py score --label NAME           # mix-only checker
-    .venv/bin/python scripts/climb/missing_bench.py score --sounds --label NAME  # cues carry sound_file
-    .venv/bin/python scripts/climb/missing_bench.py score --sounds --split dev --label NAME   # dev only, for tuning
-
-build also writes each one-off sound as signals/callN.wav (placed signal, mono, 48 kHz, before pan and level) and a
-cues_sounds.json per case whose cues carry sound_file. A removed sound's cue keeps its sound_file: the file is known, the mix lacks it.
-
 ## Sources
 
 Every key entry has a `source` field: the generator diff between the faulted and plain files, with the
