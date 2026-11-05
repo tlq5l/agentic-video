@@ -96,7 +96,7 @@ What is macOS-only:
 - On-screen text matching in `count_occurrences` (`text=`) uses Apple Vision through pyobjc.
 - The bench-v1 harness uses `sandbox-exec`; some tests and generators use `say`. Tests that need a missing tool skip themselves.
 
-The core tools run on Linux. A fresh install of 0.3.1 on Debian 12 (x86_64, ffmpeg 5.1) passed the probe, frame and speech-to-text checks; other distributions and CPUs are untested.
+The core tools run on Linux. A fresh install of 0.3.4 from PyPI on Debian 12 (x86_64, Python 3.11, ffmpeg 5.1.9) passed the probe, frame and speech-to-text checks; other distributions and CPUs are untested.
 
 ### Optional: faster, more accurate speech (whisper.cpp turbo)
 
@@ -168,6 +168,14 @@ claude mcp add -s user agentic-video -e PYTHONPATH="$PWD" -- "$PWD/.venv/bin/pyt
 ```
 
 By default results stay small enough for Claude Code: images are saved as files and the result gives their `file_path` (the agent opens the file). `frame_at` and `spectrogram_window` write PNG; contact sheets and frame grids (`contact_sheet`, `review_video`, `overview_chunks`, `inspect_window`, `inspect_windows`, `inspect_moments`) write JPEG; and a long `transcribe` result lists the first part of the transcript plus a `transcript_path` file for the rest. A client that renders images from the result itself can add `-e AGENTIC_VIDEO_INLINE_IMAGES=1`; results then carry base64 images and can pass 1 MB. Changed: earlier versions included base64 images by default; if you relied on that, set `AGENTIC_VIDEO_INLINE_IMAGES=1` to restore it.
+
+### MCP Registry
+
+The server's MCP Registry name is `io.github.tlq5l/agentic-video`. Its PyPI package is `agentic-video`, and it uses the stdio transport. To install the package from a registry client:
+
+```sh
+uvx agentic-video
+```
 
 ### Tell your agent to use it (paste into your AGENTS.md or CLAUDE.md)
 
