@@ -2331,6 +2331,9 @@ _SIMPLE_STRONG_DISPLACED_REFERENCE_GAIN_DB = 3.0
 # Cues closer than this to the start of the file have no pre-roll: neither an
 # attack rise nor the comparison moments (which start at 0.12 s) can be measured.
 _START_PREROLL_SEC = 0.12
+# A one-off cue (no other instance of its sound) may sound this far from its cue and still be found.
+_ONE_OFF_SLOT_SEC = 0.5
+_ONE_OFF_MIN_STRENGTH = 0.2
 _USUAL_LEVEL_MARGIN_DB = 3.0
 _SOFT_ATTACK_BUILD_BEATS = 4.0
 _SOFT_ATTACK_BUILD_FIRST_PASS_BEATS = 2.0
@@ -3056,6 +3059,31 @@ def _simple_supports_time(simple: Mapping[str, Any], at: float, tolerance_sec: f
     return False
 
 
+def _one_off_displaced(broad_onsets: Sequence[Mapping[str, Any]], cue_time: float, tolerance_sec: float,
+                       search_window_sec: float, cue_times: Sequence[float]) -> Optional[float]:
+    """Where a one-off cue's sound lands when it is a clear broadband attack away from the cue.
+
+    The nearest onset up to the search window either side of the cue (capped at
+    _ONE_OFF_SLOT_SEC, so a wider window does not widen this fallback), outside tolerance,
+    at least _ONE_OFF_MIN_STRENGTH strong, and not within 0.1 s of any cue (an onset that
+    sits on another cue belongs to that cue). Nearest, not strongest: a louder sound
+    that lands on the other side of the cue is more likely a different sound.
+    """
+    reach = min(_ONE_OFF_SLOT_SEC, search_window_sec)
+    best = None
+    for onset in broad_onsets:
+        time = float(onset["time_sec"])
+        distance = abs(time - cue_time)
+        if distance <= tolerance_sec or distance > reach:
+            continue
+        if float(onset.get("strength", 0.0)) < _ONE_OFF_MIN_STRENGTH or any(
+                abs(time - other) <= 0.1 for other in cue_times):
+            continue
+        if best is None or distance < best[1]:
+            best = (time, distance)
+    return None if best is None else best[0]
+
+
 def _simple_confirms_stronger_displaced_attack(
     simple: Mapping[str, Any], cue_time: float, displaced_time: float, tolerance_sec: float,
 ) -> bool:
@@ -3082,6 +3110,83 @@ def _simple_confirms_stronger_displaced_attack(
                 and test["level_db"] - test["reference_db"] >= _SIMPLE_STRONG_DISPLACED_REFERENCE_GAIN_DB):
             return True
     return False
+
+
+_SOUND_FILE_MIN_GAIN = 0.08
+_SOUND_FILE_MIN_CORRELATION = 0.10
+
+
+def _sound_file_match(samples: np.ndarray, cue_time: float, sound: np.ndarray, window_sec: float) -> Dict[str, float]:
+    """Gain and correlation of one cue's sound file in the mix, at its best start inside the window.
+
+    Start positions run from cue_time - window_sec to cue_time + window_sec. For each start the
+    least-squares gain is <file, mix> / <file, file>, and the normalised correlation is
+    <file, mix> / (|file| |mix segment|). One FFT cross-correlation gives every start at once.
+    """
+    length = len(sound)
+    sound_energy = float(np.dot(sound, sound))
+    p0 = int(round(cue_time * SAMPLE_RATE))
+    radius = int(round(window_sec * SAMPLE_RATE))
+    lo = max(0, p0 - radius)
+    hi = min(len(samples) - 1, p0 + radius)
+    if length == 0 or sound_energy <= 0.0 or hi < lo:
+        return {"gain": 0.0, "correlation": 0.0, "lag_sec": 0.0}
+    starts = hi - lo + 1
+    segment = np.zeros(starts + length - 1, dtype=np.float64)
+    available = min(len(segment), len(samples) - lo)
+    segment[:available] = samples[lo:lo + available]
+    size = 1 << int(np.ceil(np.log2(len(segment) + length)))
+    cross = np.fft.irfft(np.fft.rfft(segment, size) * np.conj(np.fft.rfft(sound, size)), size)[:starts]
+    squares = np.concatenate(([0.0], np.cumsum(segment * segment)))
+    index = np.arange(starts)
+    energy = np.maximum(squares[index + length] - squares[index], 1e-30)
+    gains = cross / sound_energy
+    correlations = cross / np.sqrt(sound_energy * energy)
+    # The best start must clear BOTH thresholds: noise can have a bigger gain than the real sound
+    # while its correlation is near zero. Starts that pass are ranked by gain; with none passing, the
+    # report shows the start with the highest correlation.
+    passing = np.flatnonzero((gains >= _SOUND_FILE_MIN_GAIN) & (correlations >= _SOUND_FILE_MIN_CORRELATION))
+    if len(passing):
+        best = int(passing[np.argmax(gains[passing])])
+    else:
+        best = int(np.argmax(correlations))
+    return {"gain": float(gains[best]), "correlation": float(correlations[best]),
+            "lag_sec": ((lo + best) - p0) / float(SAMPLE_RATE)}
+
+
+def _apply_sound_file_verdicts(
+    cue_reports: List[Dict[str, Any]], normalized: Sequence[Mapping[str, Any]], samples: np.ndarray,
+    cache: Optional[MediaCache], search_window_ms: float, tolerance_ms: float,
+) -> None:
+    """A cue that names its sound file gets its verdict from that file in the mix, not from the mix alone."""
+    with_file = {(float(cue["time_sec"]), cue["label"]): cue for cue in normalized if cue.get("sound_file")}
+    for report in cue_reports:
+        cue = with_file.get((float(report["time_sec"]), report["label"]))
+        if cue is None:
+            continue
+        cue_time = float(report["time_sec"])
+        try:
+            sound, _, _ = _decode_pcm(str(cue["sound_file"]), cache)
+            match = _sound_file_match(samples, cue_time, sound, search_window_ms / 1000.0)
+        except Exception as exc:
+            # A missing or unreadable sound file is an error on this cue only; the mix-based verdict
+            # stays and the other cues are still checked.
+            report["sound_file"] = {"path": str(cue["sound_file"]), "present": False,
+                                    "error": f"{type(exc).__name__}: {exc}"[:300]}
+            continue
+        present = match["gain"] >= _SOUND_FILE_MIN_GAIN and match["correlation"] >= _SOUND_FILE_MIN_CORRELATION
+        lag_ms = match["lag_sec"] * 1000.0
+        report["sound_file"] = {"path": str(cue["sound_file"]), "present": present,
+                                "gain": round(match["gain"], 4), "correlation": round(match["correlation"], 4),
+                                "lag_ms": round(lag_ms, 3)}
+        report["ambiguous_reason"] = None
+        if not present:
+            report.update(status="missing", matched_onset_time_sec=None, offset_ms=None,
+                          evidence="sound_file_absent")
+        else:
+            status = "ok" if abs(lag_ms) <= tolerance_ms else ("early" if lag_ms < 0.0 else "late")
+            report.update(status=status, matched_onset_time_sec=cue_time + match["lag_sec"],
+                          offset_ms=round(lag_ms, 3), evidence="sound_file_matched")
 
 
 def sync_check(
@@ -3144,11 +3249,14 @@ def sync_check(
         seen_cues.append((timestamp, cue_label.casefold()))
         band = _normalize_band_hz(cue.get("band_hz"))
         band_key = None if band is None else "{:.6f}:{:.6f}".format(band["low_hz"], band["high_hz"])
-        normalized.append({
+        entry = {
             "time_sec": round(timestamp, 6), "label": cue_label,
             "input_index": index, "band": band, "band_key": band_key,
             "group": _cue_group_name(cue_label),
-        })
+        }
+        if cue.get("sound_file"):
+            entry["sound_file"] = str(cue["sound_file"])
+        normalized.append(entry)
 
     # The cut scan is mostly an FFmpeg video decode, so run it beside the
     # audio work. Decode the audio first: beside the scan's FFmpeg processes
@@ -3477,6 +3585,21 @@ def sync_check(
                 status, reason, evidence = "ok", None, "simple_check_on_time"
                 matched_time = simple_onset
             elif (reason == _NO_SIGNATURE_REASON and cue_time >= _START_PREROLL_SEC
+                  and (excess_one_off := _excess_over_companions_db(
+                      all_band_levels, cue_time, str(cue["group"]), normalized,
+                      60.0 / bpm_value if bpm is not None else None, len(samples) / SAMPLE_RATE,
+                      coincidence / 1000.0)) is not None and excess_one_off < _SIMPLE_EXCESS_DB
+                  and (displaced_one_off := _one_off_displaced(
+                      broad_onsets, cue_time, tolerance / 1000.0, search_window / 1000.0,
+                      [float(other["time_sec"]) for other in normalized]))
+                  is not None):
+                # A one-off sound whose own band attacks a little away from the cue
+                # (a late whistle or clank): report it there, not as missing.
+                matched_time = displaced_one_off
+                status = "early" if matched_time < cue_time else "late"
+                reason = None
+                evidence = "one_off_attack_displaced"
+            elif (reason == _NO_SIGNATURE_REASON and cue_time >= _START_PREROLL_SEC
                   and (excess := _excess_over_companions_db(
                       all_band_levels, cue_time, str(cue["group"]), normalized,
                       60.0 / bpm_value if bpm is not None else None, len(samples) / SAMPLE_RATE,
@@ -3653,6 +3776,7 @@ def sync_check(
         cue_reports.append(report)
     cue_reports.sort(key=lambda item: item["time_sec"])
     _attribute_shared_displacement(cue_reports)
+    _apply_sound_file_verdicts(cue_reports, normalized, samples, cache, search_window, tolerance)
 
     # An uncued instance also needs the simple check: an attack in the
     # group's own band at its usual level, beyond what the backing explains.

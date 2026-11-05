@@ -1,0 +1,371 @@
+{
+ "_about": "Planted faults. Faulted case = ~/.local/share/media-loop-work/<case>-pristine (untouched original, per coordinator 2026-11-02). The plain <case> dirs are fixer outputs: they are run only to find shared faults and are never scored. Times are seconds in the faulted video. 'kinds' lists the checker kinds that count as a catch. Source = generator diff (faulted vs plain) with the intended time from cues.json or the generator timing.",
+ "_sync_kinds": [
+  "cue_late",
+  "cue_early"
+ ],
+ "_mix_kinds": [
+  "clipping",
+  "loudness_step",
+  "stereo_balance_shift",
+  "stereo_off_centre"
+ ],
+ "_visual_kinds": [
+  "text_cropped",
+  "text_late",
+  "text_early",
+  "flash_frame",
+  "blank_flash",
+  "frozen_picture"
+ ],
+ "dev": {
+  "newtest": [
+   {
+    "time": 5.625,
+    "kinds": [
+     "clipping",
+     "loudness_step"
+    ],
+    "label": "pad bed +10 dB, 5.625-7.5 s",
+    "source": "newtest-pristine/make_audio.py pad_gain window (plain dir has none)"
+   },
+   {
+    "time": 7.5,
+    "kinds": [
+     "cue_late"
+    ],
+    "label": "cut whoosh 7.5",
+    "source": "make_audio.py whoosh times 7.75 (faulted) vs 7.5 (plain); cues.json 7.5 cut whoosh; +250 ms"
+   },
+   {
+    "time": 8.0,
+    "kinds": [
+     "cue_missing"
+    ],
+    "label": "text pop click 04 at 8.0",
+    "source": "plain dir adds click_sound at 8.0; cues.json 8.0 text pop click 04; faulted lacks it"
+   },
+   {
+    "time": 15.0,
+    "kinds": [
+     "cue_early",
+     "cue_late"
+    ],
+    "label": "downbeat kick 13 at 15.0",
+    "source": "make_audio.py kick_times[12]=14.875 (faulted) vs 15.0 (plain, nominal); -125 ms"
+   }
+  ],
+  "newtest2": [
+   {
+    "time": 14.18,
+    "kinds": [
+     "clipping",
+     "loudness_step"
+    ],
+    "label": "pad bed +10 dB, 26-29 beats (14.18-15.82 s)",
+    "source": "newtest2-pristine/make_audio.py gain_start/gain_end pad_level"
+   },
+   {
+    "time": 3.273,
+    "kinds": [
+     "cue_late"
+    ],
+    "label": "cut whoosh 3.273",
+    "source": "make_audio.py whoosh 6*BEAT+0.25 (faulted) vs 6*BEAT (plain); cues.json 3.273; +250 ms"
+   },
+   {
+    "time": 4.364,
+    "kinds": [
+     "cue_missing"
+    ],
+    "label": "text pop | FIND YOUR FREQUENCY 4.364",
+    "source": "plain dir adds pop at 8*BEAT; cues.json 4.364; faulted lacks it"
+   },
+   {
+    "time": 22.909,
+    "kinds": [
+     "cue_early",
+     "cue_late"
+    ],
+    "label": "text pop | DOORS OPEN 22:00 22.909",
+    "source": "make_audio.py pop 42*BEAT-0.12 (faulted) vs 42*BEAT (plain); -120 ms"
+   }
+  ],
+  "newtest3": [
+   {
+    "time": 25.714,
+    "kinds": [
+     "text_late"
+    ],
+    "label": "title TAKE ONE HOME 25.714",
+    "source": "make_video.py title time 26.429 (faulted) vs 25.714 (plain); cues.json chime | TAKE ONE HOME 25.714; +714 ms"
+   },
+   {
+    "time": 11.429,
+    "kinds": [
+     "cue_late"
+    ],
+    "label": "chime 11.429",
+    "source": "make_audio.py chime_times 11.6 (faulted) vs 11.429 (plain); +171 ms"
+   },
+   {
+    "time": 20.0,
+    "kinds": [
+     "uncued_sound"
+    ],
+    "label": "extra chime at 20.0 (no cue)",
+    "source": "faulted chime_times has 20.0; plain has none; cues.json has no chime at 20.0"
+   },
+   {
+    "time": 17.143,
+    "kinds": [
+     "stereo_balance_shift",
+     "stereo_off_centre",
+     "clipping"
+    ],
+    "label": "phrase 2 pan 0.85 from beat 24 (17.143 s)",
+    "source": "make_audio.py phrases pan 0.85 (faulted) vs -0.1 (plain), from beat 24 = 17.143 s"
+   },
+   {
+    "time": 22.857,
+    "kinds": [
+     "cue_missing"
+    ],
+    "label": "slide swish | BRING A CUTTING 22.857",
+    "source": "plain dir adds swish at beat 32 (22.857); cues.json 22.857 slide swish; faulted lacks it"
+   }
+  ],
+  "newtest4": [
+   {
+    "time": 27.6,
+    "kinds": [
+     "text_late"
+    ],
+    "label": "BOOK NOW 27.6",
+    "source": "make_video.py book_time 47*BEAT (faulted) vs 46*BEAT (plain) = 27.6 s; +600 ms"
+   }
+  ],
+  "newtest5": [
+   {
+    "time": 5.333,
+    "kinds": [
+     "clipping"
+    ],
+    "label": "sizzle 5.333",
+    "source": "make_audio.py sizzle gain +8 (faulted) vs -8 (plain)"
+   },
+   {
+    "time": 25.333,
+    "kinds": [
+     "cue_missing"
+    ],
+    "label": "clap 25.333",
+    "source": "make_audio.py pattern row 9 'k....k..' (faulted) vs 'k...ck..' (plain): clap at step 4 of bar 9 = 25.333 s; cues.json 25.333 clap"
+   },
+   {
+    "time": 21.333,
+    "kinds": [
+     "text_cropped",
+     "text_late",
+     "text_early"
+    ],
+    "label": "LIVE MUSIC EVERY NIGHT 21.333",
+    "source": "make_video.py text anchor lm (faulted) vs mm (plain) at x=640; text extends right"
+   }
+  ],
+  "newtest6": [
+   {
+    "time": 6.429,
+    "kinds": [
+     "cue_late"
+    ],
+    "label": "whistle 6.429",
+    "source": "make_audio.py SFX whistle 12.4 beats (faulted) vs 12 beats (plain) = 6.643 vs 6.429 s; +214 ms (SFX times are beats)"
+   },
+   {
+    "time": 25.714,
+    "kinds": [
+     "text_cropped",
+     "text_late",
+     "text_early"
+    ],
+    "label": "ARRIVE RESTED 25.714",
+    "source": "make_video.py text anchor lm (faulted) vs default (plain) at (W//2, 390)"
+   }
+  ]
+ },
+ "held_out": {
+  "newtest7-pristine": [
+   {
+    "time": 4.571,
+    "kinds": [
+     "cue_late"
+    ],
+    "label": "chime | THE GATHER",
+    "source": "make_audio.py EVENTS at(2,0.5) (faulted) vs at(2) (plain); cues.json 4.571; +280 ms"
+   },
+   {
+    "time": 11.43,
+    "kinds": [
+     "clipping"
+    ],
+    "label": "furnace roar (bar 5)",
+    "source": "make_audio.py GAINS roar 2.6 (faulted) vs 0.26 (plain)"
+   },
+   {
+    "time": 18.286,
+    "kinds": [
+     "text_cropped"
+    ],
+    "label": "SHAPING THE BLOOM",
+    "source": "make_video.py title size 128 (faulted) vs 72 (plain); right-edge crop"
+   }
+  ],
+  "newtest8-pristine": [
+   {
+    "time": 7.5,
+    "kinds": [
+     "flash_frame",
+     "blank_flash"
+    ],
+    "label": "one-frame insert, frames 225-226",
+    "source": "make_video.py (225,'rollers',0),(226,'typeset',106) only in faulted"
+   },
+   {
+    "time": 16.0,
+    "kinds": [
+     "cue_late"
+    ],
+    "label": "stamp | PULL THE PRESS 16.0",
+    "source": "make_audio.py stamp 32.5 (faulted) vs 32 (plain) in 0.5 s units; +250 ms"
+   },
+   {
+    "time": 13.0,
+    "kinds": [
+     "cue_missing"
+    ],
+    "label": "kick 13.0",
+    "source": "make_audio.py KICK pattern row 6 'x...' (faulted) vs 'x.x.' (plain), beat 2 of bar 6 = 13.0 s"
+   },
+   {
+    "time": 10.0,
+    "kinds": [
+     "clipping"
+    ],
+    "label": "roller swish | INK THE ROLLERS 10.0",
+    "source": "make_audio.py roller_swish gain +10 (faulted) vs -8 (plain)"
+   },
+   {
+    "time": 22.0,
+    "kinds": [
+     "text_cropped"
+    ],
+    "label": "bell | DRY ON THE LINE 22.0",
+    "source": "make_video.py 'dry' text x=800 (faulted) vs 80 (plain)"
+   }
+  ],
+  "newtest9-pristine": [
+   {
+    "time": 19.667,
+    "kinds": [
+     "flash_frame",
+     "blank_flash"
+    ],
+    "label": "endcard insert, frames 590-591",
+    "source": "make_video.py (590,592,'endcard') two frames only in faulted"
+   },
+   {
+    "time": 0.0,
+    "kinds": [
+     "clipping",
+     "loudness_step"
+    ],
+    "label": "scene 1 bass +10 dB (0-5.76 s)",
+    "source": "make_audio.py SCENE_MIX_DB[0] bass +10 (faulted) vs -10 (plain)"
+   },
+   {
+    "time": 8.64,
+    "kinds": [
+     "cue_late"
+    ],
+    "label": "clank 8.64",
+    "source": "make_audio.py SFX bt(5,4) (faulted) vs bt(5,3) (plain); one beat (0.48 s) late"
+   },
+   {
+    "time": 23.04,
+    "kinds": [
+     "cue_missing"
+    ],
+    "label": "boom | OPEN FRIDAYS 9 PM 23.04",
+    "source": "plain dir adds SFX (bt(13), boom); faulted lacks it"
+   }
+  ],
+  "newtest10-pristine": [
+   {
+    "time": 6.667,
+    "kinds": [
+     "cue_missing"
+    ],
+    "label": "cash register ding 6.667",
+    "source": "make_audio.py register_ding at beat 120 (faulted, off the end) vs beat 12 (plain)"
+   },
+   {
+    "time": 13.333,
+    "kinds": [
+     "text_cropped"
+    ],
+    "label": "skate swish | COUPLES SKATE 13.333",
+    "source": "make_video.py tx = W-MARGIN-sw (faulted) vs tw (plain)"
+   },
+   {
+    "time": 17.778,
+    "kinds": [
+     "clipping"
+    ],
+    "label": "air horn 17.778",
+    "source": "make_audio.py air_horn gain +8 (faulted) vs -3 (plain)"
+   }
+  ]
+ },
+ "out_of_scope": [
+  {
+   "case": "newtest7-pristine",
+   "what": "noise band lo 3000 vs 3500 Hz (texture)",
+   "why": "no checker kind can see a band-edge texture change"
+  },
+  {
+   "case": "newtest8-pristine",
+   "what": "rectangle top 0 vs 12 px in scene_press",
+   "why": "12 px cosmetic change, no checker kind"
+  }
+ ],
+ "floor": {
+  "_about": "Clean floor (coordinator decision 5): 0 confirmed problems on these clips. Checked without cues or intent.",
+  "clips": [
+   "~/Code/rakan-edits/out/1-clean.mp4",
+   "~/Code/rakan-edits/out/2-kill-rush.mp4",
+   "~/Code/rakan-edits/out/3-ally-down.mp4",
+   "~/Code/rakan-edits/out/4-replay.mp4"
+  ],
+  "note_2_kill_rush": "White flashes at 2.83, 4.57, 7.33, 10.70, 13.10 s sit one frame before each cut and are intended; they must not be confirmed."
+ },
+ "memory_count": {
+  "claimed": 20,
+  "keyed": 15,
+  "out_of_scope": 2,
+  "unexplained": 3,
+  "note": "memory note agentic-video-vs-gemini.md says 20 faults; generator diffs give 15 keyed plus 2 out of scope. The other 3 are not visible in the generator diffs."
+ },
+ "unscored_plain_only": [
+  {
+   "case": "newtest2",
+   "what": "plain has pop at 8*BEAT (4.364)",
+   "why": "listed as cue_missing on the faulted side; not a separate entry"
+  },
+  {
+   "case": "newtest6",
+   "what": "whistle 12 beats in plain",
+   "why": "the faulted-side whistle entry (6.429) is the scored one"
+  }
+ ]
+}
