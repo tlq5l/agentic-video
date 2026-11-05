@@ -169,6 +169,14 @@ claude mcp add -s user agentic-video -e PYTHONPATH="$PWD" -- "$PWD/.venv/bin/pyt
 
 By default results stay small enough for Claude Code: images are saved as files and the result gives their `file_path` (the agent opens the file). `frame_at` and `spectrogram_window` write PNG; contact sheets and frame grids (`contact_sheet`, `review_video`, `overview_chunks`, `inspect_window`, `inspect_windows`, `inspect_moments`) write JPEG; and a long `transcribe` result lists the first part of the transcript plus a `transcript_path` file for the rest. A client that renders images from the result itself can add `-e AGENTIC_VIDEO_INLINE_IMAGES=1`; results then carry base64 images and can pass 1 MB. Changed: earlier versions included base64 images by default; if you relied on that, set `AGENTIC_VIDEO_INLINE_IMAGES=1` to restore it.
 
+### MCP Registry
+
+The server's MCP Registry name is `io.github.tlq5l/agentic-video`. Its PyPI package is `agentic-video`, and it uses the stdio transport. To install the package from a registry client:
+
+```sh
+uvx agentic-video
+```
+
 ### Tell your agent to use it (paste into your AGENTS.md or CLAUDE.md)
 
 An always-loaded note works better than hoping the agent finds the tool:
