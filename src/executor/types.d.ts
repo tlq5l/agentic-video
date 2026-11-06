@@ -1396,6 +1396,106 @@ export interface SyncCheckOutput {
   unmatched_strong_onsets_omitted?: number;
 }
 
+// motion_ tools: GIF and short-clip motion checks (noise, boil, stutter, loop seam).
+export type MotionBox = [number, number, number, number];
+
+export interface MotionOpenInput { source: string; }
+export interface MotionOpenOutput {
+  status: "ready" | "in_progress";
+  fingerprint: string;
+  origin?: "memory";
+  retry_after_seconds?: number;
+}
+
+export interface MotionSheetInput { source: string; cols?: number; cell?: number; }
+export interface MotionSheetOutput {
+  file_path: string;
+  tool_file?: unknown;
+  w: number;
+  h: number;
+  frames: number;
+  fps?: number;
+  change?: number[];
+  origin?: "memory" | "disk" | "cold";
+}
+
+export interface MotionStatsInput { source: string; box?: MotionBox; }
+export interface MotionStatsOutput {
+  boil: number;
+  still_frac: number;
+  seam_change?: number;
+  median_neighbour_change?: number;
+  seam_ratio?: number | null;
+  mean_change?: number;
+  change?: number[];
+  frames: number;
+  fps?: number;
+  w?: number;
+  h?: number;
+  box?: number[];
+  origin?: "memory" | "disk" | "cold";
+}
+
+export interface MotionBoilMapInput { source: string; gain?: number; }
+export interface MotionBoilMapOutput {
+  file_path: string;
+  tool_file?: unknown;
+  w: number;
+  h: number;
+  boil: number;
+  still_frac?: number;
+  max_flicker?: number;
+  gain?: number;
+  origin?: "memory" | "disk" | "cold";
+}
+
+export interface MotionZoomInput { source: string; box: MotionBox; frames?: string; zoom?: number; }
+export interface MotionZoomOutput {
+  file_path: string;
+  tool_file?: unknown;
+  w: number;
+  h: number;
+  box: number[];
+  frames?: number[];
+  zoom: number;
+  origin?: "memory" | "disk" | "cold";
+}
+
+export interface MotionProfileInput { source: string; }
+export interface MotionProfileOutput {
+  file_path: string;
+  tool_file?: unknown;
+  w: number;
+  h: number;
+  frames?: number;
+  fps?: number;
+  speed?: number[];
+  change?: number[];
+  flags: Array<Record<string, unknown>>;
+  flag_counts: Record<string, number>;
+  note?: string;
+  origin?: "memory" | "disk" | "cold";
+}
+
+export interface MotionCompareInput { a: string; b: string; frame?: number; box?: MotionBox; }
+export interface MotionCompareOutput {
+  file_path: string;
+  tool_file?: unknown;
+  w: number;
+  h: number;
+  frame?: number;
+  mean_abs_diff: number;
+}
+
+export interface MotionSelftestInput { source?: string; }
+export interface MotionSelftestOutput {
+  pass: boolean;
+  clean_flag_count: number;
+  detectors: Record<string, Record<string, unknown>>;
+  source?: string;
+  frames?: number;
+}
+
 export interface AgenticVideoIntegration {
   /**
    * Read duration, resolution, fps, codecs, and audio presence. Call first: duration bounds every start_sec/end_sec
@@ -1487,6 +1587,30 @@ export interface AgenticVideoIntegration {
 
   /** Name the sounds in audio windows with a cloud model (sends the audio to Cloudflare Workers AI; at most 60 windows). */
   label_sounds(input: LabelSoundsInput): Promise<ToolResult<LabelSoundsOutput>>;
+
+  /** Warm a GIF or clip in the background so later motion_ calls answer in milliseconds. */
+  motion_open(input: MotionOpenInput): Promise<ToolResult<WithUrlSource<MotionOpenOutput>>>;
+
+  /** Contact sheet of a clip's frames with a change heat map under each frame. */
+  motion_sheet(input: MotionSheetInput): Promise<ToolResult<WithUrlSource<MotionSheetOutput>>>;
+
+  /** Boil, still fraction and loop-seam numbers for a GIF or clip (optionally one region). */
+  motion_stats(input: MotionStatsInput): Promise<ToolResult<WithUrlSource<MotionStatsOutput>>>;
+
+  /** PNG of still pixels coloured by flicker, with the overall boil score. */
+  motion_boil_map(input: MotionBoilMapInput): Promise<ToolResult<WithUrlSource<MotionBoilMapOutput>>>;
+
+  /** Frame-by-frame magnified view of one region with a change heat map. */
+  motion_zoom(input: MotionZoomInput): Promise<ToolResult<WithUrlSource<MotionZoomOutput>>>;
+
+  /** Speed and change graph with flagged stutter, freeze, duplicate and loop-seam frames. */
+  motion_profile(input: MotionProfileInput): Promise<ToolResult<WithUrlSource<MotionProfileOutput>>>;
+
+  /** Side-by-side frame comparison of two local clips with a diff panel. */
+  motion_compare(input: MotionCompareInput): Promise<ToolResult<MotionCompareOutput>>;
+
+  /** Plant known faults into a clean sprite and report whether each motion detector catches them. */
+  motion_selftest(input: MotionSelftestInput): Promise<ToolResult<WithUrlSource<MotionSelftestOutput>>>;
 
 }
 
