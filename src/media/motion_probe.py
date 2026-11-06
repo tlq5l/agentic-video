@@ -281,7 +281,8 @@ def _read_disk(entry: Path, fingerprint: str) -> Optional[_Clip]:
 
 
 def _evict_locked() -> None:
-    while len(_STORE) > 1 and sum(c.nbytes for c in _STORE.values()) > STORE_MAX_BYTES:
+    """Drop the oldest clips until the store fits the cap. A clip larger than the cap on its own is dropped too."""
+    while _STORE and sum(c.nbytes for c in _STORE.values()) > STORE_MAX_BYTES:
         _STORE.popitem(last=False)
 
 
@@ -364,7 +365,8 @@ def _parse_box(box: Any, H: int, W: int) -> Tuple[int, int, int, int]:
     if not isinstance(box, (list, tuple)) or len(box) != 4:
         raise ValueError("box must be [x, y, width, height] in pixels of the decoded frames")
     x, y, w, h = (int(v) for v in box)
-    x, y = min(max(x, 0), W - 1), min(max(y, 0), H - 1)
+    if not (0 <= x < W and 0 <= y < H):
+        raise ValueError(f"box {box} starts outside the {W}x{H} frame; x and y must be inside it")
     w, h = min(w, W - x), min(h, H - y)
     if w <= 0 or h <= 0:
         raise ValueError(f"box {box} is empty for a {W}x{H} frame")
@@ -568,7 +570,7 @@ def _tool_compare(args: Dict[str, Any]) -> Dict[str, Any]:
     _label(canvas, f"A {Path(args['source']).name} f{frame}", (2, 2))
     _label(canvas, f"B {Path(args['compare_to']).name} f{frame}", (w + gap + 2, 2))
     _label(canvas, "diff x4", (2 * (w + gap) + 2, 2))
-    key = f"{args['source']}|{args['compare_to']}|{frame}|{args.get('box')}"
+    key = f"{a.fingerprint}|{b.fingerprint}|{frame}|{args.get('box')}"
     out = _png(canvas, a, "compare", key)
     out.update(frame=frame, mean_abs_diff=round(float(np.abs(fa.astype(np.int16) - fb.astype(np.int16)).mean()), 3))
     return out

@@ -180,3 +180,48 @@ def test_selftest_defaults_run_from_installed_wheel(tmp_path):
     assert reply["ok"], reply
     assert reply["data"]["pass"] is True, reply["data"]["detectors"]
     assert reply["data"]["clean_flag_count"] == 0
+
+def test_store_cap_is_a_hard_limit(tmp_path, monkeypatch):
+    """With the cap below one clip's size, the warm store still holds no more bytes than the cap.
+    Old code kept the single oversized clip, so the stored total went past the cap."""
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(motion_probe, "STORE_MAX_BYTES", 10)
+    motion_probe.clear_memory_store()
+    reply = mcp_server.handle_call("motion_stats", {"source": str(FIXTURES / "v1-256.gif")})
+    assert reply["ok"], reply
+    with motion_probe._STORE_LOCK:
+        stored = sum(c.nbytes for c in motion_probe._STORE.values())
+    motion_probe.clear_memory_store()
+    assert stored <= 10, f"{stored} bytes stored against a 10-byte cap"
+
+
+def test_box_with_origin_outside_frame_is_refused(tmp_path, monkeypatch):
+    """A box whose origin is outside the frame is an error naming box in zoom and stats.
+    Old code clamped it onto the frame edge and returned an image or stats for a different region."""
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    motion_probe.clear_memory_store()
+    v1 = str(FIXTURES / "v1-256.gif")
+    failures = []
+    for box in ([999, 999, 10, 10], [256, 0, 10, 10]):
+        for tool, extra in (("motion_zoom", {"frames": "0-3"}), ("motion_stats", {})):
+            reply = mcp_server.handle_call(tool, {"source": v1, "box": box, **extra})
+            if reply["ok"] or "box" not in reply["error"]["message"]:
+                failures.append(f"{tool} {box}: {reply}")
+    assert not failures, "\n".join(failures)
+
+
+def test_compare_image_changes_when_comparison_file_is_replaced(tmp_path, monkeypatch):
+    """Replacing the comparison file with different contents must give a new saved PNG.
+    Old code keyed the PNG on the path, so the replaced file got the old image back."""
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    motion_probe.clear_memory_store()
+    comparison = tmp_path / "comparison.gif"
+    shutil.copyfile(FIXTURES / "v1-256.gif", comparison)
+    args = {"source": str(FIXTURES / "v0-256.gif"), "compare_to": str(comparison), "frame": 0}
+    first = mcp_server.handle_call("motion_compare", args)
+    assert first["ok"], first
+    shutil.copyfile(FIXTURES / "bad-256.gif", comparison)
+    second = mcp_server.handle_call("motion_compare", args)
+    assert second["ok"], second
+    assert second["data"]["file_path"] != first["data"]["file_path"], "replaced file reused the saved image"
+
