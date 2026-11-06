@@ -1477,7 +1477,7 @@ export interface MotionProfileOutput {
   origin?: "memory" | "disk" | "cold";
 }
 
-export interface MotionCompareInput { a: string; b: string; frame?: number; box?: MotionBox; }
+export interface MotionCompareInput { source: string; compare_to: string; frame?: number; box?: MotionBox; }
 export interface MotionCompareOutput {
   file_path: string;
   tool_file?: unknown;
@@ -1607,7 +1607,7 @@ export interface AgenticVideoIntegration {
   motion_profile(input: MotionProfileInput): Promise<ToolResult<WithUrlSource<MotionProfileOutput>>>;
 
   /** Side-by-side frame comparison of two local clips with a diff panel. */
-  motion_compare(input: MotionCompareInput): Promise<ToolResult<MotionCompareOutput>>;
+  motion_compare(input: MotionCompareInput): Promise<ToolResult<WithUrlSource<MotionCompareOutput>>>;
 
   /** Plant known faults into a clean sprite and report whether each motion detector catches them. */
   motion_selftest(input: MotionSelftestInput): Promise<ToolResult<WithUrlSource<MotionSelftestOutput>>>;

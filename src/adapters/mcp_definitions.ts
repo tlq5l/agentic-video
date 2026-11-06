@@ -351,8 +351,8 @@ export const MotionProfileInputSchema = {
 };
 
 export const MotionCompareInputSchema = {
-  a: z.string().trim().min(1).describe("First local GIF or video file path."),
-  b: z.string().trim().min(1).describe("Second local GIF or video file path."),
+  source: SourceSchema,
+  compare_to: z.string().trim().min(1).describe("Second local GIF or video file path, or a video URL."),
   frame: z.number().int().min(0).describe("0-based frame index in both clips.").optional(),
   box: z.array(z.number().int().min(0)).length(4).describe("[x, y, width, height] in pixels of the decoded frames; clipped to the frame.").optional(),
 };
@@ -430,7 +430,7 @@ export function registerAgenticVideoTools(server: McpServer, handlers: AgenticVi
     ["motion_boil_map", { description: "Use this to see where a GIF boils. Returns one PNG with still pixels coloured by flicker (hot means boiling) over the frame, plus the overall boil score.", inputSchema: MotionBoilMapInputSchema }, handlers.motion_boil_map],
     ["motion_zoom", { description: "Use this to inspect one region frame by frame at magnification, with a change heat map under each frame. Returns one PNG. The zoom is capped so the image stays under the size limit; the result reports the zoom used.", inputSchema: MotionZoomInputSchema }, handlers.motion_zoom],
     ["motion_profile", { description: "Use this to find stutter, freeze, duplicate and loop-seam problems by frame. Returns a PNG graph of speed and change, the flagged frames, and counts per kind. Speed counts only changes above 2 luma levels; there is no optical flow.", inputSchema: MotionProfileInputSchema }, handlers.motion_profile],
-    ["motion_compare", { description: "Use this to compare one frame of two clips side by side with a diff panel. The two clips must be the same size. Returns one PNG and the mean absolute difference.", inputSchema: MotionCompareInputSchema }, handlers.motion_compare],
+    ["motion_compare", { description: "Use this to compare one frame of two clips side by side with a diff panel. `source` and `compare_to` are both clips and must be the same size. Returns one PNG and the mean absolute difference.", inputSchema: MotionCompareInputSchema }, handlers.motion_compare],
     ["motion_selftest", { description: "Use this to check that the motion detectors work before trusting them. Plants known faults (dropped, swapped, duplicated and frozen frames, a loop-seam jump, noise on still pixels) into a clean sprite, reports whether each is caught, and counts false flags on the clean clip. Omit source to use the bundled fixture.", inputSchema: MotionSelftestInputSchema }, handlers.motion_selftest],
   ];
 

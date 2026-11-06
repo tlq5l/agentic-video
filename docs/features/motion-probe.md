@@ -1,6 +1,6 @@
 # Motion probe (motion_ tools)
 
-How a user reaches it: the eight `motion_*` MCP tools (`motion_open`, `motion_sheet`, `motion_stats`, `motion_boil_map`, `motion_zoom`, `motion_profile`, `motion_compare`, `motion_selftest`). Each takes a local GIF or video path (`source`; `motion_compare` takes `a` and `b`).
+How a user reaches it: the eight `motion_*` MCP tools (`motion_open`, `motion_sheet`, `motion_stats`, `motion_boil_map`, `motion_zoom`, `motion_profile`, `motion_compare`, `motion_selftest`). Each takes a local GIF or video path or a video URL (`source`; `motion_compare` also takes `compare_to` for the second clip).
 
 Code: `src/media/motion_probe.py` (decode, `build_index`, `find_flags`, the warm store and `dispatch`), routed from `_dispatch` in `src/executor/mcp_server.py`. The schemas are in `src/adapters/mcp_schemas.json`, with zod and declarations in `src/adapters/mcp_definitions.ts` and `src/executor/types.d.ts`.
 
@@ -17,5 +17,5 @@ What depends on it: nothing else calls it. The cache lives under the media cache
 
 Gotchas:
 - Change is luma-based, so motion that changes colour but not brightness can be missed.
-- `motion_compare` reads local paths only.
+- A URL source downloads first; the call answers `in_progress` with `retry_after_seconds` until the file is ready.
 - The in-memory store is capped at 384 MB and evicts the oldest clip first.

@@ -508,8 +508,8 @@ def _graph(speed: np.ndarray, change: np.ndarray, flags: List[Dict[str, Any]], w
 
 
 def _tool_compare(args: Dict[str, Any]) -> Dict[str, Any]:
-    a, _ = _clip(args["a"])
-    b, _ = _clip(args["b"])
+    a, _ = _clip(args["source"])
+    b, _ = _clip(args["compare_to"])
     n = min(a.meta["frames"], b.meta["frames"])
     frame = int(args.get("frame", 0))
     if not 0 <= frame < n:
@@ -528,10 +528,10 @@ def _tool_compare(args: Dict[str, Any]) -> Dict[str, Any]:
     canvas.paste(Image.fromarray(np.ascontiguousarray(fa)), (0, lab))
     canvas.paste(Image.fromarray(np.ascontiguousarray(fb)), (w + gap, lab))
     canvas.paste(Image.fromarray(np.ascontiguousarray(diff_heat(fa, fb))), (2 * (w + gap), lab))
-    _label(canvas, f"A {Path(args['a']).name} f{frame}", (2, 2))
-    _label(canvas, f"B {Path(args['b']).name} f{frame}", (w + gap + 2, 2))
+    _label(canvas, f"A {Path(args['source']).name} f{frame}", (2, 2))
+    _label(canvas, f"B {Path(args['compare_to']).name} f{frame}", (w + gap + 2, 2))
     _label(canvas, "diff x4", (2 * (w + gap) + 2, 2))
-    key = f"{args['a']}|{args['b']}|{frame}|{args.get('box')}"
+    key = f"{args['source']}|{args['compare_to']}|{frame}|{args.get('box')}"
     out = _png(canvas, a, "compare", key)
     out.update(frame=frame, mean_abs_diff=round(float(np.abs(fa.astype(np.int16) - fb.astype(np.int16)).mean()), 3))
     return out

@@ -3873,7 +3873,7 @@
       }
     },
     "motion_open": {
-      "name": "motion_open",
+    "name": "motion_open",
     "description": "Warm a GIF or short clip in the background so later motion_ calls answer in milliseconds. Returns at once: status ready when the clip is cached, or in_progress with retry_after_seconds; call again with the same source. The cache lives in memory and on disk, keyed by file fingerprint.",
     "inputSchema": {
       "type": "object",
@@ -3891,12 +3891,27 @@
     "outputSchema": {
       "type": "object",
       "properties": {
+        "source_url": {
+          "type": "string",
+          "description": "The video URL you passed as `source`; only present when `source` was a URL."
+        },
+        "local_path": {
+          "type": "string",
+          "description": "Cached local copy of `source_url`; pass it to other tools or ffmpeg to skip the URL lookup."
+        },
         "status": {
           "type": "string",
           "enum": [
             "ready",
             "in_progress"
           ]
+        },
+        "retry_after_seconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "note": {
+          "type": "string"
         },
         "fingerprint": {
           "type": "string"
@@ -3906,20 +3921,13 @@
           "enum": [
             "memory"
           ]
-        },
-        "retry_after_seconds": {
-          "type": "integer",
-          "minimum": 0
         }
       },
-      "required": [
-        "status",
-        "fingerprint"
-      ]
+      "required": []
     }
   },
     "motion_sheet": {
-      "name": "motion_sheet",
+    "name": "motion_sheet",
     "description": "Use this to see a clip's frames and where they change. Returns one PNG contact sheet: each frame, with a heat map of its change from the previous frame underneath, plus the per-frame change list.",
     "inputSchema": {
       "type": "object",
@@ -3951,6 +3959,27 @@
     "outputSchema": {
       "type": "object",
       "properties": {
+        "source_url": {
+          "type": "string",
+          "description": "The video URL you passed as `source`; only present when `source` was a URL."
+        },
+        "local_path": {
+          "type": "string",
+          "description": "Cached local copy of `source_url`; pass it to other tools or ffmpeg to skip the URL lookup."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "in_progress"
+          ]
+        },
+        "retry_after_seconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "note": {
+          "type": "string"
+        },
         "file_path": {
           "type": "string",
           "description": "Saved PNG on disk; open this for full size."
@@ -3987,14 +4016,11 @@
           }
         }
       },
-      "required": [
-        "file_path",
-        "frames"
-      ]
+      "required": []
     }
   },
     "motion_stats": {
-      "name": "motion_stats",
+    "name": "motion_stats",
     "description": "Use this first for a yes or no on a GIF's motion. Returns boil (flicker on still pixels, the README formula; lower is calmer), still_frac, the loop-seam change against the median, and the per-frame change. Optional box limits the numbers to one region.",
     "inputSchema": {
       "type": "object",
@@ -4022,6 +4048,27 @@
     "outputSchema": {
       "type": "object",
       "properties": {
+        "source_url": {
+          "type": "string",
+          "description": "The video URL you passed as `source`; only present when `source` was a URL."
+        },
+        "local_path": {
+          "type": "string",
+          "description": "Cached local copy of `source_url`; pass it to other tools or ffmpeg to skip the URL lookup."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "in_progress"
+          ]
+        },
+        "retry_after_seconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "note": {
+          "type": "string"
+        },
         "boil": {
           "type": "number"
         },
@@ -4077,15 +4124,11 @@
           "description": "Where the clip index came from: memory (warm), disk (cached index), or cold (decoded now)."
         }
       },
-      "required": [
-        "boil",
-        "still_frac",
-        "frames"
-      ]
+      "required": []
     }
   },
     "motion_boil_map": {
-      "name": "motion_boil_map",
+    "name": "motion_boil_map",
     "description": "Use this to see where a GIF boils. Returns one PNG with still pixels coloured by flicker (hot means boiling) over the frame, plus the overall boil score.",
     "inputSchema": {
       "type": "object",
@@ -4109,6 +4152,27 @@
     "outputSchema": {
       "type": "object",
       "properties": {
+        "source_url": {
+          "type": "string",
+          "description": "The video URL you passed as `source`; only present when `source` was a URL."
+        },
+        "local_path": {
+          "type": "string",
+          "description": "Cached local copy of `source_url`; pass it to other tools or ffmpeg to skip the URL lookup."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "in_progress"
+          ]
+        },
+        "retry_after_seconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "note": {
+          "type": "string"
+        },
         "file_path": {
           "type": "string",
           "description": "Saved PNG on disk; open this for full size."
@@ -4145,14 +4209,11 @@
           "type": "number"
         }
       },
-      "required": [
-        "file_path",
-        "boil"
-      ]
+      "required": []
     }
   },
     "motion_zoom": {
-      "name": "motion_zoom",
+    "name": "motion_zoom",
     "description": "Use this to inspect one region frame by frame at magnification, with a change heat map under each frame. Returns one PNG. The zoom is capped so the image stays under the size limit; the result reports the zoom used.",
     "inputSchema": {
       "type": "object",
@@ -4193,6 +4254,27 @@
     "outputSchema": {
       "type": "object",
       "properties": {
+        "source_url": {
+          "type": "string",
+          "description": "The video URL you passed as `source`; only present when `source` was a URL."
+        },
+        "local_path": {
+          "type": "string",
+          "description": "Cached local copy of `source_url`; pass it to other tools or ffmpeg to skip the URL lookup."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "in_progress"
+          ]
+        },
+        "retry_after_seconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "note": {
+          "type": "string"
+        },
         "file_path": {
           "type": "string",
           "description": "Saved PNG on disk; open this for full size."
@@ -4232,15 +4314,11 @@
           "type": "integer"
         }
       },
-      "required": [
-        "file_path",
-        "box",
-        "zoom"
-      ]
+      "required": []
     }
   },
     "motion_profile": {
-      "name": "motion_profile",
+    "name": "motion_profile",
     "description": "Use this to find stutter, freeze, duplicate and loop-seam problems by frame. Returns a PNG graph of speed and change, the flagged frames, and counts per kind. Speed counts only changes above 2 luma levels; there is no optical flow.",
     "inputSchema": {
       "type": "object",
@@ -4258,6 +4336,27 @@
     "outputSchema": {
       "type": "object",
       "properties": {
+        "source_url": {
+          "type": "string",
+          "description": "The video URL you passed as `source`; only present when `source` was a URL."
+        },
+        "local_path": {
+          "type": "string",
+          "description": "Cached local copy of `source_url`; pass it to other tools or ffmpeg to skip the URL lookup."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "in_progress"
+          ]
+        },
+        "retry_after_seconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "note": {
+          "type": "string"
+        },
         "file_path": {
           "type": "string",
           "description": "Saved PNG on disk; open this for full size."
@@ -4310,33 +4409,26 @@
           "additionalProperties": {
             "type": "integer"
           }
-        },
-        "note": {
-          "type": "string"
         }
       },
-      "required": [
-        "file_path",
-        "flags",
-        "flag_counts"
-      ]
+      "required": []
     }
   },
     "motion_compare": {
-      "name": "motion_compare",
-    "description": "Use this to compare one frame of two clips side by side with a diff panel. The two clips must be the same size. Returns one PNG and the mean absolute difference.",
+    "name": "motion_compare",
+    "description": "Use this to compare one frame of two clips side by side with a diff panel. `source` and `compare_to` are both clips and must be the same size. Returns one PNG and the mean absolute difference.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "a": {
+        "source": {
           "type": "string",
           "minLength": 1,
-          "description": "First local GIF or video file path."
+          "description": "Local GIF or video file path, or a video URL (downloaded once and cached, as in other tools)."
         },
-        "b": {
+        "compare_to": {
           "type": "string",
           "minLength": 1,
-          "description": "Second local GIF or video file path."
+          "description": "Second local GIF or video file path, or a video URL."
         },
         "frame": {
           "type": "integer",
@@ -4356,13 +4448,34 @@
         }
       },
       "required": [
-        "a",
-        "b"
+        "source",
+        "compare_to"
       ]
     },
     "outputSchema": {
       "type": "object",
       "properties": {
+        "source_url": {
+          "type": "string",
+          "description": "The video URL you passed as `source`; only present when `source` was a URL."
+        },
+        "local_path": {
+          "type": "string",
+          "description": "Cached local copy of `source_url`; pass it to other tools or ffmpeg to skip the URL lookup."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "in_progress"
+          ]
+        },
+        "retry_after_seconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "note": {
+          "type": "string"
+        },
         "file_path": {
           "type": "string",
           "description": "Saved PNG on disk; open this for full size."
@@ -4384,14 +4497,11 @@
           "type": "number"
         }
       },
-      "required": [
-        "file_path",
-        "mean_abs_diff"
-      ]
+      "required": []
     }
   },
     "motion_selftest": {
-      "name": "motion_selftest",
+    "name": "motion_selftest",
     "description": "Use this to check that the motion detectors work before trusting them. Plants known faults (dropped, swapped, duplicated and frozen frames, a loop-seam jump, noise on still pixels) into a clean sprite, reports whether each is caught, and counts false flags on the clean clip. Omit source to use the bundled fixture.",
     "inputSchema": {
       "type": "object",
@@ -4399,7 +4509,7 @@
         "source": {
           "type": "string",
           "minLength": 1,
-          "description": "Optional local clip to use instead of the bundled sprite."
+          "description": "Optional local clip or video URL to use instead of the bundled sprite."
         }
       },
       "required": []
@@ -4407,6 +4517,27 @@
     "outputSchema": {
       "type": "object",
       "properties": {
+        "source_url": {
+          "type": "string",
+          "description": "The video URL you passed as `source`; only present when `source` was a URL."
+        },
+        "local_path": {
+          "type": "string",
+          "description": "Cached local copy of `source_url`; pass it to other tools or ffmpeg to skip the URL lookup."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "in_progress"
+          ]
+        },
+        "retry_after_seconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "note": {
+          "type": "string"
+        },
         "pass": {
           "type": "boolean"
         },
@@ -4423,11 +4554,7 @@
           "type": "integer"
         }
       },
-      "required": [
-        "pass",
-        "clean_flag_count",
-        "detectors"
-      ]
+      "required": []
     }
   }
   }
