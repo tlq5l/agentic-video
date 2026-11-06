@@ -1,8 +1,10 @@
 """End-to-end check of the motion_ tools through handle_call: the planted-fault selftest, the boil
 ordering on the bundled GIF fixtures, and millisecond warm calls once a clip is cached in memory."""
 
+import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -145,16 +147,26 @@ def test_motion_tools_end_to_end_through_handle_call(tmp_path, monkeypatch):
 def test_selftest_defaults_run_from_installed_wheel(tmp_path):
     """Build the wheel, install it into a fresh venv outside the repo, and run motion_selftest with default
     arguments from there. A repo-only file on the default path fails here even though the repo tests pass."""
+    uv = shutil.which("uv")  # uv-managed Pythons may have no pip, so prefer uv when it is on PATH
     wheel_dir = tmp_path / "dist"
-    subprocess.run([sys.executable, "-m", "pip", "wheel", "--no-deps", "--wheel-dir", str(wheel_dir), str(REPO)],
-                   check=True, timeout=600)
+    if uv:
+        build = [uv, "build", "--wheel", "--out-dir", str(wheel_dir), str(REPO)]
+    elif importlib.util.find_spec("pip"):
+        build = [sys.executable, "-m", "pip", "wheel", "--no-deps", "--wheel-dir", str(wheel_dir), str(REPO)]
+    else:
+        build = [sys.executable, "-m", "build", "--wheel", "--outdir", str(wheel_dir), str(REPO)]
+    subprocess.run(build, check=True, timeout=600)
     (wheel,) = wheel_dir.glob("agentic_video-*.whl")
 
     env_dir = tmp_path / "venv"
-    venv.create(env_dir, with_pip=True)
     bin_dir = env_dir / ("Scripts" if os.name == "nt" else "bin")
     py = str(bin_dir / ("python.exe" if os.name == "nt" else "python"))
-    subprocess.run([py, "-m", "pip", "install", "--quiet", str(wheel)], check=True, timeout=900)
+    if uv:
+        subprocess.run([uv, "venv", "--python", sys.executable, str(env_dir)], check=True, timeout=300)
+        subprocess.run([uv, "pip", "install", "--quiet", "--python", py, str(wheel)], check=True, timeout=900)
+    else:
+        venv.create(env_dir, with_pip=True)
+        subprocess.run([py, "-m", "pip", "install", "--quiet", str(wheel)], check=True, timeout=900)
 
     probe = ("import json, src.executor.mcp_server as m\n"
              "reply = m.handle_call('motion_selftest', {})\n"

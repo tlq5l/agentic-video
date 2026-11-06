@@ -11,7 +11,7 @@ What the numbers mean:
 - `speed` counts only changes above 2 luma levels. There is no optical flow (no cv2 in the venv).
 - Stutter flags need a change more than 3x the median of its neighbours. A single dropped frame is under that rule and is not flagged; swapped or dropped runs of 3 frames are.
 
-Warm calls (measured on the fixture, 64 frames at 256 px): `motion_stats` cold about 71 ms, from disk about 1.4 ms, from memory about 0.1 ms; `motion_zoom` about 9-10 ms when warm (it writes a PNG on each call). `motion_open` starts a background build and returns `in_progress` with `retry_after_seconds`.
+Warm calls (measured on the fixture, 64 frames at 256 px): `motion_stats` cold about 71 ms, from disk about 1.4 ms, from memory about 0.1 ms; `motion_zoom` about 9-10 ms when warm (a repeat call reuses the saved PNG and writes nothing). `motion_open` starts a background build and returns `in_progress` with `retry_after_seconds`.
 
 What depends on it: nothing else calls it. The cache lives under the media cache entry for the file fingerprint (`motion-v1`), so a changed file gets a new entry.
 
