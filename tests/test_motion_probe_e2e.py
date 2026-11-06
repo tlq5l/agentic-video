@@ -40,6 +40,11 @@ def test_motion_tools_end_to_end_through_handle_call(tmp_path, monkeypatch):
     assert stats["ok"] and stats["data"]["origin"] == "memory", stats
     assert stats_ms < WARM_CALL_BUDGET_MS, f"warm motion_stats took {stats_ms:.1f} ms"
 
-    zoom, zoom_ms = _timed("motion_zoom", {"source": v1, "box": [0, 0, 64, 64], "frames": "0-7"})
+    # The first zoom draws and saves the PNG; the repeat call is the warm one.
+    zoom_args = {"source": v1, "box": [0, 0, 64, 64], "frames": "0-7"}
+    first, _ = _timed("motion_zoom", zoom_args)
+    assert first["ok"], first
+    zoom, zoom_ms = _timed("motion_zoom", zoom_args)
+    assert zoom["data"]["file_path"] == first["data"]["file_path"], zoom
     assert zoom["ok"] and zoom["data"]["origin"] == "memory", zoom
     assert zoom_ms < WARM_CALL_BUDGET_MS, f"warm motion_zoom took {zoom_ms:.1f} ms"

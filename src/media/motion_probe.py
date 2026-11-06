@@ -37,6 +37,7 @@ STILL_T = 2.0
 WIDTH_CAP = 512
 MAX_FRAMES = 240
 MAX_PX = 8000
+RENDER_VERSION = 1  # bump when a tool's drawing changes, so saved images are not reused
 BG = (128, 128, 128)
 LUMA = np.array([0.299, 0.587, 0.114], np.float32)
 STUTTER_RATIO = 3.0
@@ -378,12 +379,24 @@ def _tool_file(path: Path) -> Dict[str, Any]:
 def _out_path(clip: _Clip, kind: str, key: str) -> Path:
     out_dir = MediaCache().get_entry_dir(clip.fingerprint) / "motion-out"
     out_dir.mkdir(parents=True, exist_ok=True)
-    return out_dir / f"{kind}-{hashlib.sha1(key.encode()).hexdigest()[:10]}.png"
+    return out_dir / f"{kind}-{hashlib.sha1(f'{RENDER_VERSION}|{key}'.encode()).hexdigest()[:10]}.png"
+
+
+def _reuse_png(clip: _Clip, kind: str, key: str) -> Optional[Dict[str, Any]]:
+    """The saved image for the same clip, tool and settings, or None; saving the PNG is most of a warm call."""
+    path = _out_path(clip, kind, key)
+    if not path.is_file():
+        return None
+    with Image.open(path) as img:
+        w, h = img.size
+    return {"file_path": str(path), "w": w, "h": h, "tool_file": _tool_file(path)}
 
 
 def _png(img: Image.Image, clip: _Clip, kind: str, key: str) -> Dict[str, Any]:
     path = _out_path(clip, kind, key)
-    img.save(path, compress_level=1)
+    tmp = path.with_suffix(f".{os.getpid()}.tmp")
+    img.save(tmp, format="PNG", compress_level=1)
+    os.replace(tmp, path)  # a half-written file is never reused
     return {"file_path": str(path), "w": img.width, "h": img.height, "tool_file": _tool_file(path)}
 
 
@@ -452,6 +465,11 @@ def _tool_zoom(args: Dict[str, Any]) -> Dict[str, Any]:
     f0, f1 = _parse_frames(args.get("frames"), n)
     idx = list(range(f0, f1 + 1))
     z = max(1, min(int(args.get("zoom", 4)), (MAX_PX // len(idx)) // w, MAX_PX // (2 * h)))
+    key = f"{x},{y},{w},{h}|{f0}-{f1}|{z}"
+    out = _reuse_png(clip, "zoom", key)
+    if out is not None:
+        out.update(box=[x, y, w, h], frames=[f0, f1], zoom=z, origin=origin)
+        return out
     gap, lab = 6, 20
     cw = w * z
     canvas = Image.new("RGB", (len(idx) * (cw + gap) - gap, lab + 2 * h * z), (24, 24, 24))
@@ -466,7 +484,7 @@ def _tool_zoom(args: Dict[str, Any]) -> Dict[str, Any]:
         canvas.paste(Image.fromarray(np.ascontiguousarray(up(cur))), (X, lab))
         canvas.paste(Image.fromarray(np.ascontiguousarray(up(diff_heat(cur, prev)))), (X, lab + h * z))
         _label(canvas, f"f{f}", (X + 2, 2))
-    out = _png(canvas, clip, "zoom", f"{x},{y},{w},{h}|{f0}-{f1}|{z}")
+    out = _png(canvas, clip, "zoom", key)
     out.update(box=[x, y, w, h], frames=[f0, f1], zoom=z, origin=origin)
     return out
 
