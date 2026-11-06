@@ -70,6 +70,19 @@ Use `python -m src.loop run --config loop.json` to build, check, fix the source 
 
 ---
 
+## motion_ tools (GIF and short clips)
+
+Use these when the question is whether a GIF or short clip's motion is right: boil or noise on still areas, stutter, a frozen or doubled frame, a loop seam that jumps. The eight tools share one cached index per file, so the second call is in milliseconds.
+
+- `motion_stats({ source })` is the first call: `boil` (lower is calmer), `still_frac`, the loop-seam change against the median, and per-frame change.
+- `motion_profile({ source })` lists flagged frames (stutter, freeze, duplicate, loop_seam) with a graph.
+- `motion_boil_map`, `motion_sheet` and `motion_compare` show where and what; `motion_selftest` checks the detectors on planted faults and should pass before you trust a result.
+- `motion_open({ source })` warms a clip in the background; it returns `in_progress` with `retry_after_seconds` until the index is ready.
+
+Zoom: after `motion_boil_map` shows a hot area, call `motion_zoom({ source, box: [x, y, width, height], frames: "10-20", zoom: 4 })`. `box` is in pixels of the decoded frames, and the zoom is capped so the PNG stays under the size limit (the result reports the zoom used). Open `file_path` for full size; the inline image is downscaled.
+
+Limits: speed and change are luma-based with no optical flow, so colour-only motion can be missed; one dropped frame is under the stutter rule and is not flagged.
+
 ## Negative Controls & Falsification Safety
 
 When answering negative queries (*"Does an elephant appear in this office meeting?"*):

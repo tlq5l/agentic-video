@@ -43,3 +43,7 @@ packages = ["src"]
 
 [tool.hatch.build.targets.sdist]
 include = ["src", "/README.md", "LICENSE", "requirements.txt", "requirements-visual.txt"]
+
+# Test-only: tests/test_schema_contract.py imports jsonschema. uv installs the dev group by default.
+[dependency-groups]
+dev = ["jsonschema>=4"]

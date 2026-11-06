@@ -53,6 +53,14 @@ EXPECTED_TOOLS = {
     "sync_check",
     "watch_for",
     "label_sounds",
+    "motion_open",
+    "motion_sheet",
+    "motion_stats",
+    "motion_boil_map",
+    "motion_zoom",
+    "motion_profile",
+    "motion_compare",
+    "motion_selftest",
 }
 
 

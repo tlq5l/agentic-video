@@ -1,0 +1,3 @@
+{
+  "check": ["uv", "run", "--with", "pytest", "python", "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests/test_motion_probe_e2e.py"]
+}
