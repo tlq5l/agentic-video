@@ -49,7 +49,7 @@ SEAM_RATIO = 3.0
 BOIL_FAULT_DELTA = 1.0
 STORE_MAX_BYTES = 384 * 1024 * 1024
 ARRAYS = ("rgb", "change", "speed", "still", "flicker", "median")
-DEFAULT_FIXTURE = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "motion" / "clean-sprite-256.gif"
+DEFAULT_FIXTURE = Path(__file__).resolve().parent / "clean-sprite-256.gif"  # ships in the wheel with src/
 
 
 def _font(size: int):

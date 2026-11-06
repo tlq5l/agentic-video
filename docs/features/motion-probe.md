@@ -4,7 +4,7 @@ How a user reaches it: the eight `motion_*` MCP tools (`motion_open`, `motion_sh
 
 Code: `src/media/motion_probe.py` (decode, `build_index`, `find_flags`, the warm store and `dispatch`), routed from `_dispatch` in `src/executor/mcp_server.py`. The schemas are in `src/adapters/mcp_schemas.json`, with zod and declarations in `src/adapters/mcp_definitions.ts` and `src/executor/types.d.ts`.
 
-How to check it works: `pytest tests/test_motion_probe_e2e.py` (one end-to-end test through `handle_call`), then `motion_selftest`, which plants known faults in a clean sprite and reports whether each detector catches them and how many false flags the clean clip gets. The fixtures are in `tests/fixtures/motion/` (about 1.6 MB in total).
+How to check it works: `pytest tests/test_motion_probe_e2e.py` (three end-to-end tests: two through `handle_call`, one that builds the wheel, installs it in a fresh venv and runs `motion_selftest` with default arguments there), then `motion_selftest`, which plants known faults in a clean sprite and reports whether each detector catches them and how many false flags the clean clip gets. The clean sprite ships inside the package at `src/media/clean-sprite-256.gif`; the other test GIFs are in `tests/fixtures/motion/` (about 1.6 MB in total).
 
 What the numbers mean:
 - `boil` is the flicker score on still pixels, using the README formula; lower is calmer. On the bundled fixtures the ordering is bad-256 > v0-256 > v1-256.

@@ -1,9 +1,15 @@
 """End-to-end check of the motion_ tools through handle_call: the planted-fault selftest, the boil
 ordering on the bundled GIF fixtures, and millisecond warm calls once a clip is cached in memory."""
 
+import json
+import os
+import subprocess
+import sys
 import threading
 import time
+import venv
 from pathlib import Path
+from typing import Any, Dict
 
 from PIL import Image
 
@@ -11,6 +17,7 @@ import src.executor.mcp_server as mcp_server
 from src.core.config import Config
 from src.media import motion_probe
 
+REPO = Path(__file__).resolve().parents[1]
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "motion"
 WARM_CALL_BUDGET_MS = 50
 
@@ -76,9 +83,9 @@ def test_motion_tools_hold_up_through_handle_call(tmp_path, monkeypatch):
             return real_save(self, fp, *rest, **kw)
 
         monkeypatch.setattr(Image.Image, "save", gated_save)
-        results = [None, None]
+        results: Dict[int, Any] = {}  # writer index -> reply, or the exception it raised
 
-        def writer(i):
+        def writer(i: int) -> None:
             try:
                 results[i] = mcp_server.handle_call("motion_zoom", args)
             except Exception as exc:
@@ -90,7 +97,8 @@ def test_motion_tools_hold_up_through_handle_call(tmp_path, monkeypatch):
         for t in threads:
             t.join(30)
         monkeypatch.setattr(Image.Image, "save", real_save)
-        for result in results:
+        assert sorted(results) == [0, 1], results  # both writers reported back
+        for result in results.values():
             assert isinstance(result, dict) and result["ok"], result
         with Image.open(results[0]["data"]["file_path"]) as png:
             png.load()
@@ -132,3 +140,31 @@ def test_motion_tools_end_to_end_through_handle_call(tmp_path, monkeypatch):
     assert zoom["data"]["file_path"] == first["data"]["file_path"], zoom
     assert zoom["ok"] and zoom["data"]["origin"] == "memory", zoom
     assert zoom_ms < WARM_CALL_BUDGET_MS, f"warm motion_zoom took {zoom_ms:.1f} ms"
+
+
+def test_selftest_defaults_run_from_installed_wheel(tmp_path):
+    """Build the wheel, install it into a fresh venv outside the repo, and run motion_selftest with default
+    arguments from there. A repo-only file on the default path fails here even though the repo tests pass."""
+    wheel_dir = tmp_path / "dist"
+    subprocess.run([sys.executable, "-m", "pip", "wheel", "--no-deps", "--wheel-dir", str(wheel_dir), str(REPO)],
+                   check=True, timeout=600)
+    (wheel,) = wheel_dir.glob("agentic_video-*.whl")
+
+    env_dir = tmp_path / "venv"
+    venv.create(env_dir, with_pip=True)
+    bin_dir = env_dir / ("Scripts" if os.name == "nt" else "bin")
+    py = str(bin_dir / ("python.exe" if os.name == "nt" else "python"))
+    subprocess.run([py, "-m", "pip", "install", "--quiet", str(wheel)], check=True, timeout=900)
+
+    probe = ("import json, src.executor.mcp_server as m\n"
+             "reply = m.handle_call('motion_selftest', {})\n"
+             "print(json.dumps({'module': m.__file__, 'reply': reply},\n"
+             "                 default=lambda o: o.item() if hasattr(o, 'item') else str(o)))")
+    run = subprocess.run([py, "-c", probe], cwd=tmp_path, capture_output=True, text=True, timeout=600)
+    assert run.returncode == 0, run.stderr[-2000:]
+    out = json.loads(run.stdout.strip().splitlines()[-1])
+    assert str(env_dir) in out["module"], f"ran from {out['module']}, not the installed wheel"
+    reply = out["reply"]
+    assert reply["ok"], reply
+    assert reply["data"]["pass"] is True, reply["data"]["detectors"]
+    assert reply["data"]["clean_flag_count"] == 0
