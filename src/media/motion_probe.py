@@ -233,6 +233,7 @@ _STORE: "OrderedDict[str, _Clip]" = OrderedDict()
 _STORE_LOCK = threading.Lock()
 _BUILD_LOCKS: Dict[str, threading.Lock] = {}
 _PENDING: Dict[str, threading.Thread] = {}
+_FAILED: Dict[str, str] = {}  # fingerprint -> decode error, so motion_open can report it
 
 
 def clear_memory_store() -> None:
@@ -315,15 +316,25 @@ def _clip(source: Any) -> Tuple[_Clip, str]:
         return clip, origin
 
 
+def _build_in_background(path: str, fingerprint: str) -> None:
+    try:
+        _clip(path)
+    except Exception as exc:  # a thread's exception is lost; keep it for motion_open to report
+        with _STORE_LOCK:
+            _FAILED[fingerprint] = str(exc)
+
+
 def _tool_open(args: Dict[str, Any]) -> Dict[str, Any]:
     path = _local_path(args["source"])
     fingerprint = MediaCache().compute_fingerprint(str(path))
     with _STORE_LOCK:
         if fingerprint in _STORE:
             return {"status": "ready", "fingerprint": fingerprint, "origin": "memory"}
+        if fingerprint in _FAILED:
+            return {"status": "failed", "fingerprint": fingerprint, "error": _FAILED[fingerprint]}
         thread = _PENDING.get(fingerprint)
         if thread is None or not thread.is_alive():
-            thread = threading.Thread(target=_clip, args=(str(path),), daemon=True, name=f"motion-{fingerprint[:8]}")
+            thread = threading.Thread(target=_build_in_background, args=(str(path), fingerprint), daemon=True, name=f"motion-{fingerprint[:8]}")
             _PENDING[fingerprint] = thread
             thread.start()
     return {"status": "in_progress", "retry_after_seconds": 1, "fingerprint": fingerprint}
@@ -394,7 +405,7 @@ def _reuse_png(clip: _Clip, kind: str, key: str) -> Optional[Dict[str, Any]]:
 
 def _png(img: Image.Image, clip: _Clip, kind: str, key: str) -> Dict[str, Any]:
     path = _out_path(clip, kind, key)
-    tmp = path.with_suffix(f".{os.getpid()}.tmp")
+    tmp = path.with_suffix(f".{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp")  # unique per writer: two writers never share one file
     img.save(tmp, format="PNG", compress_level=1)
     os.replace(tmp, path)  # a half-written file is never reused
     return {"file_path": str(path), "w": img.width, "h": img.height, "tool_file": _tool_file(path)}
@@ -433,6 +444,9 @@ def _tool_stats(args: Dict[str, Any]) -> Dict[str, Any]:
     meta = clip.meta
     if args.get("box") is not None:
         x, y, w, h = _parse_box(args["box"], meta["h"], meta["w"])
+        if min(w, h) < BLOCK:
+            raise ValueError(f"box {args['box']} is {w}x{h} px inside the {meta['w']}x{meta['h']} frame; "
+                             f"motion_stats needs at least {BLOCK} px on each side. Use a larger box.")
         index = build_index(clip.rgb[:, y:y + h, x:x + w])
         out = _stats(index, meta)
         out.update(box=[x, y, w, h])
@@ -464,13 +478,18 @@ def _tool_zoom(args: Dict[str, Any]) -> Dict[str, Any]:
     x, y, w, h = _parse_box(args["box"], H, W)
     f0, f1 = _parse_frames(args.get("frames"), n)
     idx = list(range(f0, f1 + 1))
-    z = max(1, min(int(args.get("zoom", 4)), (MAX_PX // len(idx)) // w, MAX_PX // (2 * h)))
+    gap, lab = 6, 20  # gap between frame columns; label strip above the rows
+    # Largest zoom that keeps the canvas within MAX_PX on each side: columns of w*z px with gaps, rows of lab + 2*h*z.
+    z = min(int(args.get("zoom", 4)), (MAX_PX - (len(idx) - 1) * gap) // (len(idx) * w), (MAX_PX - lab) // (2 * h))
+    if z < 1:
+        too_wide = len(idx) * w + (len(idx) - 1) * gap
+        raise ValueError(f"box [{x}, {y}, {w}, {h}] over frames {f0}-{f1} is too large: at zoom 1 the image would be "
+                         f"{too_wide}x{lab + 2 * h} px, past the {MAX_PX} px limit. Use a smaller box or fewer frames.")
     key = f"{x},{y},{w},{h}|{f0}-{f1}|{z}"
     out = _reuse_png(clip, "zoom", key)
     if out is not None:
         out.update(box=[x, y, w, h], frames=[f0, f1], zoom=z, origin=origin)
         return out
-    gap, lab = 6, 20
     cw = w * z
     canvas = Image.new("RGB", (len(idx) * (cw + gap) - gap, lab + 2 * h * z), (24, 24, 24))
 
@@ -635,4 +654,7 @@ TOOLS = {
 def dispatch(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
     if name not in TOOLS:
         raise ValueError(f"unknown motion tool {name}")
-    return {"ok": True, "data": TOOLS[name](args)}
+    try:
+        return {"ok": True, "data": TOOLS[name](args)}
+    except ValueError as exc:  # bad input comes back as an error result whose message names the parameter
+        return {"ok": False, "error": {"code": "invalid_argument", "message": str(exc)}}

@@ -1401,10 +1401,11 @@ export type MotionBox = [number, number, number, number];
 
 export interface MotionOpenInput { source: string; }
 export interface MotionOpenOutput {
-  status: "ready" | "in_progress";
+  status: "ready" | "in_progress" | "failed";
   fingerprint: string;
   origin?: "memory";
   retry_after_seconds?: number;
+  error?: string;
 }
 
 export interface MotionSheetInput { source: string; cols?: number; cell?: number; }

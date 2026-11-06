@@ -3874,7 +3874,7 @@
     },
     "motion_open": {
     "name": "motion_open",
-    "description": "Warm a GIF or short clip in the background so later motion_ calls answer in milliseconds. Returns at once: status ready when the clip is cached, or in_progress with retry_after_seconds; call again with the same source. The cache lives in memory and on disk, keyed by file fingerprint.",
+    "description": "Warm a GIF or short clip in the background so later motion_ calls answer in milliseconds. Returns at once: status ready when the clip is cached, in_progress with retry_after_seconds (call again with the same source), or failed with the error when the clip cannot be decoded. The cache lives in memory and on disk, keyed by file fingerprint.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -3903,8 +3903,13 @@
           "type": "string",
           "enum": [
             "ready",
-            "in_progress"
+            "in_progress",
+            "failed"
           ]
+        },
+        "error": {
+          "type": "string",
+          "description": "Why the clip cannot be decoded; only present when status is failed."
         },
         "retry_after_seconds": {
           "type": "integer",
