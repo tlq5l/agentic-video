@@ -18,6 +18,7 @@ Pick one route and follow its steps.
 Then paste this first prompt: "Use agentic-video: make a contact sheet of `/path/to/video.mp4` and list its cuts"
 
 - [Six task recipes with real output](docs/recipes/): each has a prompt and the tool result.
+- [When to use agentic-video, and when a video-understanding model fits better](docs/when-to-use.md?ref=agentic-video-when-to-use-docs).
 - Used it for something? Tell us in [Discussions](https://github.com/tlq5l/agentic-video/discussions).
 - Found a miss? [Open an issue](https://github.com/tlq5l/agentic-video/issues/new?template=report-a-miss.yml).
 
