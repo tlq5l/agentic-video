@@ -28,6 +28,8 @@ import time
 import zlib
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 TESTS = ROOT / "tests"
 SRC = ROOT / "src"
@@ -35,29 +37,48 @@ MARKER_EXPRESSION = "not model and not slow"
 SELECT_ALL = {"tests/conftest.py", "conftest.py", "pytest.ini", "pyproject.toml"}
 DEFAULT_JOBS = 4
 SHARD_ENV = "RELATED_TESTS_SHARD"  # "<index>/<count>", read by the pytest plugin below
-REPORT_ENV = "RELATED_TESTS_REPORT"  # a file path; the plugin writes {"collected": [...], "kept": [...]} there
+REPORT_ENV = "RELATED_TESTS_REPORT"  # a file path; the plugin writes {"collected", "kept", "ran"} there
+
+SHARD_REPORT = {}  # {"collected": [...], "kept": [...]} once this worker has sharded
+RAN = set()  # nodeids that reported any phase (setup, call, teardown) in this worker
 
 
+def write_report(data):
+    report = os.environ.get(REPORT_ENV)
+    if report:
+        with open(report, "w", encoding="utf-8") as handle:
+            json.dump(data, handle)
+
+
+@pytest.hookimpl(hookwrapper=True)
 def pytest_collection_modifyitems(config, items):
-    """pytest plugin hook (loaded with `-p related_tests`): keep this worker's share of the collected tests.
+    """pytest plugin hook (loaded with `-p related_tests`): keep this worker's share of the final test list.
 
-    The share is a crc32 of each nodeid modulo the worker count. crc32 is the same in every process
-    (the built-in hash() is not), so workers agree on the split even when they collect in different orders.
-    The parent checks the report from each worker (see shard_problem)."""
+    It acts after every other modifyitems hook (-m deselection, conftest hooks, trylast hooks), so every
+    worker splits the same list. The share is a crc32 of each nodeid modulo the worker count. crc32 is the
+    same in every process (the built-in hash() is not), so workers agree on the split even when they
+    collect in different orders. The parent checks each worker's report (see shard_problems)."""
+    yield
     spec = os.environ.get(SHARD_ENV)
     if not spec:
         return
     index, count = (int(part) for part in spec.split("/"))
-    collected = [item.nodeid for item in items]
     kept, dropped = [], []
     for item in items:
         (kept if zlib.crc32(item.nodeid.encode()) % count == index else dropped).append(item)
-    report = os.environ.get(REPORT_ENV)
-    if report:
-        with open(report, "w", encoding="utf-8") as handle:
-            json.dump({"collected": collected, "kept": [item.nodeid for item in kept]}, handle)
+    SHARD_REPORT.update(collected=[item.nodeid for item in items], kept=[item.nodeid for item in kept])
+    write_report(SHARD_REPORT)  # written now too, so a crash later still leaves the split
     config.hook.pytest_deselected(items=dropped)
     items[:] = kept
+
+
+def pytest_runtest_logreport(report):
+    RAN.add(report.nodeid)
+
+
+def pytest_sessionfinish():
+    if SHARD_REPORT:
+        write_report({**SHARD_REPORT, "ran": sorted(RAN)})
 
 
 def worker_exit_code(codes):
@@ -83,21 +104,23 @@ def read_report(path):
         return None
 
 
-def shard_problem(reports, codes):
-    """Why the workers' shares are not one exact split of what they all collected, or None when they are.
+def shard_problems(reports, codes):
+    """Lines saying why the workers' shares are not one exact split of what they all collected (empty when they are).
 
-    Each worker must have collected the same nodeids, and the kept lists must be pairwise disjoint
-    with a union equal to the collected set."""
+    Each worker must have collected the same nodeids, and the kept lists must be pairwise disjoint with a
+    union equal to the collected set. A worker that exited 0 or 5 must have run exactly the tests it kept,
+    and exit 5 (no tests) is only fine when it kept none. A report with no "ran" key was cut short: nothing ran."""
     missing = [index + 1 for index, report in enumerate(reports) if report is None]
     if missing:
         if any(code not in (0, 5) for code in codes):
-            return None  # a worker that died is failed by its exit code (worker_exit_code)
-        return f"related_tests: shard mismatch: no collection report from worker(s) {missing}"
+            return []  # a worker that died is failed by its exit code (worker_exit_code)
+        return [f"related_tests: shard mismatch: no collection report from worker(s) {missing}"]
+    problems = []
     base = set(reports[0]["collected"])
     for index, report in enumerate(reports):
         seen = set(report["collected"])
         if seen != base:
-            return (
+            problems.append(
                 f"related_tests: shard mismatch: worker {index + 1} collected {len(seen)} tests, "
                 f"worker 1 collected {len(base)}; the workers did not collect the same tests"
             )
@@ -107,18 +130,31 @@ def shard_problem(reports, codes):
     dropped = len(base - union)
     unknown = len(union - base)
     if duplicated or dropped or unknown:
-        return (
+        problems.append(
             f"related_tests: shard mismatch: of {len(base)} collected tests, {duplicated} run by more than one "
             f"worker, {dropped} run by none, {unknown} not collected"
         )
-    return None
+    for index, (report, code) in enumerate(zip(reports, codes)):
+        if code not in (0, 5):
+            continue  # failing codes are already named by worker_exit_code
+        kept_here, ran = set(report["kept"]), set(report.get("ran", []))
+        if code == 5 and kept_here:
+            problems.append(
+                f"related_tests: worker {index + 1} exited 5 (no tests) after being given {len(kept_here)} tests"
+            )
+        elif ran != kept_here:
+            problems.append(
+                f"related_tests: worker {index + 1} ran {len(ran)} tests but was given {len(kept_here)}: "
+                f"{len(kept_here - ran)} never ran, {len(ran - kept_here)} ran outside its share"
+            )
+    return problems
 
 
 def run_sharded(chosen, jobs):
     """Run the chosen test files in `jobs` pytest processes at once and return one exit code.
 
     Exit codes go through worker_exit_code. The workers' collection reports must split the tests exactly
-    (shard_problem); a mismatch prints a line and turns a 0 or 5 result into 1."""
+    (shard_problems); each violation prints a line and turns a 0 or 5 result into 1."""
     with tempfile.TemporaryDirectory() as scratch:
         workers = []
         for index in range(jobs):
@@ -139,11 +175,11 @@ def run_sharded(chosen, jobs):
             codes.append(code)
         returncode = worker_exit_code(codes)
         reports = [read_report(os.path.join(scratch, f"report-{index}.json")) for index in range(jobs)]
-    problem = shard_problem(reports, codes)
-    if problem:
+    problems = shard_problems(reports, codes)
+    for problem in problems:
         print(problem)
-        if returncode in (0, 5):
-            returncode = 1
+    if problems and returncode in (0, 5):
+        returncode = 1
     return returncode
 
 
