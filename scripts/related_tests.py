@@ -5,6 +5,7 @@ Usage:
   python scripts/related_tests.py --base main     # changes vs another ref
   python scripts/related_tests.py --files src/retrieval/visual.py   # pick the files by hand
   python scripts/related_tests.py --list          # print the chosen tests, run nothing
+  python scripts/related_tests.py --jobs 1        # one pytest process instead of the default 4
 
 A test is chosen when it imports a changed module directly, or imports a src module that
 imports the changed one (one level). Importing a module also runs the __init__ files of its
@@ -18,8 +19,10 @@ under src/, or one of the config files above; a folder is refused, and so is any
 
 import argparse
 import ast
+import os
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -28,6 +31,48 @@ TESTS = ROOT / "tests"
 SRC = ROOT / "src"
 MARKER_EXPRESSION = "not model and not slow"
 SELECT_ALL = {"tests/conftest.py", "conftest.py", "pytest.ini", "pyproject.toml"}
+DEFAULT_JOBS = 4
+SHARD_ENV = "RELATED_TESTS_SHARD"  # "<index>/<count>", read by the pytest plugin below
+
+
+def pytest_collection_modifyitems(config, items):
+    """pytest plugin hook (loaded with `-p related_tests`): keep this worker's share of the collected tests.
+
+    Every worker collects the same tests in the same order, so position modulo the count gives each test
+    exactly one worker."""
+    spec = os.environ.get(SHARD_ENV)
+    if not spec:
+        return
+    index, count = (int(part) for part in spec.split("/"))
+    kept = [item for position, item in enumerate(items) if position % count == index]
+    config.hook.pytest_deselected(items=[item for item in items if item not in kept])
+    items[:] = kept
+
+
+def run_sharded(chosen, jobs):
+    """Run the chosen test files in `jobs` pytest processes at once and return one exit code.
+
+    A worker with no tests (exit 5) does not fail the run; only when no worker ran a test is 5 kept."""
+    workers = []
+    for index in range(jobs):
+        env = dict(os.environ, **{SHARD_ENV: f"{index}/{jobs}"})
+        env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(Path(__file__).parent), env.get("PYTHONPATH")]))
+        command = [sys.executable, "-m", "pytest", "-x", "-q", "-p", "related_tests", "-m", MARKER_EXPRESSION, *chosen]
+        log = tempfile.TemporaryFile(mode="w+")  # a file, not a pipe: a full pipe would stall a worker
+        workers.append((subprocess.Popen(command, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT), log))
+    codes = []
+    for index, (proc, log) in enumerate(workers):
+        code = proc.wait()
+        log.seek(0)
+        if jobs > 1:
+            print(f"--- worker {index + 1}/{jobs} ---")
+        print(log.read(), end="")
+        log.close()
+        codes.append(code)
+    ran = [code for code in codes if code != 5]
+    if not ran:
+        return 5
+    return max(ran)
 
 
 def git_lines(*args):
@@ -113,7 +158,10 @@ def main(argv=None):
     parser.add_argument("--base", default="HEAD", help="git ref to diff against (default HEAD)")
     parser.add_argument("--files", nargs="+", help="use these changed files instead of git's (relative to the current folder, or absolute)")
     parser.add_argument("--list", action="store_true", help="print the chosen tests and do not run them")
+    parser.add_argument("--jobs", type=int, default=DEFAULT_JOBS, help=f"pytest processes that share the tests (default {DEFAULT_JOBS}; 1 runs them in one)")
     args = parser.parse_args(argv)
+    if args.jobs < 1:
+        parser.error("--jobs must be at least 1")
 
     changed = normalize_files(parser, args.files) if args.files else changed_files(args.base)
     chosen = [p.relative_to(ROOT).as_posix() for p in select_tests(changed)]
@@ -127,11 +175,9 @@ def main(argv=None):
         return 0
 
     started = time.monotonic()
-    result = subprocess.run(
-        [sys.executable, "-m", "pytest", "-x", "-q", "-m", MARKER_EXPRESSION, *chosen], cwd=ROOT
-    )
-    print(f"related_tests: {time.monotonic() - started:.1f} s, exit {result.returncode}")
-    return result.returncode
+    returncode = run_sharded(chosen, args.jobs)
+    print(f"related_tests: {time.monotonic() - started:.1f} s, exit {returncode}")
+    return returncode
 
 
 if __name__ == "__main__":
