@@ -19,11 +19,13 @@ under src/, or one of the config files above; a folder is refused, and so is any
 
 import argparse
 import ast
+import json
 import os
 import subprocess
 import sys
 import tempfile
 import time
+import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,46 +35,116 @@ MARKER_EXPRESSION = "not model and not slow"
 SELECT_ALL = {"tests/conftest.py", "conftest.py", "pytest.ini", "pyproject.toml"}
 DEFAULT_JOBS = 4
 SHARD_ENV = "RELATED_TESTS_SHARD"  # "<index>/<count>", read by the pytest plugin below
+REPORT_ENV = "RELATED_TESTS_REPORT"  # a file path; the plugin writes {"collected": [...], "kept": [...]} there
 
 
 def pytest_collection_modifyitems(config, items):
     """pytest plugin hook (loaded with `-p related_tests`): keep this worker's share of the collected tests.
 
-    Every worker collects the same tests in the same order, so position modulo the count gives each test
-    exactly one worker."""
+    The share is a crc32 of each nodeid modulo the worker count. crc32 is the same in every process
+    (the built-in hash() is not), so workers agree on the split even when they collect in different orders.
+    The parent checks the report from each worker (see shard_problem)."""
     spec = os.environ.get(SHARD_ENV)
     if not spec:
         return
     index, count = (int(part) for part in spec.split("/"))
-    kept = [item for position, item in enumerate(items) if position % count == index]
-    config.hook.pytest_deselected(items=[item for item in items if item not in kept])
+    collected = [item.nodeid for item in items]
+    kept, dropped = [], []
+    for item in items:
+        (kept if zlib.crc32(item.nodeid.encode()) % count == index else dropped).append(item)
+    report = os.environ.get(REPORT_ENV)
+    if report:
+        with open(report, "w", encoding="utf-8") as handle:
+            json.dump({"collected": collected, "kept": [item.nodeid for item in kept]}, handle)
+    config.hook.pytest_deselected(items=dropped)
     items[:] = kept
+
+
+def worker_exit_code(codes):
+    """One exit code for all workers. 0 (passed) and 5 (no tests) are fine; any other code fails the run.
+
+    A worker killed by a signal has a negative code (-N for signal N); it is named on its own line.
+    The first positive failure code is returned, else 1. All 5 gives 5; a mix of 0 and 5 gives 0."""
+    for index, code in enumerate(codes):
+        if code < 0:
+            print(f"related_tests: worker {index + 1} died with signal {-code}")
+    failed = [code for code in codes if code not in (0, 5)]
+    if failed:
+        positive = [code for code in failed if code > 0]
+        return positive[0] if positive else 1
+    return 5 if all(code == 5 for code in codes) else 0
+
+
+def read_report(path):
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return json.load(handle)
+    except (OSError, ValueError):
+        return None
+
+
+def shard_problem(reports, codes):
+    """Why the workers' shares are not one exact split of what they all collected, or None when they are.
+
+    Each worker must have collected the same nodeids, and the kept lists must be pairwise disjoint
+    with a union equal to the collected set."""
+    missing = [index + 1 for index, report in enumerate(reports) if report is None]
+    if missing:
+        if any(code not in (0, 5) for code in codes):
+            return None  # a worker that died is failed by its exit code (worker_exit_code)
+        return f"related_tests: shard mismatch: no collection report from worker(s) {missing}"
+    base = set(reports[0]["collected"])
+    for index, report in enumerate(reports):
+        seen = set(report["collected"])
+        if seen != base:
+            return (
+                f"related_tests: shard mismatch: worker {index + 1} collected {len(seen)} tests, "
+                f"worker 1 collected {len(base)}; the workers did not collect the same tests"
+            )
+    kept = [nodeid for report in reports for nodeid in report["kept"]]
+    union = set(kept)
+    duplicated = len(kept) - len(union)
+    dropped = len(base - union)
+    unknown = len(union - base)
+    if duplicated or dropped or unknown:
+        return (
+            f"related_tests: shard mismatch: of {len(base)} collected tests, {duplicated} run by more than one "
+            f"worker, {dropped} run by none, {unknown} not collected"
+        )
+    return None
 
 
 def run_sharded(chosen, jobs):
     """Run the chosen test files in `jobs` pytest processes at once and return one exit code.
 
-    A worker with no tests (exit 5) does not fail the run; only when no worker ran a test is 5 kept."""
-    workers = []
-    for index in range(jobs):
-        env = dict(os.environ, **{SHARD_ENV: f"{index}/{jobs}"})
-        env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(Path(__file__).parent), env.get("PYTHONPATH")]))
-        command = [sys.executable, "-m", "pytest", "-x", "-q", "-p", "related_tests", "-m", MARKER_EXPRESSION, *chosen]
-        log = tempfile.TemporaryFile(mode="w+")  # a file, not a pipe: a full pipe would stall a worker
-        workers.append((subprocess.Popen(command, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT), log))
-    codes = []
-    for index, (proc, log) in enumerate(workers):
-        code = proc.wait()
-        log.seek(0)
-        if jobs > 1:
-            print(f"--- worker {index + 1}/{jobs} ---")
-        print(log.read(), end="")
-        log.close()
-        codes.append(code)
-    ran = [code for code in codes if code != 5]
-    if not ran:
-        return 5
-    return max(ran)
+    Exit codes go through worker_exit_code. The workers' collection reports must split the tests exactly
+    (shard_problem); a mismatch prints a line and turns a 0 or 5 result into 1."""
+    with tempfile.TemporaryDirectory() as scratch:
+        workers = []
+        for index in range(jobs):
+            report = os.path.join(scratch, f"report-{index}.json")
+            env = dict(os.environ, **{SHARD_ENV: f"{index}/{jobs}", REPORT_ENV: report})
+            env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(Path(__file__).parent), env.get("PYTHONPATH")]))
+            command = [sys.executable, "-m", "pytest", "-x", "-q", "-p", "related_tests", "-m", MARKER_EXPRESSION, *chosen]
+            log = tempfile.TemporaryFile(mode="w+")  # a file, not a pipe: a full pipe would stall a worker
+            workers.append((subprocess.Popen(command, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT), log))
+        codes = []
+        for index, (proc, log) in enumerate(workers):
+            code = proc.wait()
+            log.seek(0)
+            if jobs > 1:
+                print(f"--- worker {index + 1}/{jobs} ---")
+            print(log.read(), end="")
+            log.close()
+            codes.append(code)
+        returncode = worker_exit_code(codes)
+        reports = [read_report(os.path.join(scratch, f"report-{index}.json")) for index in range(jobs)]
+    problem = shard_problem(reports, codes)
+    if problem:
+        print(problem)
+        if returncode in (0, 5):
+            returncode = 1
+    return returncode
 
 
 def git_lines(*args):
