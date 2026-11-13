@@ -1,0 +1,41 @@
+{
+  "1-clean": {
+    "joins": [
+      2.3,
+      4.6,
+      6.833,
+      9.0,
+      11.3,
+      13.733,
+      15.967,
+      18.3,
+      20.567,
+      23.0
+    ],
+    "source": "rakan-edits edits/1-clean/NOTES.md, Song round: cuts at 0.000 ... 23.000 s (10 joins)"
+  },
+  "2-kill-rush": {
+    "joins": [
+      2.867,
+      4.6,
+      7.367,
+      10.733,
+      13.133
+    ],
+    "source": "rakan-edits edits/2-kill-rush/NOTES.md, Song round: cuts (kill changes, 5), frames 86,138,221,322,394"
+  },
+  "3-ally-down": {
+    "joins": [
+      6.833,
+      11.3,
+      15.967
+    ],
+    "source": "rakan-edits tmp/song-3-ally-down/segments.json cut_frames 205,339,479; diff peaks confirmed at 6.833, 11.300, 15.967 s"
+  },
+  "4-replay": {
+    "joins": [
+      6.867
+    ],
+    "source": "rakan-edits edits/4-replay/build.sh NA=206 frames (cut at 6.867 s); diff peak 28.3 at 6.867 s"
+  }
+}

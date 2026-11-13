@@ -1,0 +1,12 @@
+{
+  "check": [
+    "bash",
+    "-c",
+    ".venv/bin/python -m pytest -q -p no:cacheprovider -m \"not model and not slow\" -k \"not frame_at\" --ignore=tests/test_mcpb_bundle.py tests"
+  ],
+  "setup": [
+    "bash",
+    "-c",
+    "export PATH=\"$HOME/.local/bin:/opt/homebrew/bin:$PATH\" && uv venv -q --python 3.12 .venv && uv pip install -q --python .venv/bin/python -r requirements.txt pytest jsonschema"
+  ]
+}
