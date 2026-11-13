@@ -747,26 +747,29 @@ def _finish_onsets(
 
 def _add_onsets_away_from(
     base: List[Dict[str, Any]], extra: List[Dict[str, Any]], window_sec: float, gap_sec: float,
-) -> Tuple[List[Dict[str, Any]], List[float]]:
+) -> Tuple[List[Dict[str, Any]], List[float], int]:
     """`base` (unchanged) plus each `extra` onset that has no base onset within window_sec and stays at least
-    gap_sec from every onset kept before it (earlier `extra` onsets count too). Returns (sorted list, times of the added).
+    gap_sec from every onset kept before it (earlier `extra` onsets count too). Returns (sorted list, times of the
+    added, how many extra onsets were dropped for being within gap_sec of a kept onset).
 
     Walks `extra` in time order, so the earlier of two clashing strength onsets is the one kept.
     """
     base_times = np.sort(np.asarray([float(item["time_sec"]) for item in base], dtype=np.float64))
     added: List[Dict[str, Any]] = []
+    gap_dropped = 0
     for onset in sorted(extra, key=lambda item: float(item["time_sec"])):
         time_sec = float(onset["time_sec"])
         # The nearest base onset on each side is the only one that can be within either limit.
         index = int(np.searchsorted(base_times, time_sec))
         gaps = [abs(time_sec - base_times[k]) for k in (index - 1, index) if 0 <= k < len(base_times)]
-        if any(distance <= window_sec or distance < gap_sec for distance in gaps):
+        if any(distance <= window_sec for distance in gaps):
             continue
-        if added and time_sec - float(added[-1]["time_sec"]) < gap_sec:
+        if any(distance < gap_sec for distance in gaps) or (added and time_sec - float(added[-1]["time_sec"]) < gap_sec):
+            gap_dropped += 1
             continue
         added.append(onset)
     merged = sorted([*base, *added], key=lambda item: float(item["time_sec"]))
-    return merged, [float(item["time_sec"]) for item in added]
+    return merged, [float(item["time_sec"]) for item in added], gap_dropped
 
 
 def _detect_strength_onsets_in_samples(
@@ -920,10 +923,13 @@ def audio_onsets(
     main_onsets, merged_count = _finish_onsets(
         _detect_onsets_in_samples(samples, start, end, first_sample, last_sample, threshold, band),
         samples, compare_samples, band, gap)
-    strength_onsets, _ = _finish_onsets(
+    strength_onsets, strength_merged = _finish_onsets(
         _detect_strength_onsets_in_samples(samples, start, end, first_sample, last_sample, threshold, band),
         samples, compare_samples, band, gap)
-    onsets, added_times = _add_onsets_away_from(main_onsets, strength_onsets, ONSET_UNION_SEC, gap)
+    onsets, added_times, union_gap_dropped = _add_onsets_away_from(main_onsets, strength_onsets, ONSET_UNION_SEC, gap)
+    # merged_count means "onsets merged away by min_gap" across both passes; the window dedupe against
+    # main onsets is not counted.
+    merged_count += strength_merged + union_gap_dropped
 
     result = {
         "source_path": str(Path(source).expanduser().resolve()),

@@ -13,6 +13,7 @@ from PIL import Image
 from src.core.cache import MediaCache
 from src.core.config import Config
 from src.executor.mcp_server import handle_call, tool_call_response
+from src.media import audio
 from src.media.audio import _outlier_sections, audio_onsets, loudness_timeline, spectrogram_window, sync_check
 from src.transcript import asr
 
@@ -368,3 +369,29 @@ def test_visual_tools_refuse_audio_only_m4a_with_audio_only_message(monkeypatch,
         response = json.loads(tool_call_response(1, name, args))
         assert response["result"]["isError"] is True, name
         assert "audio only" in response["result"]["content"][0]["text"], name
+
+
+def test_audio_onsets_merged_count_includes_strength_pass(tmp_path, monkeypatch):
+    rate = 48000
+    samples = np.zeros(2 * rate, dtype=np.float32)
+    for time_sec in (0.500, 0.528, 0.900, 1.300):
+        length = int(0.004 * rate)
+        local = np.arange(length) / rate
+        first = int(time_sec * rate)
+        samples[first:first + length] += 0.4 * np.sin(2 * np.pi * 1700 * local) * np.exp(-local / 0.0015)
+    path = tmp_path / "pair.wav"
+    with wave.open(str(path), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(rate)
+        handle.writeframes((np.clip(samples, -0.99, 0.99) * 32767).astype("<i2").tobytes())
+
+    monkeypatch.setattr(audio, "_detect_onsets_in_samples", lambda *args: [])
+    monkeypatch.setattr(
+        audio, "_detect_strength_onsets_in_samples",
+        lambda *args: [{"time_sec": 0.500, "strength": 0.8}, {"time_sec": 0.520, "strength": 0.7}],
+    )
+    result = audio_onsets(str(path), min_strength=0.08, min_gap_sec=0.035, cache=MediaCache(tmp_path / "cache"))
+
+    assert result["total"] == 1
+    assert result["merged_count"] == 1
