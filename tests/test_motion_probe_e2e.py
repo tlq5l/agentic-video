@@ -242,3 +242,26 @@ def test_motion_stats_reports_truncated_for_clip_cut_at_240_frames(tmp_path, mon
     assert short_reply["ok"], short_reply
     assert short_reply["data"]["truncated"] is False, short_reply["data"]
     motion_probe.clear_memory_store()
+
+
+def test_motion_open_reports_ready_for_clip_over_memory_cap(tmp_path, monkeypatch):
+    """A clip bigger than the in-memory cap is built, written to disk, evicted at once; motion_open then
+    reports ready from disk and motion_stats reads it from disk. Old code restarted the build on every call."""
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(motion_probe, "STORE_MAX_BYTES", 300_000)  # the clip below is about 740 KB of frames
+    motion_probe.clear_memory_store()
+    big = tmp_path / "big.gif"
+    frames = [Image.new("RGB", (64, 96), (30 + 5 * i, 30, 30)) for i in range(40)]
+    frames[0].save(big, save_all=True, append_images=frames[1:], duration=40, loop=0)
+    statuses = []
+    for _ in range(200):
+        reply = mcp_server.handle_call("motion_open", {"source": str(big)})
+        assert reply["ok"], reply
+        statuses.append(reply["data"]["status"])
+        if reply["data"]["status"] != "in_progress":
+            break
+        time.sleep(0.05)
+    assert statuses[-1] == "ready", f"motion_open never ready: {len(statuses)} calls, last={statuses[-3:]}"
+    stats = mcp_server.handle_call("motion_stats", {"source": str(big)})
+    assert stats["ok"] and stats["data"]["origin"] == "disk", stats
+    motion_probe.clear_memory_store()

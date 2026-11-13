@@ -331,6 +331,15 @@ def _build_in_background(path: str, fingerprint: str) -> None:
             _FAILED[fingerprint] = str(exc)
 
 
+def _disk_ready(fingerprint: str) -> bool:
+    """True when the disk cache holds a complete entry for this fingerprint (meta.json is written last)."""
+    try:
+        meta = json.loads((_entry(fingerprint) / "meta.json").read_text())
+    except (OSError, ValueError):
+        return False
+    return meta.get("version") == VERSION and meta.get("fingerprint") == fingerprint
+
+
 def _tool_open(args: Dict[str, Any]) -> Dict[str, Any]:
     path = _local_path(args["source"])
     fingerprint = MediaCache().compute_fingerprint(str(path))
@@ -339,6 +348,14 @@ def _tool_open(args: Dict[str, Any]) -> Dict[str, Any]:
             return {"status": "ready", "fingerprint": fingerprint, "origin": "memory"}
         if fingerprint in _FAILED:
             return {"status": "failed", "fingerprint": fingerprint, "error": _FAILED[fingerprint]}
+        thread = _PENDING.get(fingerprint)
+        if thread is not None and thread.is_alive():
+            return {"status": "in_progress", "retry_after_seconds": 1, "fingerprint": fingerprint}
+    # No build running and not in memory: a clip over the cap is evicted right after its build,
+    # so the finished disk copy is the ready state (the next tools read it from disk).
+    if _disk_ready(fingerprint):
+        return {"status": "ready", "fingerprint": fingerprint, "origin": "disk"}
+    with _STORE_LOCK:
         thread = _PENDING.get(fingerprint)
         if thread is None or not thread.is_alive():
             thread = threading.Thread(target=_build_in_background, args=(str(path), fingerprint), daemon=True, name=f"motion-{fingerprint[:8]}")
