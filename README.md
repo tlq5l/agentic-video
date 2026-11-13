@@ -242,6 +242,7 @@ It does not beat Gemini's video understanding in general.
 - `scripts/generate_synthetic_benchmark.py`: regenerates the synthetic fixture video.
 - `fixtures/`: small test videos (see Media credits).
 - `docs/`: architecture notes and per-feature pages.
+- [`llms.txt`](https://github.com/tlq5l/agentic-video/blob/main/llms.txt?ref=agentic-video-llms-txt-docs-index): an index of the docs pages for LLM agents; plain-markdown copies are in `docs/llms/`.
 
 ## Media credits
 
