@@ -3924,7 +3924,8 @@
         "origin": {
           "type": "string",
           "enum": [
-            "memory"
+            "memory",
+            "disk"
           ]
         }
       },

@@ -13,6 +13,7 @@ import venv
 from pathlib import Path
 from typing import Any, Dict
 
+import jsonschema
 from PIL import Image
 
 import src.executor.mcp_server as mcp_server
@@ -264,4 +265,44 @@ def test_motion_open_reports_ready_for_clip_over_memory_cap(tmp_path, monkeypatc
     assert statuses[-1] == "ready", f"motion_open never ready: {len(statuses)} calls, last={statuses[-3:]}"
     stats = mcp_server.handle_call("motion_stats", {"source": str(big)})
     assert stats["ok"] and stats["data"]["origin"] == "disk", stats
+    motion_probe.clear_memory_store()
+
+
+def test_motion_selftest_refuses_a_two_frame_clip(tmp_path, monkeypatch):
+    """A 2-frame GIF is too short to plant the selftest faults. motion_selftest answers with a structured
+    error that names the file and the minimum frame count, and does not raise out of handle_call."""
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    motion_probe.clear_memory_store()
+    two = tmp_path / "two-frames.gif"
+    frames = [Image.new("RGB", (16, 16), (0, 0, 0)), Image.new("RGB", (16, 16), (255, 255, 255))]
+    frames[0].save(two, save_all=True, append_images=frames[1:], duration=40, loop=0)
+    reply = mcp_server.handle_call("motion_selftest", {"source": str(two)})
+    assert reply["ok"] is False, reply
+    message = reply["error"]["message"]
+    assert "two-frames.gif" in message and f"at least {motion_probe.SELFTEST_MIN_FRAMES} frames" in message, message
+    motion_probe.clear_memory_store()
+
+
+def test_motion_open_disk_origin_matches_its_output_schema(tmp_path, monkeypatch):
+    """A clip served from the disk cache reports origin "disk", and that reply validates against the
+    motion_open output schema in mcp_schemas.json."""
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(motion_probe, "STORE_MAX_BYTES", 300_000)  # over the cap: built, written, evicted at once
+    motion_probe.clear_memory_store()
+    big = tmp_path / "disk-origin.gif"
+    frames = [Image.new("RGB", (64, 96), (30 + 5 * i, 30, 30)) for i in range(40)]
+    frames[0].save(big, save_all=True, append_images=frames[1:], duration=40, loop=0)
+    reply = None
+    for _ in range(200):
+        reply = mcp_server.handle_call("motion_open", {"source": str(big)})
+        assert reply["ok"], reply
+        if reply["data"]["status"] != "in_progress":
+            break
+        time.sleep(0.05)
+    assert reply["data"]["status"] == "ready", reply
+    motion_probe.clear_memory_store()
+    reopened = mcp_server.handle_call("motion_open", {"source": str(big)})
+    assert reopened["ok"] and reopened["data"]["origin"] == "disk", reopened
+    schema = json.loads((REPO / "src" / "adapters" / "mcp_schemas.json").read_text(encoding="utf-8"))["tools"]["motion_open"]["outputSchema"]
+    jsonschema.validate(reopened["data"], schema)
     motion_probe.clear_memory_store()
