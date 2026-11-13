@@ -23,6 +23,8 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parents[1]
 CLOUD_VARS = ("CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN", "AGENTIC_VIDEO_CF_TOKEN_COMMAND")
 SECRET = "not-a-real-token-5d2e"
+WORKERS_AI_OFF = ("Workers AI is switched off (owner 2026-11-14): the cloud call is refused before any request, "
+                "held for the day it is turned back on (WORKERS_AI_ON in src/media/cloudflare.py).")
 
 
 @pytest.fixture(scope="module")
@@ -118,6 +120,7 @@ def test_tool_is_listed_with_cloud_warning():
     assert "THIS SENDS VIDEO FRAMES TO CLOUDFLARE" in tool["description"]
 
 
+@pytest.mark.skip(reason=WORKERS_AI_OFF)
 def test_wakes_once_when_the_red_box_stays_then_cooldown_holds_the_rest(red_box_video, stand_in, tmp_path):
     base, seen = stand_in
     temp = tmp_path / "temp"
@@ -144,6 +147,7 @@ def test_wakes_once_when_the_red_box_stays_then_cooldown_holds_the_rest(red_box_
     assert [w["time_sec"] for w in result["structuredContent"]["wakes"]] == [20.0, 25.0, 30.0]
 
 
+@pytest.mark.skip(reason=WORKERS_AI_OFF)
 @pytest.mark.parametrize("delay_for, label", [
     (lambda n: 15.0, "every reply takes 15 s"),
     (lambda n: 0.0 if n < 6 else 25.0, "the API hangs after 6 good replies"),
@@ -183,11 +187,23 @@ def test_bad_arguments_get_advice_not_a_cloud_call(red_box_video, arguments, exp
 def test_refuses_without_credentials_before_sending_anything(red_box_video):
     result, _ = _call({"source": str(red_box_video), "conditions": ["Is a red box visible?"]}, drop=CLOUD_VARS)
     text = result["content"][0]["text"]
-    assert result["isError"] and "CLOUDFLARE_ACCOUNT_ID" in text and "CLOUDFLARE_API_TOKEN" in text and "Nothing was sent" in text
+    assert result["isError"] and "switched off" in text and "Nothing was sent" in text
 
 
-@pytest.mark.skipif(not os.environ.get("CLOUDFLARE_ACCOUNT_ID") or not any(os.environ.get(v) for v in CLOUD_VARS[1:]),
-                    reason="needs Cloudflare credentials (paid cloud call)")
+def test_refuses_with_credentials_and_sends_nothing(red_box_video, stand_in, tmp_path):
+    """Owner 2026-11-14: Workers AI is off. With a token and a reachable stand-in the tool still refuses and sends no frame."""
+    base, seen = stand_in
+    env = {"CLOUDFLARE_ACCOUNT_ID": "a" * 32, "CLOUDFLARE_API_TOKEN": SECRET, "AGENTIC_VIDEO_CF_API_BASE": base,
+           "AGENTIC_VIDEO_TEMP_DIR": str(tmp_path / "temp")}
+    result, code = _call({"source": str(red_box_video), "conditions": ["Is a red box visible?"]},
+                         env=env, drop=("AGENTIC_VIDEO_CF_TOKEN_COMMAND",))
+    text = result["content"][0]["text"]
+    assert code == 0 and result["isError"], result
+    assert "switched off" in text and "Nothing was sent" in text and "search_visual" in text
+    assert seen == [] and SECRET not in json.dumps(result)
+
+
+@pytest.mark.skip(reason=WORKERS_AI_OFF)
 def test_live_clef_wakes_on_the_red_box(red_box_video):
     result, _ = _call({"source": str(red_box_video), "conditions": ["Is there a red rectangle in the middle of the picture?"]})
     assert not result.get("isError"), result
@@ -195,6 +211,7 @@ def test_live_clef_wakes_on_the_red_box(red_box_video):
     assert len(wakes) == 1 and 15.0 <= wakes[0]["time_sec"] <= 25.0
 
 
+@pytest.mark.skip(reason=WORKERS_AI_OFF)
 @pytest.mark.parametrize("status, reply", [
     (400, json.dumps({"errors": [{"message": f"token {SECRET} rejected"}]}).encode()),
     (200, json.dumps({"result": {"answers": {"q0": {"noul": SECRET}}}}).encode()),

@@ -34,6 +34,10 @@ PIECE_SEC = 8  # a 20 s clip makes 3 pieces (8, 8 and 4 s), so the stitched offs
 HOSTNAME = socket.gethostname()
 
 
+WORKERS_AI_OFF = ("Workers AI is switched off (owner 2026-11-14): the shadow job is refused before any request, "
+                "held for the day it is turned back on (WORKERS_AI_ON in src/media/cloudflare.py).")
+
+
 @pytest.fixture(scope="module")
 def speech_clip():
     """The committed speech clip; nonempty, so a missing or empty file fails here rather than as a silent empty transcript."""
@@ -148,6 +152,7 @@ def _write_trial_state(state: Path, started_at, count: int, ended: bool = False)
         json.dumps({"started_at": started_at, "count": count, "ended": ended}), encoding="utf-8")
 
 
+@pytest.mark.skip(reason=WORKERS_AI_OFF)
 def test_switch_on_sends_three_pieces_logs_both_and_the_reply_matches_switch_off(speech_clip, trial_env, monkeypatch):
     seen, state = trial_env["seen"], trial_env["state"]
     off = _transcribe(speech_clip)
@@ -187,6 +192,7 @@ def test_switch_on_sends_three_pieces_logs_both_and_the_reply_matches_switch_off
     assert trial["count"] == 1 and trial["ended"] is False and trial["started_at"]
 
 
+@pytest.mark.skip(reason=WORKERS_AI_OFF)
 def test_a_synchronous_fresh_run_is_shadowed_too(speech_clip, trial_env, monkeypatch):
     """AgenticVideoEngine.transcribe with an explicit timeout is a fresh run with no background slot; it is shadowed."""
     seen, state = trial_env["seen"], trial_env["state"]
@@ -199,6 +205,7 @@ def test_a_synchronous_fresh_run_is_shadowed_too(speech_clip, trial_env, monkeyp
     assert len(seen) == 3
 
 
+@pytest.mark.skip(reason=WORKERS_AI_OFF)
 def test_a_synchronous_run_returns_before_the_shadow_credentials_resolve(speech_clip, trial_env, monkeypatch, tmp_path):
     """The shadow token command waits for a gate that this test opens only after the synchronous call has returned.
     Before the fix the hook ran the command on the caller's thread, so the command had finished (`done` existed) when
@@ -278,6 +285,7 @@ def test_an_expired_trial_with_no_token_source_logs_nothing(speech_clip, trial_e
     assert trial["ended"] is False and trial["count"] == 3
 
 
+@pytest.mark.skip(reason=WORKERS_AI_OFF)
 def test_an_expiry_during_a_job_stops_its_remaining_pieces(speech_clip, trial_env, monkeypatch):
     """Pieces run one at a time here, so the trial can expire after the first piece is sent. The later pieces and
     their retries are refused, the job still logs once, and trial_ended is written once."""
