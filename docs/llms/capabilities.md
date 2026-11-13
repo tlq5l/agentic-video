@@ -1,6 +1,6 @@
 # Where each tool runs
 
-One row per tool (25 in `src/adapters/mcp_schemas.json`). The last three columns say what a tool needs. "yes" means the code needs it; "no" means it does not.
+One row per tool (33 in `src/adapters/mcp_schemas.json`). The last three columns say what a tool needs. "yes" means the code needs it; "no" means it does not.
 
 Cells in the two run columns come from one smoke run per machine on 2026-10-31. The script called every tool once through `handle_call` on a 20-second clip with a tone and three scene changes. The run had no Apple silicon Mac.
 
@@ -35,11 +35,19 @@ Cells in the two run columns come from one smoke run per machine on 2026-10-31. 
 | `sync_check` | not run | ok | ok | no | no | no |
 | `watch_for` | not run | not run | not run | yes | no | no |
 | `label_sounds` | not run | not run | not run | yes | no | no |
+| `motion_open` | not run | not run | not run | no | no | no |
+| `motion_sheet` | not run | not run | not run | no | no | no |
+| `motion_stats` | not run | not run | not run | no | no | no |
+| `motion_boil_map` | not run | not run | not run | no | no | no |
+| `motion_zoom` | not run | not run | not run | no | no | no |
+| `motion_profile` | not run | not run | not run | no | no | no |
+| `motion_compare` | not run | not run | not run | no | no | no |
+| `motion_selftest` | not run | not run | not run | no | no | no |
 
 Notes:
 
 - Apple silicon was not run for any tool. The MacBook runs no heavy work, so this column is empty until someone runs the smoke script on an Apple silicon Mac.
 - `transcribe` and `search_transcript` use local speech recognition. `turbo` needs whisper.cpp (`whisper-cli` and its model). `search_transcript` hybrid matches by meaning need EmbeddingGemma 2 on Apple CoreML; that was not run here, and without it the search stays keyword-only.
 - The "started" cells are not failures. Their results are not checked here: each one still needs a repeat call or a poll of its job.
-- `watch_for` and `label_sounds` send frames or audio to Cloudflare Workers AI. Without `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` they stop before sending anything.
+- `watch_for` and `label_sounds` are switched off (owner 2026-11-14): they refuse every call and send nothing, with or without Cloudflare credentials. The credentials column is what they would need once switched back on.
 - The smoke run also covered argument shapes agents guess (see `docs/features/contact-sheets.md` and the README). Those calls are not in this table.

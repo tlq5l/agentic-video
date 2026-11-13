@@ -49,5 +49,5 @@ Notes:
 - Apple silicon was not run for any tool. The MacBook runs no heavy work, so this column is empty until someone runs the smoke script on an Apple silicon Mac.
 - `transcribe` and `search_transcript` use local speech recognition. `turbo` needs whisper.cpp (`whisper-cli` and its model). `search_transcript` hybrid matches by meaning need EmbeddingGemma 2 on Apple CoreML; that was not run here, and without it the search stays keyword-only.
 - The "started" cells are not failures. Their results are not checked here: each one still needs a repeat call or a poll of its job.
-- `watch_for` and `label_sounds` send frames or audio to Cloudflare Workers AI. Without `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` they stop before sending anything.
+- `watch_for` and `label_sounds` are switched off (owner 2026-11-14): they refuse every call and send nothing, with or without Cloudflare credentials. The credentials column is what they would need once switched back on.
 - The smoke run also covered argument shapes agents guess (see `docs/features/contact-sheets.md` and the README). Those calls are not in this table.

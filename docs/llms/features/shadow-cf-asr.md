@@ -1,6 +1,6 @@
 # Shadow Cloudflare transcription (trial)
 
-This SENDS AUDIO TO CLOUDFLARE. It is a trial switch for the maintainer, on the maintainer's own machines. It is never on by default, and it is not in the public PyPI package's defaults.
+Switched off (owner 2026-11-14): Cloudflare Workers AI is disabled, so setting the switch sends nothing. Once switched back on, this SENDS AUDIO TO CLOUDFLARE. It is a trial switch for the maintainer, on the maintainer's own machines. It is never on by default, and it is not in the public PyPI package's defaults.
 
 How a user reaches it: nothing user-facing. It runs after a fresh local transcription (`transcribe`, `request_transcription`, the background ASR slot, or a synchronous `AgenticVideoEngine.transcribe` call). The user gets the local transcript, unchanged.
 

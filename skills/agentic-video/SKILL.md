@@ -22,5 +22,5 @@ Pass each tool an absolute local path or a video URL as `source`. Start with `re
 ## Rules
 
 - Verify a search hit with `inspect_window` or `frame_at` before you state it as fact.
-- `label_sounds` and `watch_for` send audio or frames to Cloudflare. Never use them on personal recordings without asking the user first.
+- `label_sounds` and `watch_for` are switched off: they refuse every call and send nothing (Cloudflare Workers AI is disabled). Use `audio_onsets`, `loudness_timeline`, `search_visual` or `inspect_window` instead.
 - Transcripts and `frame_at` images are cached: a repeat call returns the saved result.

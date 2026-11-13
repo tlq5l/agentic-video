@@ -1,5 +1,7 @@
 # Watch for
 
+Switched off (owner 2026-11-14): Cloudflare Workers AI is disabled, so `watch_for` refuses every call before reading credentials, and nothing is sent. Free alternatives: `search_visual` (run `build_visual_index` first), or `inspect_window` and `contact_sheet` to look yourself. The rest of this page describes the tool once it is switched back on (`WORKERS_AI_ON` in `src/media/cloudflare.py`).
+
 How a user reaches it: the `watch_for` tool, and `python -m src.media.watch VIDEO --when "QUESTION" [--when ...] [--start N --end N --interval N --cut N --consecutive N --cooldown N]`.
 
 Code: `src/media/watch.py` (`watch_for`, `find_wakes`, `_ask`), `src/media/cloudflare.py` (credentials shared with label_sounds), `src/retrieval/engine.py` (`AgenticVideoEngine.watch_for`), `src/executor/mcp_server.py` (dispatch), contract in `src/adapters/mcp_schemas.json`, `src/adapters/mcp_definitions.ts`, `src/executor/types.d.ts`.
@@ -11,7 +13,7 @@ What depends on it: nothing else calls it; `AGENTS.md` points to it.
 How it decides: one frame (640 px wide) every `interval_sec` goes to Clef with every condition as a yes/no question; a condition wakes at the sample where its chance of yes has been at least `cut` on `consecutive` samples in a row, and at most once per `cooldown_sec` per condition. `first_seen_sec` is the first sample of that run. `conditions[].max_chance` shows how close a quiet condition came.
 
 Gotchas:
-- The frames leave the machine (Cloudflare Workers AI, Clef). Never use it on personal recordings. The tool description says so.
+- When switched on, the frames leave the machine (Cloudflare Workers AI, Clef). Never use it on personal recordings. The tool description says so.
 - Only the questions you write can wake. A condition nobody asked about is never reported; a frame-difference watcher wakes on anything, which is why it false-wakes.
 - An event must span `consecutive` samples: at the defaults an event under 10 s can be missed, and a wake comes about 5 s after the event starts. Lower `interval_sec` or `consecutive` for short events (more calls).
 - Real footage has not been measured for accuracy: check each wake against the footage. The example stream is synthetic.

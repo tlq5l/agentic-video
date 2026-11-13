@@ -1,5 +1,7 @@
 # Label sounds
 
+Switched off (owner 2026-11-14): Cloudflare Workers AI is disabled, so `label_sounds` refuses every call before reading credentials, and nothing is sent. Free alternatives: `audio_onsets`, `loudness_timeline` and `spectrogram_window` (they measure the sound; they do not name it). The rest of this page describes the tool once it is switched back on (`WORKERS_AI_ON` in `src/media/cloudflare.py`).
+
 How a user reaches it: the `label_sounds` tool, and `python -m src.media.sound_labels VIDEO START END [--labels a,b] [--window-sec N]`.
 
 Code: `src/media/sound_labels.py` (`label_sounds`, `_decode_range`, `_ask`), `src/media/cloudflare.py` (credentials shared with watch_for), `src/retrieval/engine.py` (`AgenticVideoEngine.label_sounds`), `src/executor/mcp_server.py` (dispatch), contract in `src/adapters/mcp_schemas.json`, `src/adapters/mcp_definitions.ts`, `src/executor/types.d.ts`.
@@ -9,7 +11,7 @@ How to check it works: `pytest tests/test_label_sounds.py tests/test_cloud_token
 What depends on it: nothing else calls it; `audio_onsets` and `AGENTS.md` point to it for naming a sound.
 
 Gotchas:
-- The audio leaves the machine: each window is sent as a 16 kHz mono WAV to Cloudflare Workers AI (Clef-omni). Never use it on personal recordings. The tool description says so.
+- When switched on, the audio leaves the machine: each window is sent as a 16 kHz mono WAV to Cloudflare Workers AI (Clef-omni). Never use it on personal recordings. The tool description says so.
 - It labels windows of a range you give it; it does not search a long video. Find candidate times with `audio_onsets` or `loudness_timeline` first. At most 60 windows per call (300 s at the default 5 s).
 - Closed list: a sound not in `labels` is forced onto the nearest label or onto `none_chance`, so list every sound that may be present. Steady musical chords can get a false `church bells` label.
 - Treat `top_chance` under 0.5 as weak and confirm with `spectrogram_window`.

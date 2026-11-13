@@ -1591,10 +1591,10 @@ export interface AgenticVideoIntegration {
   /** Compare visual cut times, sound onsets and optional intended cues (each list shows at most 500 items). */
   sync_check(input: SyncCheckInput): Promise<ToolResult<WithUrlSource<SyncCheckOutput>>>;
 
-  /** Watch a range for yes/no conditions with a cloud model (sends frames to Cloudflare Workers AI; at most 720 samples; answers within about 50 s). */
+  /** SWITCHED OFF: refuses every call and sends nothing (Cloudflare Workers AI is disabled). When on, watches a range for yes/no conditions with a cloud model (sends frames to Cloudflare Workers AI; at most 720 samples; answers within about 50 s). */
   watch_for(input: WatchForInput): Promise<ToolResult<WatchForOutput>>;
 
-  /** Name the sounds in audio windows with a cloud model (sends the audio to Cloudflare Workers AI; at most 60 windows). */
+  /** SWITCHED OFF: refuses every call and sends nothing (Cloudflare Workers AI is disabled). When on, names the sounds in audio windows with a cloud model (sends the audio to Cloudflare Workers AI; at most 60 windows). */
   label_sounds(input: LabelSoundsInput): Promise<ToolResult<LabelSoundsOutput>>;
 
   /** Warm a GIF or clip in the background so later motion_ calls answer in milliseconds. */
