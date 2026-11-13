@@ -876,6 +876,9 @@ def _loudness_summary(data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _dispatch(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+    if name.startswith("motion_"):
+        from src.media import motion_probe  # lazy: numpy and Pillow load only for motion calls
+        return motion_probe.dispatch(name, args)
     source = args.get("source", "")
     engine = AgenticVideoEngine(source)
     

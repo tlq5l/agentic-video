@@ -2,7 +2,25 @@
 
 <!-- mcp-name: io.github.tlq5l/agentic-video -->
 
-agentic-video lets an AI agent that reads text and images, but not video, work with video files on your own machine. It is a Python library plus a stdio MCP server. The agent asks small, targeted questions ("show me 12 frames from 0:40 to 1:10", "when is 'launch' spoken?") and gets back measurements, transcripts and contact sheets: grids of frames, each with its timestamp burned into the pixels. Everything runs locally with FFmpeg, Whisper and optional local models, except two optional cloud tools (`watch_for`, `label_sounds`), which send frames or audio to Cloudflare Workers AI only when you set credentials and call them.
+agentic-video lets an AI agent that reads text and images, but not video, work with video files on your own machine. It is a Python library plus a stdio MCP server. The agent asks small, targeted questions ("show me 12 frames from 0:40 to 1:10", "when is 'launch' spoken?") and gets back measurements, transcripts and contact sheets: grids of frames, each with its timestamp burned into the pixels. Everything runs locally with FFmpeg, Whisper and optional local models, except two optional cloud tools (`watch_for`, `label_sounds`), which send frames or audio to Cloudflare Workers AI only when you set credentials and call them. An opt-in shadow transcription trial (off by default, owner machines only) also sends audio to Cloudflare when its switch and credentials are set.
+
+**See it work:** https://agentic-video-gallery.infra-1b7.workers.dev (the gallery: real tasks, including the misses).
+
+## Try it in 2 minutes
+
+Pick one route and follow its steps.
+
+- **Claude Code:** `brew install ffmpeg uv`, then `claude mcp add -s user agentic-video -- uvx agentic-video`.
+- **Claude Desktop:** download the `.mcpb` from the [latest release](https://github.com/tlq5l/agentic-video/releases/latest) and double-click it (macOS; run `brew install ffmpeg` first).
+- **Claude Code plugin:** `brew install ffmpeg uv` first (the plugin's server runs `uvx`), then `claude plugin marketplace add tlq5l/agentic-video`, then `claude plugin install agentic-video@agentic-video` ([docs/claude-code-plugin.md](docs/claude-code-plugin.md)).
+- **Other clients:** [Run the MCP server](#run-the-mcp-server) has the JSON block.
+
+Then paste this first prompt: "Use agentic-video: make a contact sheet of `/path/to/video.mp4` and list its cuts"
+
+- [Six task recipes with real output](docs/recipes/): each has a prompt and the tool result.
+- [When to use agentic-video, and when a video-understanding model fits better](docs/when-to-use.md?ref=agentic-video-when-to-use-docs).
+- Used it for something? Tell us in [Discussions](https://github.com/tlq5l/agentic-video/discussions).
+- Found a miss? [Open an issue](https://github.com/tlq5l/agentic-video/issues/new?template=report-a-miss.yml).
 
 **Install:** `brew install ffmpeg` on macOS, or `sudo apt-get install -y ffmpeg` on Debian or Ubuntu (see [Install](#install-macos-or-linux) for the uv line). Then add it to Claude Code with `claude mcp add -s user agentic-video -- uvx agentic-video` (or `pipx install agentic-video`). Other clients: [Run the MCP server](#run-the-mcp-server).
 
@@ -12,7 +30,7 @@ agentic-video lets an AI agent that reads text and images, but not video, work w
 
 *One `contact_sheet` call on a 5-second clip: six frames, each stamped with its time, as a single image the agent can read.*
 
-In 2 minutes (macOS) your agent can answer "what happens in this video?" and "when is X said?" for a local video file. You get the length and size, a contact sheet image with timestamps, the cuts, a loudness summary and searchable speech. Nothing leaves your machine unless you use the optional cloud tools below. Setup for Claude Code:
+In 2 minutes (macOS) your agent can answer "what happens in this video?" and "when is X said?" for a local video file. You get the length and size, a contact sheet image with timestamps, the cuts, a loudness summary and searchable speech. Nothing leaves your machine unless you use the optional cloud tools below or set the shadow transcription trial switch (off by default, owner machines only). Setup for Claude Code:
 
 ```sh
 brew install ffmpeg uv
@@ -29,9 +47,10 @@ Then ask: "Use agentic-video to review `/path/to/video.mp4`." Other clients and 
 
 ## What it gives an agent
 
-The MCP server exposes 25 tools (full schemas in `src/adapters/mcp_schemas.json`):
+The MCP server exposes 33 tools (full schemas in `src/adapters/mcp_schemas.json`):
 
 - **Look:** `review_video` (first look in one call: metadata, contact sheet, cuts, near-black stretches and a loudness summary), `probe_video` (duration, fps, size, codecs, audio), `contact_sheet`, `overview_chunks` (consecutive sheets across a long video), `inspect_window` / `inspect_windows` (dense frames for short ranges; `read_text` on `inspect_window` adds each frame's on-screen text), `frame_at` (one exact frame at full size, optionally cropped and enlarged to read small text; `read_text: true` also returns the on-screen text it reads, Apple Vision on macOS), `inspect_moments` (frames around given instants), `refine_temporal_beam` (zoom into candidate windows).
+- **Motion (GIF and short clips):** `motion_stats` (boil, loop-seam and per-frame change in one call), `motion_profile` (stutter, freeze, duplicate and loop-seam flags by frame), `motion_boil_map`, `motion_sheet`, `motion_zoom`, `motion_compare`, `motion_selftest`, and `motion_open` to warm a clip in the background so later calls take milliseconds.
 - **Listen:** `transcribe` (timestamped speech, cached; a video with no cached transcript starts a background job, so the first call returns `status: in_progress` and `retry_after_seconds`: call the same tool again after that many seconds), `search_transcript` (find when words are spoken: exact words first, then passages that match by meaning when the optional on-device EmbeddingGemma 2 model is set up; keyword-only without it).
 - **Find:** `detect_cuts` (hard cuts and animated scene changes), `check_frame_cadence` (stretches where frames repeat so the picture updates less often than the frame rate, such as 30 fps padded to 60), `build_visual_index` + `search_visual` (local CLIP search for things that are visible, optional; the interval holding the top hit grows from its best frames only over neighbouring frames that score close to the best, up to 8 seconds, so it can be shorter; a span already longer than 8 seconds, such as a held frame or hits merged together, is kept whole, so it can be longer and can include lower-scoring hits). `watch_for` (cloud: wakes when yes/no questions about the picture start to hold, from sampled frames).
 - **Count and track:** `count_occurrences` (separate appearances of an object or on-screen text; `direction` counts those moving one way across the frame, plus spans too brief to show motion), `count_repetitions` (cycles of a repeated action), `track_region_changes` / `track_region_events` (changes inside one fixed rectangle).
@@ -79,7 +98,7 @@ What is macOS-only:
 - On-screen text matching in `count_occurrences` (`text=`) uses Apple Vision through pyobjc.
 - The bench-v1 harness uses `sandbox-exec`; some tests and generators use `say`. Tests that need a missing tool skip themselves.
 
-The core tools run on Linux. A fresh install of 0.3.1 on Debian 12 (x86_64, ffmpeg 5.1) passed the probe, frame and speech-to-text checks; other distributions and CPUs are untested.
+The core tools run on Linux. A fresh install of 0.3.4 from PyPI on Debian 12 (x86_64, Python 3.11, ffmpeg 5.1.9) passed the probe, frame and speech-to-text checks; other distributions and CPUs are untested.
 
 ### Optional: faster, more accurate speech (whisper.cpp turbo)
 
@@ -105,10 +124,10 @@ This installs PyTorch, Transformers and (on macOS) the Apple Vision bindings, an
 
 ### Optional: cloud tools (`watch_for`, `label_sounds`)
 
-`watch_for` and `label_sounds` send video frames or audio to Cloudflare Workers AI (the Clef models). They are optional: the other tools never call Cloudflare. Do not use them on recordings you need to keep private. Set these in the server's environment:
+`watch_for` and `label_sounds` send video frames or audio to Cloudflare Workers AI (the Clef models). They are optional: the other tools never call Cloudflare, except the off-by-default shadow transcription trial (see the trial switch below). Do not use them on recordings you need to keep private. Set these in the server's environment:
 
 - `CLOUDFLARE_ACCOUNT_ID`: your account id.
-- `CLOUDFLARE_API_TOKEN`: a token with Workers AI access. Or set `AGENTIC_VIDEO_CF_TOKEN_COMMAND` to a command whose last printed line is the token (for example, `wrangler auth token`); the command runs at most once every 50 minutes.
+- `CLOUDFLARE_API_TOKEN`: a token with Workers AI access. Or set `AGENTIC_VIDEO_CF_TOKEN_COMMAND` to a command whose last printed line is the token (for example, `wrangler auth token`); the command runs at most once every 50 minutes per process, and each detached shadow child keeps its own token cache.
 
 Without them the two tools fail with a message naming what is missing, and nothing is sent.
 
@@ -151,6 +170,14 @@ claude mcp add -s user agentic-video -e PYTHONPATH="$PWD" -- "$PWD/.venv/bin/pyt
 ```
 
 By default results stay small enough for Claude Code: images are saved as files and the result gives their `file_path` (the agent opens the file). `frame_at` and `spectrogram_window` write PNG; contact sheets and frame grids (`contact_sheet`, `review_video`, `overview_chunks`, `inspect_window`, `inspect_windows`, `inspect_moments`) write JPEG; and a long `transcribe` result lists the first part of the transcript plus a `transcript_path` file for the rest. A client that renders images from the result itself can add `-e AGENTIC_VIDEO_INLINE_IMAGES=1`; results then carry base64 images and can pass 1 MB. Changed: earlier versions included base64 images by default; if you relied on that, set `AGENTIC_VIDEO_INLINE_IMAGES=1` to restore it.
+
+### MCP Registry
+
+The server's MCP Registry name is `io.github.tlq5l/agentic-video`. Its PyPI package is `agentic-video`, and it uses the stdio transport. To install the package from a registry client:
+
+```sh
+uvx agentic-video
+```
 
 ### Tell your agent to use it (paste into your AGENTS.md or CLAUDE.md)
 
@@ -217,6 +244,7 @@ It does not beat Gemini's video understanding in general.
 - `scripts/generate_synthetic_benchmark.py`: regenerates the synthetic fixture video.
 - `fixtures/`: small test videos (see Media credits).
 - `docs/`: architecture notes and per-feature pages.
+- [`llms.txt`](https://github.com/tlq5l/agentic-video/blob/main/llms.txt?ref=agentic-video-llms-txt-docs-index): an index of the docs pages for LLM agents; plain-markdown copies are in `docs/llms/`.
 
 ## Media credits
 

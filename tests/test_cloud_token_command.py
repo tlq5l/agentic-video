@@ -92,17 +92,18 @@ def _server(calls, base, token_command=None, token=None):
     return [replies[i] for i in range(1, len(calls) + 1)], done.returncode
 
 
-def test_both_tools_share_one_token_run_and_use_its_last_line(clip, stand_in, tmp_path):
+def test_both_tools_refuse_while_workers_ai_is_off(clip, stand_in, tmp_path):
+    """Owner 2026-11-14: Workers AI is off. Both tools refuse before the token command runs and before any request is sent."""
     base, seen = stand_in
     command, counter = _token_command(tmp_path, TOKEN)
     watch = ("watch_for", {"source": str(clip), "conditions": ["Is a dog visible?"], "interval_sec": 2})
     label = ("label_sounds", {"source": str(clip), "start_sec": 0, "end_sec": 3, "labels": ["siren"]})
     results, code = _server([watch, label, watch], base, token_command=command)
     assert code == 0
-    assert [bool(r.get("isError")) for r in results] == [False, False, False], results
-    assert len(counter.read_text().splitlines()) == 1  # one run for three calls across both tools
-    assert seen and set(seen) == {f"Bearer {TOKEN}"}
-    assert "banner" not in json.dumps(results)
+    assert all(r.get("isError") for r in results), results
+    assert all("switched off" in json.dumps(r) and "Nothing was sent" in json.dumps(r) for r in results), results
+    assert not counter.exists()  # the token command never ran
+    assert seen == []
 
 
 def test_a_token_that_cannot_go_in_a_header_is_refused_and_never_echoed(clip, stand_in):

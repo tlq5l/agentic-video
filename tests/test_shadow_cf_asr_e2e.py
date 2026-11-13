@@ -34,6 +34,10 @@ PIECE_SEC = 8  # a 20 s clip makes 3 pieces (8, 8 and 4 s), so the stitched offs
 HOSTNAME = socket.gethostname()
 
 
+WORKERS_AI_OFF = ("Workers AI is switched off (owner 2026-11-14): the shadow job is refused before any request, "
+                "held for the day it is turned back on (WORKERS_AI_ON in src/media/cloudflare.py).")
+
+
 @pytest.fixture(scope="module")
 def speech_clip():
     """The committed speech clip; nonempty, so a missing or empty file fails here rather than as a silent empty transcript."""
@@ -148,6 +152,7 @@ def _write_trial_state(state: Path, started_at, count: int, ended: bool = False)
         json.dumps({"started_at": started_at, "count": count, "ended": ended}), encoding="utf-8")
 
 
+@pytest.mark.skip(reason=WORKERS_AI_OFF)
 def test_switch_on_sends_three_pieces_logs_both_and_the_reply_matches_switch_off(speech_clip, trial_env, monkeypatch):
     seen, state = trial_env["seen"], trial_env["state"]
     off = _transcribe(speech_clip)
@@ -187,6 +192,7 @@ def test_switch_on_sends_three_pieces_logs_both_and_the_reply_matches_switch_off
     assert trial["count"] == 1 and trial["ended"] is False and trial["started_at"]
 
 
+@pytest.mark.skip(reason=WORKERS_AI_OFF)
 def test_a_synchronous_fresh_run_is_shadowed_too(speech_clip, trial_env, monkeypatch):
     """AgenticVideoEngine.transcribe with an explicit timeout is a fresh run with no background slot; it is shadowed."""
     seen, state = trial_env["seen"], trial_env["state"]
@@ -199,6 +205,7 @@ def test_a_synchronous_fresh_run_is_shadowed_too(speech_clip, trial_env, monkeyp
     assert len(seen) == 3
 
 
+@pytest.mark.skip(reason=WORKERS_AI_OFF)
 def test_a_synchronous_run_returns_before_the_shadow_credentials_resolve(speech_clip, trial_env, monkeypatch, tmp_path):
     """The shadow token command waits for a gate that this test opens only after the synchronous call has returned.
     Before the fix the hook ran the command on the caller's thread, so the command had finished (`done` existed) when
@@ -259,6 +266,26 @@ def test_an_expired_trial_sends_nothing_and_writes_trial_ended_once(speech_clip,
     assert trial["ended"] is True and trial["count"] == 3
 
 
+def test_an_expired_trial_with_no_token_source_logs_nothing(speech_clip, trial_env, monkeypatch):
+    """Regression: the switch and account id were set but no token, so the expired trial wrote its trial_ended line
+    before the credentials check. A run with no token source must now leave the log and the trial state alone."""
+    state = trial_env["state"]
+    expired_at = time.time() - (shadow_cf_asr.TRIAL_DAYS + 1) * 86400
+    _write_trial_state(state, expired_at, count=3)
+    monkeypatch.setenv(shadow_cf_asr.SWITCH_ENV, HOSTNAME)
+    monkeypatch.delenv("CLOUDFLARE_API_TOKEN")
+    monkeypatch.delenv("AGENTIC_VIDEO_CF_TOKEN_COMMAND", raising=False)
+
+    _transcribe(speech_clip)
+    _wait_for_background_worker()
+    time.sleep(3)  # the shadow prepare thread runs after the transcript returns
+
+    assert trial_env["seen"] == [] and _log_records(state) == []
+    trial = json.loads((state / "shadow-cf-asr-state.json").read_text(encoding="utf-8"))
+    assert trial["ended"] is False and trial["count"] == 3
+
+
+@pytest.mark.skip(reason=WORKERS_AI_OFF)
 def test_an_expiry_during_a_job_stops_its_remaining_pieces(speech_clip, trial_env, monkeypatch):
     """Pieces run one at a time here, so the trial can expire after the first piece is sent. The later pieces and
     their retries are refused, the job still logs once, and trial_ended is written once."""
@@ -278,6 +305,31 @@ def test_an_expiry_during_a_job_stops_its_remaining_pieces(speech_clip, trial_en
     assert len(trial_env["seen"]) == 1  # only the first piece reached the stand-in
     assert record["status"] == "partial" and [e["piece_index"] for e in record["piece_errors"]] == [1, 2]
     assert [r["status"] for r in _log_records(state)].count("trial_ended") == 1
+
+
+def test_no_account_id_means_the_token_command_never_runs_and_no_child_starts(speech_clip, trial_env, monkeypatch, tmp_path):
+    """Uses a fake token command that only writes a marker file, because the real command runs wrangler and needs a
+    Cloudflare login that the test box does not have. With the switch on and no account id, the shadow path must refuse
+    before it runs any token command or starts any child, so the marker never appears."""
+    marker = tmp_path / "token-command-ran"
+    script = tmp_path / "token.sh"
+    script.write_text(f"#!/bin/sh\ntouch {marker}\necho {SECRET}\n", encoding="utf-8")
+    script.chmod(0o755)
+    monkeypatch.delenv("CLOUDFLARE_ACCOUNT_ID")
+    monkeypatch.delenv("CLOUDFLARE_API_TOKEN")
+    monkeypatch.setenv("AGENTIC_VIDEO_CF_TOKEN_COMMAND", str(script))
+    monkeypatch.setattr(cloudflare, "_command_token", None)  # a token kept by an earlier test would skip the command
+    monkeypatch.setenv(shadow_cf_asr.SWITCH_ENV, HOSTNAME)
+
+    _transcribe(speech_clip)
+    _wait_for_background_worker()
+    for thread in threading.enumerate():  # the synchronous path's shadow prepare thread, if one was started
+        if thread.name == "agentic-video-shadow-prepare":
+            thread.join(timeout=60)
+    time.sleep(3)  # a child started now would reach its token command within this time
+
+    assert not marker.exists()
+    assert trial_env["seen"] == [] and _log_records(trial_env["state"]) == []
 
 
 def _live_allowed():

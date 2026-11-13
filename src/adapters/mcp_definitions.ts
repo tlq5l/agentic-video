@@ -319,6 +319,48 @@ export const SyncCheckInputSchema = {
   verbose: z.boolean().describe("false (default) gives each cue candidate_onsets_count; true gives each cue candidate_onsets (the onsets near it with time_sec, offset_ms and strength) instead of the count.").optional(),
 };
 
+export const MotionOpenInputSchema = {
+  source: SourceSchema,
+};
+
+export const MotionSheetInputSchema = {
+  source: SourceSchema,
+  cols: z.number().int().min(1).max(16).describe("Frames per row.").optional(),
+  cell: z.number().int().min(32).max(256).describe("Cell width in pixels.").optional(),
+};
+
+export const MotionStatsInputSchema = {
+  source: SourceSchema,
+  box: z.array(z.number().int().min(0)).length(4).describe("[x, y, width, height] in pixels of the decoded frames; clipped to the frame.").optional(),
+};
+
+export const MotionBoilMapInputSchema = {
+  source: SourceSchema,
+  gain: z.number().min(0.5).describe("Flicker level that shows as fully hot; lower makes faint boil visible.").optional(),
+};
+
+export const MotionZoomInputSchema = {
+  source: SourceSchema,
+  box: z.array(z.number().int().min(0)).length(4).describe("[x, y, width, height] in pixels of the decoded frames; clipped to the frame."),
+  frames: z.string().max(32).describe("Inclusive frame range 'first-last' (0-based), e.g. 10-20. Omit for all frames.").optional(),
+  zoom: z.number().int().min(1).max(16).describe("Magnification.").optional(),
+};
+
+export const MotionProfileInputSchema = {
+  source: SourceSchema,
+};
+
+export const MotionCompareInputSchema = {
+  source: SourceSchema,
+  compare_to: z.string().trim().min(1).describe("Second local GIF or video file path, or a video URL."),
+  frame: z.number().int().min(0).describe("0-based frame index in both clips.").optional(),
+  box: z.array(z.number().int().min(0)).length(4).describe("[x, y, width, height] in pixels of the decoded frames; clipped to the frame.").optional(),
+};
+
+export const MotionSelftestInputSchema = {
+  source: SourceSchema.optional(),
+};
+
 export interface AgenticVideoHandlers {
   probe_video: (input: any) => Promise<any>;
   transcribe: (input: any) => Promise<any>;
@@ -345,6 +387,14 @@ export interface AgenticVideoHandlers {
   sync_check: (input: any) => Promise<any>;
   watch_for: (input: any) => Promise<any>;
   label_sounds: (input: any) => Promise<any>;
+  motion_open: (input: any) => Promise<any>;
+  motion_sheet: (input: any) => Promise<any>;
+  motion_stats: (input: any) => Promise<any>;
+  motion_boil_map: (input: any) => Promise<any>;
+  motion_zoom: (input: any) => Promise<any>;
+  motion_profile: (input: any) => Promise<any>;
+  motion_compare: (input: any) => Promise<any>;
+  motion_selftest: (input: any) => Promise<any>;
 }
 
 export function registerAgenticVideoTools(server: McpServer, handlers: AgenticVideoHandlers): void {
@@ -374,6 +424,14 @@ export function registerAgenticVideoTools(server: McpServer, handlers: AgenticVi
     ["sync_check", { description: "Check audio/video sync: compares visual cuts with measured audio onsets, and optionally with intended sound cues (time_sec, label, optional band_hz), within tolerance_ms (0-5000, default 80). Returns per-cut and per-cue matches and unmatched strong onsets (the cuts and unmatched_strong_onsets lists show at most 500 items each; the cues list is never cut short; total_cuts and total_cues are the full counts). Each cue reports candidate_onsets_count, the number of onsets near it; verbose true reports that cue's candidate_onsets list instead of the count. Needs an audio track. To look at the two signals separately use detect_cuts and audio_onsets.", inputSchema: SyncCheckInputSchema }, handlers.sync_check],
     ["watch_for", { description: "Watch a stretch of a video for yes/no conditions with a cloud model (Clef on Cloudflare Workers AI) and return the moments each one started to hold. One frame every interval_sec (default 5 s, 1 to 600) from [start_sec, end_sec] is asked every condition (1 to 8 yes/no questions about ONE frame, e.g. \"Is a person visible?\"); a condition wakes at the sample where its chance of yes has been at least cut (default 0.5) on `consecutive` samples in a row (default 2), at most once per cooldown_sec (default 30) per condition. THIS SENDS VIDEO FRAMES TO CLOUDFLARE: never use it on personal recordings. The server needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN (or AGENTIC_VIDEO_CF_TOKEN_COMMAND, a command that prints the token) and the call fails naming what is missing, before anything is sent. Only the questions you write can wake: a condition nobody asked about is never reported, so list every event you care about. An event must last at least consecutive x interval_sec to be caught (two samples 5 s apart need about 10 s); lower interval_sec or consecutive for shorter ones, which costs more calls. Accuracy on real footage is not yet measured. At most 720 samples per call; the call answers within about 50 s even when Cloudflare is slow: a longer range, or a sample that keeps failing after its retry, returns the finished samples with complete=false and next_start_sec to continue from (the cooldown does not carry over). This is for finding when something starts to be true; to inspect what happened use inspect_window, for scene changes use detect_cuts, and for sounds use audio_onsets. Results are not cached.", inputSchema: WatchForInputSchema }, handlers.watch_for],
     ["label_sounds", { description: "Name the sounds in a stretch of a video's audio: cuts [start_sec, end_sec] (both required) into windows of window_sec (default 5 s, at most 60 windows per call) and returns, per window, the chance of each label plus none_chance, from a cloud model (Clef-omni on Cloudflare Workers AI). THIS SENDS THE AUDIO TO CLOUDFLARE: never use it on personal recordings. The server needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN (or AGENTIC_VIDEO_CF_TOKEN_COMMAND, a command that prints the token) and the call fails with a message naming what is missing. `labels` (default: 20 common sounds such as dog barking, siren, glass breaking, church bells) is the closed list to choose from, so a sound outside the list is forced onto the nearest label or none: list every sound that may be present. Steady musical chords can be named church bells, so treat top_chance under 0.5 as weak and check a hit with spectrogram_window. top_label is null when none_chance beats every label. It does not search: find candidate times with audio_onsets or loudness_timeline first, then label those ranges. For speech use transcribe or search_transcript. Needs an audio track. No window starts after about 40 s and the call answers within about 50 s: a longer range returns the windows finished in time with complete=false and next_start_sec to continue from.", inputSchema: LabelSoundsInputSchema }, handlers.label_sounds],
+    ["motion_open", { description: "Warm a GIF or short clip in the background so later motion_ calls answer in milliseconds. Returns at once: status ready when the clip is cached, in_progress with retry_after_seconds (call again with the same source), or failed with the error when the clip cannot be decoded. The cache lives in memory and on disk, keyed by file fingerprint.", inputSchema: MotionOpenInputSchema }, handlers.motion_open],
+    ["motion_sheet", { description: "Use this to see a clip's frames and where they change. Returns one PNG contact sheet: each frame, with a heat map of its change from the previous frame underneath, plus the per-frame change list.", inputSchema: MotionSheetInputSchema }, handlers.motion_sheet],
+    ["motion_stats", { description: "Use this first for a yes or no on a GIF's motion. Returns boil (flicker on still pixels, the README formula; lower is calmer), still_frac, the loop-seam change against the median, and the per-frame change. Optional box limits the numbers to one region.", inputSchema: MotionStatsInputSchema }, handlers.motion_stats],
+    ["motion_boil_map", { description: "Use this to see where a GIF boils. Returns one PNG with still pixels coloured by flicker (hot means boiling) over the frame, plus the overall boil score.", inputSchema: MotionBoilMapInputSchema }, handlers.motion_boil_map],
+    ["motion_zoom", { description: "Use this to inspect one region frame by frame at magnification, with a change heat map under each frame. Returns one PNG. The zoom is capped so the image stays under the size limit; the result reports the zoom used.", inputSchema: MotionZoomInputSchema }, handlers.motion_zoom],
+    ["motion_profile", { description: "Use this to find stutter, freeze, duplicate and loop-seam problems by frame. Returns a PNG graph of speed and change, the flagged frames, and counts per kind. Speed counts only changes above 2 luma levels; there is no optical flow.", inputSchema: MotionProfileInputSchema }, handlers.motion_profile],
+    ["motion_compare", { description: "Use this to compare one frame of two clips side by side with a diff panel. `source` and `compare_to` are both clips and must be the same size. Returns one PNG and the mean absolute difference.", inputSchema: MotionCompareInputSchema }, handlers.motion_compare],
+    ["motion_selftest", { description: "Use this to check that the motion detectors work before trusting them. Plants known faults (dropped, swapped, duplicated and frozen frames, a loop-seam jump, noise on still pixels) into a clean sprite, reports whether each is caught, and counts false flags on the clean clip. Omit source to use the bundled fixture.", inputSchema: MotionSelftestInputSchema }, handlers.motion_selftest],
   ];
 
   for (const [name, definition, handler] of definitions) {
