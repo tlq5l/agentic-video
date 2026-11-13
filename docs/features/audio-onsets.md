@@ -11,4 +11,4 @@ Gotchas:
 - The default comes from the onset climb set. 0.04 s loses one recall hit on the broadband setting and 0.05 s loses recall on both settings.
 - Plain clicks can double about 38-43 ms apart, which the default does not merge; `min_gap_sec` about 0.05 does.
 - `sync_check` and its internal cue-analysis calls (`_cue_onset_candidates`, `_simple_dominant_band_check`) pass `min_gap_sec=0`, so their results do not change. The standalone checker (`check_video` in `src/loop.py`) calls `audio_onsets` with the default, so its onset list and strongest-onset summary can change.
-- The result cache key is versioned (`audio_onsets_v9`) and holds the exact start, end, `min_strength` and `min_gap_sec`, not rounded copies; bump the version when the output changes.
+- The result cache key is versioned (`audio_onsets_v11`) and holds the exact start, end, `min_strength` and `min_gap_sec`, not rounded copies; bump the version when the output changes.
