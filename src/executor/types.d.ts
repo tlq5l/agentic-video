@@ -1418,6 +1418,8 @@ export interface MotionSheetOutput {
   fps?: number;
   change?: number[];
   origin?: "memory" | "disk" | "cold";
+  truncated?: boolean;
+  source_frames?: number;
 }
 
 export interface MotionStatsInput { source: string; box?: MotionBox; }
@@ -1430,6 +1432,8 @@ export interface MotionStatsOutput {
   mean_change?: number;
   change?: number[];
   frames: number;
+  truncated?: boolean;
+  source_frames?: number;
   fps?: number;
   w?: number;
   h?: number;
@@ -1469,6 +1473,8 @@ export interface MotionProfileOutput {
   w: number;
   h: number;
   frames?: number;
+  truncated?: boolean;
+  source_frames?: number;
   fps?: number;
   speed?: number[];
   change?: number[];
@@ -1495,6 +1501,8 @@ export interface MotionSelftestOutput {
   detectors: Record<string, Record<string, unknown>>;
   source?: string;
   frames?: number;
+  truncated?: boolean;
+  source_frames?: number;
 }
 
 export interface AgenticVideoIntegration {

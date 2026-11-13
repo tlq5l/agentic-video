@@ -225,3 +225,20 @@ def test_compare_image_changes_when_comparison_file_is_replaced(tmp_path, monkey
     assert second["ok"], second
     assert second["data"]["file_path"] != first["data"]["file_path"], "replaced file reused the saved image"
 
+
+def test_motion_stats_reports_truncated_for_clip_cut_at_240_frames(tmp_path, monkeypatch):
+    """A 241-frame GIF is measured only up to 240 frames, so motion_stats says truncated with the full count;
+    a 64-frame fixture is not truncated."""
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    motion_probe.clear_memory_store()
+    long_gif = tmp_path / "long-241.gif"
+    frames = [Image.new("RGB", (32, 32), (i, 40, 90)) for i in range(241)]
+    frames[0].save(long_gif, save_all=True, append_images=frames[1:], duration=40, loop=0)
+    long_reply = mcp_server.handle_call("motion_stats", {"source": str(long_gif)})
+    assert long_reply["ok"], long_reply
+    assert long_reply["data"]["truncated"] is True, long_reply["data"]
+    assert long_reply["data"]["source_frames"] == 241, long_reply["data"]
+    short_reply = mcp_server.handle_call("motion_stats", {"source": str(FIXTURES / "v0-256.gif")})
+    assert short_reply["ok"], short_reply
+    assert short_reply["data"]["truncated"] is False, short_reply["data"]
+    motion_probe.clear_memory_store()

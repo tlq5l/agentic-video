@@ -119,7 +119,9 @@ def decode(path: Path) -> Tuple[np.ndarray, Dict[str, Any]]:
         im = Image.open(path)
     except Exception:
         im = None
+    src_n = None  # frames in the file, when Pillow can count them; None for ffmpeg input
     if im is not None and (getattr(im, "n_frames", 1) > 1 or im.format == "GIF"):
+        src_n = int(getattr(im, "n_frames", 1))
         rgb, durs, fps = _decode_pillow(im)
         w0, h0 = im.size
     else:
@@ -128,7 +130,10 @@ def decode(path: Path) -> Tuple[np.ndarray, Dict[str, Any]]:
     if n < 2:
         raise ValueError(f"{path.name} has {n} frame(s); motion checks need at least 2")
     meta = {"frames": int(n), "w": int(W), "h": int(H), "fps": fps, "durations": durs,
-            "source_w": int(w0), "source_h": int(h0), "truncated": bool(n >= MAX_FRAMES)}
+            "source_w": int(w0), "source_h": int(h0),
+            "truncated": bool(src_n > MAX_FRAMES) if src_n is not None else bool(n >= MAX_FRAMES)}
+    if src_n is not None:
+        meta["source_frames"] = src_n
     return rgb, meta
 
 
@@ -277,7 +282,8 @@ def _read_disk(entry: Path, fingerprint: str) -> Optional[_Clip]:
     rgb = np.load(entry / "rgb.npy")
     index = {k: np.load(entry / f"{k}.npy") for k in ARRAYS if k != "rgb"}
     index["scalars"] = meta["scalars"]
-    return _Clip(fingerprint, {k: meta[k] for k in ("frames", "w", "h", "fps", "durations", "source_w", "source_h", "truncated")}, rgb, index)
+    keep = ("frames", "w", "h", "fps", "durations", "source_w", "source_h", "truncated", "source_frames")
+    return _Clip(fingerprint, {k: meta[k] for k in keep if k in meta}, rgb, index)
 
 
 def _evict_locked() -> None:
@@ -415,6 +421,14 @@ def _png(img: Image.Image, clip: _Clip, kind: str, key: str) -> Dict[str, Any]:
 
 # --------------------------------------------------------------------------- tools
 
+def _truncation(meta: Dict[str, Any]) -> Dict[str, Any]:
+    """Tail report: a clip longer than MAX_FRAMES was measured only up to it. source_frames is added when known."""
+    out: Dict[str, Any] = {"truncated": bool(meta["truncated"])}
+    if out["truncated"] and meta.get("source_frames") is not None:
+        out["source_frames"] = int(meta["source_frames"])
+    return out
+
+
 def _tool_sheet(args: Dict[str, Any]) -> Dict[str, Any]:
     clip, origin = _clip(args["source"])
     rgb, meta = clip.rgb, clip.meta
@@ -437,7 +451,7 @@ def _tool_sheet(args: Dict[str, Any]) -> Dict[str, Any]:
         sheet.paste(Image.fromarray(diff_heat(cells[i], cells[i - 1])), (x, y + ch))
         _label(sheet, str(i), (x + 3, y + 3))
     out = _png(sheet, clip, "sheet", f"{cols}|{cw}")
-    out.update(frames=n, fps=meta["fps"], change=[round(float(c), 2) for c in clip.index["change"]], origin=origin)
+    out.update(frames=n, fps=meta["fps"], change=[round(float(c), 2) for c in clip.index["change"]], origin=origin, **_truncation(meta))
     return out
 
 
@@ -454,7 +468,7 @@ def _tool_stats(args: Dict[str, Any]) -> Dict[str, Any]:
         out.update(box=[x, y, w, h])
     else:
         out = _stats(clip.index, meta)
-    out.update(w=meta["w"], h=meta["h"], origin=origin)
+    out.update(w=meta["w"], h=meta["h"], origin=origin, **_truncation(meta))
     return out
 
 
@@ -519,7 +533,7 @@ def _tool_profile(args: Dict[str, Any]) -> Dict[str, Any]:
         counts[f["kind"]] = counts.get(f["kind"], 0) + 1
     graph = _graph(idx["speed"], idx["change"], flags)
     out = _png(graph, clip, "profile", "v1")
-    out.update(frames=clip.meta["frames"], fps=clip.meta["fps"],
+    out.update(frames=clip.meta["frames"], fps=clip.meta["fps"], **_truncation(clip.meta),
                speed=[round(float(s), 3) for s in idx["speed"]],
                change=[round(float(c), 3) for c in idx["change"]],
                flags=flags[:200], flag_counts=counts, origin=origin,
@@ -637,7 +651,7 @@ def _tool_selftest(args: Dict[str, Any]) -> Dict[str, Any]:
     path = _local_path(args["source"]) if args.get("source") else DEFAULT_FIXTURE
     rgb, meta = decode(path)
     report = selftest_report(rgb)
-    report.update(source=str(path), frames=meta["frames"])
+    report.update(source=str(path), frames=meta["frames"], **_truncation(meta))
     return report
 
 

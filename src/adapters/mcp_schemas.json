@@ -4008,6 +4008,8 @@
           ],
           "description": "Where the clip index came from: memory (warm), disk (cached index), or cold (decoded now)."
         },
+        "truncated": { "type": "boolean", "description": "True when the clip is longer than 240 frames, so only the first 240 were measured." },
+        "source_frames": { "type": "integer", "description": "The clip's full frame count, when known and truncated is true." },
         "frames": {
           "type": "integer"
         },
@@ -4101,6 +4103,8 @@
             "type": "number"
           }
         },
+        "truncated": { "type": "boolean", "description": "True when the clip is longer than 240 frames, so only the first 240 were measured." },
+        "source_frames": { "type": "integer", "description": "The clip's full frame count, when known and truncated is true." },
         "frames": {
           "type": "integer"
         },
@@ -4385,6 +4389,8 @@
           ],
           "description": "Where the clip index came from: memory (warm), disk (cached index), or cold (decoded now)."
         },
+        "truncated": { "type": "boolean", "description": "True when the clip is longer than 240 frames, so only the first 240 were measured." },
+        "source_frames": { "type": "integer", "description": "The clip's full frame count, when known and truncated is true." },
         "frames": {
           "type": "integer"
         },
@@ -4555,6 +4561,8 @@
         "source": {
           "type": "string"
         },
+        "truncated": { "type": "boolean", "description": "True when the clip is longer than 240 frames, so only the first 240 were measured." },
+        "source_frames": { "type": "integer", "description": "The clip's full frame count, when known and truncated is true." },
         "frames": {
           "type": "integer"
         }
