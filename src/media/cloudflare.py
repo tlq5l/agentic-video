@@ -42,6 +42,16 @@ class CloudCallError(AgenticVideoError):
     """Raised when a Workers AI request fails."""
 
 
+# Owner 2026-11-14: Workers AI is billed to the card from 2026-12-01. Off: every Workers AI feature refuses before any token
+# command runs or any request is sent. Set to True to bring them back.
+WORKERS_AI_ON = False
+FREE_ALTERNATIVES = {
+    "Shadow ASR": "the local transcript (transcribe, whisper.cpp or faster-whisper on this machine) already holds the speech",
+    "watch_for": "search_visual (local CLIP index; build_visual_index first), or inspect_window and contact_sheet to look yourself",
+    "label_sounds": "audio_onsets, loudness_timeline and spectrogram_window, measured on this machine (they do not name sounds)",
+}
+
+
 def credentials(feature: str, sends: str) -> Tuple[str, str]:
     """(account id, token). The token comes from CLOUDFLARE_API_TOKEN or the last line the
     AGENTIC_VIDEO_CF_TOKEN_COMMAND prints (plain `wrangler auth token` prints a banner first).
@@ -50,6 +60,11 @@ def credentials(feature: str, sends: str) -> Tuple[str, str]:
     Cloudflare drops it sooner. A token that is not one run of visible ASCII is refused without being shown.
     """
     global _command_token, _command_token_at
+    if not WORKERS_AI_ON:
+        raise CloudCredentialsError(
+            f"{feature} sends {sends} to Cloudflare Workers AI, which is switched off (billed to the card from 2026-12-01; "
+            f"owner 2026-11-14). Nothing was sent. Free alternative: {FREE_ALTERNATIVES.get(feature, 'none in this repo')}."
+        )
     account = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip()
     token = os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
     command = os.environ.get("AGENTIC_VIDEO_CF_TOKEN_COMMAND", "").strip()

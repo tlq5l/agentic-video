@@ -18,6 +18,8 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
+WORKERS_AI_OFF = ("Workers AI is switched off (owner 2026-11-14): the cloud call is refused before any request, "
+                "held for the day it is turned back on (WORKERS_AI_ON in src/media/cloudflare.py).")
 CLOUD_VARS = ("CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN", "AGENTIC_VIDEO_CF_TOKEN_COMMAND")
 SECRET = "not-a-real-token-8c1f"
 
@@ -128,7 +130,7 @@ def test_refuses_without_credentials_before_sending_anything(siren_video):
     result = _call({"source": str(siren_video), "start_sec": 0, "end_sec": 6}, drop=CLOUD_VARS)
     assert result["isError"]
     text = result["content"][0]["text"]
-    assert "CLOUDFLARE_ACCOUNT_ID" in text and "CLOUDFLARE_API_TOKEN" in text and "Nothing was sent" in text
+    assert "switched off" in text and "Nothing was sent" in text
 
 
 @pytest.mark.parametrize("arguments, expected", [
@@ -143,6 +145,7 @@ def test_bad_arguments_get_advice_not_a_cloud_call(siren_video, arguments, expec
     assert result["isError"] and expected in result["content"][0]["text"]
 
 
+@pytest.mark.skip(reason=WORKERS_AI_OFF)
 def test_missing_audio_track_is_reported(tmp_path):
     silent = tmp_path / "no_audio.mp4"
     subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=160x120:d=3:r=10", str(silent)], check=True)
@@ -151,6 +154,15 @@ def test_missing_audio_track_is_reported(tmp_path):
     assert result["isError"] and "no audio track" in result["content"][0]["text"]
 
 
+def test_refuses_with_credentials_and_sends_nothing(siren_video):
+    """Owner 2026-11-14: Workers AI is off. With a token the tool still refuses before any request."""
+    result = _call({"source": str(siren_video), "start_sec": 0, "end_sec": 3}, drop=CLOUD_VARS,
+                   env={"CLOUDFLARE_ACCOUNT_ID": "0" * 32, "CLOUDFLARE_API_TOKEN": SECRET})
+    text = result["content"][0]["text"]
+    assert result["isError"] and "switched off" in text and "Nothing was sent" in text and SECRET not in text
+
+
+@pytest.mark.skip(reason=WORKERS_AI_OFF)
 def test_bad_token_is_a_clear_cloud_error_and_never_echoed(siren_video):
     result = _call({"source": str(siren_video), "start_sec": 0, "end_sec": 3}, drop=CLOUD_VARS,
                    env={"CLOUDFLARE_ACCOUNT_ID": "0" * 32, "CLOUDFLARE_API_TOKEN": SECRET})
@@ -168,6 +180,7 @@ REDACTED_REPLIES = [
 ]
 
 
+@pytest.mark.skip(reason=WORKERS_AI_OFF)
 @pytest.mark.parametrize("reply", REDACTED_REPLIES)
 def test_token_is_never_echoed_from_a_bad_reply(siren_video, stand_in, reply):
     base = stand_in(reply)
@@ -176,6 +189,7 @@ def test_token_is_never_echoed_from_a_bad_reply(siren_video, stand_in, reply):
     assert SECRET not in json.dumps(result)
 
 
+@pytest.mark.skip(reason=WORKERS_AI_OFF)
 @pytest.mark.slow
 def test_slow_cloud_returns_finished_windows_within_the_limit(minute_tone, stand_in):
     """Every reply takes 10 s, so the 60 one-second windows cannot all finish in time; the call must stop and say where to resume."""
@@ -191,8 +205,7 @@ def test_slow_cloud_returns_finished_windows_within_the_limit(minute_tone, stand
     assert SECRET not in json.dumps(result)
 
 
-@pytest.mark.skipif(not any(os.environ.get(v) for v in CLOUD_VARS) or not os.environ.get("CLOUDFLARE_ACCOUNT_ID"),
-                    reason="needs Cloudflare credentials (paid cloud call)")
+@pytest.mark.skip(reason=WORKERS_AI_OFF)
 def test_labels_two_windows_live(siren_video):
     labels = ["siren", "dog barking", "clapping", "car horn"]
     result = _call({"source": str(siren_video), "start_sec": 0, "end_sec": 6, "window_sec": 3, "labels": labels})
