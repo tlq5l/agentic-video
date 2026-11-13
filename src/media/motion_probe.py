@@ -607,6 +607,10 @@ def _tool_compare(args: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+# Fewest frames the planted faults fit in: loop_seam_jump keeps n - 8 frames (one at 9) and swapped_frames reaches frame k + 5.
+SELFTEST_MIN_FRAMES = 9
+
+
 def _plant(rgb: np.ndarray, fault: str, still: np.ndarray) -> np.ndarray:
     n = len(rgb)
     k = n // 3
@@ -667,6 +671,8 @@ def selftest_report(rgb: np.ndarray) -> Dict[str, Any]:
 def _tool_selftest(args: Dict[str, Any]) -> Dict[str, Any]:
     path = _local_path(args["source"]) if args.get("source") else DEFAULT_FIXTURE
     rgb, meta = decode(path)
+    if len(rgb) < SELFTEST_MIN_FRAMES:
+        raise ValueError(f"{path.name} has {len(rgb)} frame(s); motion_selftest plants faults that need at least {SELFTEST_MIN_FRAMES} frames")
     report = selftest_report(rgb)
     report.update(source=str(path), frames=meta["frames"], **_truncation(meta))
     return report

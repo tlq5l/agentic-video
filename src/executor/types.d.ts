@@ -1403,7 +1403,7 @@ export interface MotionOpenInput { source: string; }
 export interface MotionOpenOutput {
   status: "ready" | "in_progress" | "failed";
   fingerprint: string;
-  origin?: "memory";
+  origin?: "memory" | "disk";
   retry_after_seconds?: number;
   error?: string;
 }
