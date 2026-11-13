@@ -14,10 +14,10 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from .common import CONTESTANTS, DEFAULT_DATA_ROOT, DEFAULT_KEY_PATH, DEFAULT_SEALED_DIR, TRACKS, data_root, default_tool_cwd, default_tool_python, key_path, question_path, read_jsonl, visual_model_environment, scratch_dir
+    from .common import CONTESTANTS, DEFAULT_KEY_PATH, DEFAULT_SEALED_DIR, TRACKS, data_root, default_tool_cwd, default_tool_python, key_path, question_path, read_jsonl, visual_model_environment, scratch_dir
     from .ingest import ingest_questions
 except ImportError:  # direct script execution
-    from common import CONTESTANTS, DEFAULT_DATA_ROOT, DEFAULT_KEY_PATH, DEFAULT_SEALED_DIR, TRACKS, data_root, default_tool_cwd, default_tool_python, key_path, question_path, read_jsonl, visual_model_environment, scratch_dir
+    from common import CONTESTANTS, DEFAULT_KEY_PATH, DEFAULT_SEALED_DIR, TRACKS, data_root, default_tool_cwd, default_tool_python, key_path, question_path, read_jsonl, visual_model_environment, scratch_dir
     from ingest import ingest_questions
 
 

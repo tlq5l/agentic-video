@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import math
 import os
 import random
@@ -133,7 +132,7 @@ def _render_video(
     if motion_blur:
         filters.append("tmix=frames=3:weights='1 2 1'")
     filters.extend([
-        f"crop=640:360:x='40+12*sin(t*0.16)':y='20+9*cos(t*0.11)'",
+        "crop=640:360:x='40+12*sin(t*0.16)':y='20+9*cos(t*0.11)'",
         "format=yuv420p",
     ])
     filter_graph = ",".join(filters)
@@ -159,7 +158,7 @@ def _write_wave(path: Path, sample_rate: int, frames: bytes) -> None:
 def _speech_bounds(wav_path: Path) -> tuple[float, float]:
     block_ms = 10
     with wave.open(str(wav_path), "rb") as audio:
-        rate, width, channels = audio.getframerate(), audio.getsampwidth(), audio.getnchannels()
+        rate, width, _channels = audio.getframerate(), audio.getsampwidth(), audio.getnchannels()
         chunk_frames = max(1, round(rate * block_ms / 1000))
         energies: list[float] = []
         while raw := audio.readframes(chunk_frames):

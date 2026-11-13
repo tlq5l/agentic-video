@@ -421,7 +421,7 @@ def fetch_real() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    args = parser.parse_args()
+    parser.parse_args()
     questions, keys = fetch_real()
     q_path, k_path = question_path(), key_path()
     prior_questions = read_jsonl(q_path) if q_path.exists() else []
