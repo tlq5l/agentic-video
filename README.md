@@ -2,7 +2,7 @@
 
 <!-- mcp-name: io.github.tlq5l/agentic-video -->
 
-agentic-video lets an AI agent that reads text and images, but not video, work with video files on your own machine. It is a Python library plus a stdio MCP server. The agent asks small, targeted questions ("show me 12 frames from 0:40 to 1:10", "when is 'launch' spoken?") and gets back measurements, transcripts and contact sheets: grids of frames, each with its timestamp burned into the pixels. Everything runs locally with FFmpeg, Whisper and optional local models, except two optional cloud tools (`watch_for`, `label_sounds`), which send frames or audio to Cloudflare Workers AI only when you set credentials and call them. An opt-in shadow transcription trial (off by default, owner machines only) also sends audio to Cloudflare when its switch and credentials are set.
+agentic-video lets an AI agent that reads text and images, but not video, work with video files on your own machine. It is a Python library plus a stdio MCP server. The agent asks small, targeted questions ("show me 12 frames from 0:40 to 1:10", "when is 'launch' spoken?") and gets back measurements, transcripts and contact sheets: grids of frames, each with its timestamp burned into the pixels. Everything runs locally with FFmpeg, Whisper and optional local models, except two optional cloud tools (`watch_for`, `label_sounds`), which are switched off: they refuse every call and send nothing, because Cloudflare Workers AI is disabled (billed to the card from 2026-12-01). The opt-in shadow transcription trial is switched off too.
 
 **See it work:** https://agentic-video-gallery.infra-1b7.workers.dev (the gallery: real tasks, including the misses).
 
@@ -122,16 +122,16 @@ uv pip install --python .venv/bin/python -r requirements-visual.txt
 
 This installs PyTorch, Transformers and (on macOS) the Apple Vision bindings, and downloads about 605 MB of CLIP weights. The visual search only loads local files and never calls a paid API. Without these, `search_visual` and `build_visual_index` return an error that explains the setup.
 
-### Optional: cloud tools (`watch_for`, `label_sounds`)
+### Cloud tools (`watch_for`, `label_sounds`): switched off
 
-`watch_for` and `label_sounds` send video frames or audio to Cloudflare Workers AI (the Clef models). They are optional: the other tools never call Cloudflare, except the off-by-default shadow transcription trial (see the trial switch below). Do not use them on recordings you need to keep private. Set these in the server's environment:
+`watch_for` and `label_sounds` are switched off (owner 2026-11-14): Cloudflare Workers AI is disabled, so each call refuses before reading credentials or sending anything. Free alternatives: `search_visual` and `inspect_window` for `watch_for`; `audio_onsets`, `loudness_timeline` and `spectrogram_window` for `label_sounds`. Once switched back on, they send video frames or audio to Cloudflare Workers AI (the Clef models), so do not use them on recordings you need to keep private. The other tools never call Cloudflare. With the switch on, set these in the server's environment:
 
 - `CLOUDFLARE_ACCOUNT_ID`: your account id.
 - `CLOUDFLARE_API_TOKEN`: a token with Workers AI access. Or set `AGENTIC_VIDEO_CF_TOKEN_COMMAND` to a command whose last printed line is the token (for example, `wrangler auth token`); the command runs at most once every 50 minutes per process, and each detached shadow child keeps its own token cache.
 
-Without them the two tools fail with a message naming what is missing, and nothing is sent.
+While the switch is off, the two tools refuse every call, with or without these, and nothing is sent.
 
-Trial switch (maintainer only): `AGENTIC_VIDEO_SHADOW_CF_ASR` set to this machine's hostname **SENDS AUDIO TO CLOUDFLARE** after every fresh local transcription, to compare it with the local result in a log. The user's transcript never changes. It is off unless that variable names the machine, and it stops by itself after 14 days or 200 uses. Details: [docs/features/shadow-cf-asr.md](docs/features/shadow-cf-asr.md).
+Shadow trial (maintainer only, switched off): setting `AGENTIC_VIDEO_SHADOW_CF_ASR` to this machine's hostname sends nothing while Cloudflare Workers AI is switched off. Once it is switched back on, it **SENDS AUDIO TO CLOUDFLARE** after every fresh local transcription, to compare it with the local result in a log. The user's transcript never changes. It is off unless that variable names the machine, and it stops by itself after 14 days or 200 uses. Details: [docs/features/shadow-cf-asr.md](docs/features/shadow-cf-asr.md).
 
 ### Optional: hybrid transcript search (macOS, EmbeddingGemma 2)
 

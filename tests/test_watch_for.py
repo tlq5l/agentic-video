@@ -117,7 +117,7 @@ def test_tool_is_listed_with_cloud_warning():
     done = subprocess.run([sys.executable, "-m", "src.executor.mcp_server"], input=json.dumps(request) + "\n",
                           capture_output=True, text=True, cwd=ROOT, timeout=60, check=False)
     tool = next(t for t in json.loads(done.stdout.splitlines()[-1])["result"]["tools"] if t["name"] == "watch_for")
-    assert "THIS SENDS VIDEO FRAMES TO CLOUDFLARE" in tool["description"]
+    assert "SWITCHED OFF" in tool["description"]
 
 
 @pytest.mark.skip(reason=WORKERS_AI_OFF)

@@ -123,7 +123,7 @@ def _call(arguments, drop=(), env=None):
 def test_tool_is_listed_with_cloud_warning():
     replies, _ = _server([{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}], {})
     tool = next(t for t in replies[1]["result"]["tools"] if t["name"] == "label_sounds")
-    assert "THIS SENDS THE AUDIO TO CLOUDFLARE" in tool["description"]
+    assert "SWITCHED OFF" in tool["description"]
 
 
 def test_refuses_without_credentials_before_sending_anything(siren_video):
