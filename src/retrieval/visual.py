@@ -8,6 +8,7 @@ import errno
 import fcntl
 import importlib.util
 import math
+import os
 import re
 import shutil
 import subprocess
@@ -50,6 +51,28 @@ def clip_missing_message():
     return None
 
 
+CLIP_WEIGHTS_MISSING_MESSAGE = (
+    f"Visual search needs the CLIP model weights ({MODEL_ID}) in the local Hugging Face cache, and they are not there. "
+    "To download them (about 605 MB), run this once, and only when you choose to: "
+    ".venv/bin/python -c 'from huggingface_hub import snapshot_download; snapshot_download(repo_id=\"openai/clip-vit-base-patch32\", "
+    f"revision=\"{MODEL_REVISION}\", allow_patterns=[\"*.json\", \"*.txt\", \"pytorch_model.bin\"])'. Nothing was downloaded."
+)
+
+
+def clip_weights_missing_message():
+    """The setup error when the CLIP weights are not in the local Hugging Face cache, else None. Reads the cache folder
+    only (HF_HUB_CACHE, else HF_HOME/hub), so it never downloads and never loads the model."""
+    hf_home = os.environ.get("HF_HOME") or str(Path.home() / ".cache" / "huggingface")
+    hub = Path(os.environ.get("HF_HUB_CACHE") or Path(hf_home) / "hub")
+    snapshot = hub / f"models--{MODEL_ID.replace('/', '--')}" / "snapshots" / MODEL_REVISION
+
+    def cached(name):
+        return (snapshot / name).is_file()
+    if cached("config.json") and cached("preprocessor_config.json") and (cached("pytorch_model.bin") or cached("model.safetensors")):
+        return None
+    return CLIP_WEIGHTS_MISSING_MESSAGE
+
+
 class ClipEncoder:
     """CPU-only inference prevents unbounded unified-memory accelerator allocation."""
     def __init__(self):
@@ -64,7 +87,7 @@ class ClipEncoder:
             self.processor = CLIPProcessor.from_pretrained(MODEL_ID, revision=MODEL_REVISION, local_files_only=True)
             self.model = CLIPModel.from_pretrained(MODEL_ID, revision=MODEL_REVISION, local_files_only=True).cpu().eval()
         except OSError as exc:
-            raise RuntimeError(f"Cache {MODEL_ID} locally first; see README visual search setup. No runtime download attempted.") from exc
+            raise RuntimeError(CLIP_WEIGHTS_MISSING_MESSAGE) from exc
 
     def _normalize(self, features):
         values = features.float().cpu().numpy()
@@ -484,9 +507,9 @@ def submit(engine, operation, **args):
         query, top_k = args["query"], args["top_k"]
         start, end = args["start_sec"], args["end_sec"]
         _validate_search(query, top_k, start, end)
-        missing = clip_missing_message()
-        if missing:  # answer now: a queued search would only ever report index_required
-            raise RuntimeError(missing)
+    missing = clip_missing_message() or clip_weights_missing_message()
+    if missing:  # answer now: a queued job would only end in index_required or this same error on the next poll
+        raise RuntimeError(missing)
     source = Path(engine.source_path).resolve()
     stat = source.stat()
     key = (str(engine._cache.base_dir.resolve()), str(source), stat.st_size, stat.st_mtime_ns,
