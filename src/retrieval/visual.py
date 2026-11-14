@@ -6,6 +6,7 @@ pre-fetch the model explicitly. One build and one search worker run per process.
 import heapq
 import errno
 import fcntl
+import importlib.util
 import math
 import re
 import shutil
@@ -39,6 +40,16 @@ ORPHAN_TEMP_AGE_SEC = 300
 PREFETCH_CHUNKS = 3  # chunks decoded ahead of the embedding step, one FFmpeg each
 
 
+CLIP_MISSING_MESSAGE = "Visual search needs requirements-visual.txt (torch and transformers)."
+
+
+def clip_missing_message():
+    """The setup error when torch or transformers is not installed, else None. Checked without importing them or loading the model."""
+    if any(importlib.util.find_spec(name) is None for name in ("torch", "transformers")):
+        return CLIP_MISSING_MESSAGE
+    return None
+
+
 class ClipEncoder:
     """CPU-only inference prevents unbounded unified-memory accelerator allocation."""
     def __init__(self):
@@ -46,7 +57,7 @@ class ClipEncoder:
             import torch
             from transformers import CLIPModel, CLIPProcessor
         except ImportError as exc:
-            raise RuntimeError("Visual search needs requirements-visual.txt (torch and transformers).") from exc
+            raise RuntimeError(CLIP_MISSING_MESSAGE) from exc
         self.torch = torch
         torch.set_num_threads(TORCH_THREADS)
         try:
@@ -473,6 +484,9 @@ def submit(engine, operation, **args):
         query, top_k = args["query"], args["top_k"]
         start, end = args["start_sec"], args["end_sec"]
         _validate_search(query, top_k, start, end)
+        missing = clip_missing_message()
+        if missing:  # answer now: a queued search would only ever report index_required
+            raise RuntimeError(missing)
     source = Path(engine.source_path).resolve()
     stat = source.stat()
     key = (str(engine._cache.base_dir.resolve()), str(source), stat.st_size, stat.st_mtime_ns,

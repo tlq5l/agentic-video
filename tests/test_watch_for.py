@@ -171,6 +171,7 @@ def test_slow_cloud_returns_finished_samples_within_about_50_s(red_box_video, sl
     assert SECRET not in json.dumps(result) and not list(temp.glob("watch_*"))
 
 
+@pytest.mark.skip(reason=WORKERS_AI_OFF)  # bounds run after the switched-off refusal, so they need the switch on
 @pytest.mark.parametrize("arguments, expected", [
     ({"conditions": []}, "conditions"),
     ({"conditions": ["a", "a"]}, "distinct"),
@@ -223,3 +224,18 @@ def test_token_is_never_echoed_from_a_bad_reply(red_box_video, slow_stand_in, st
                          env=env, drop=("AGENTIC_VIDEO_CF_TOKEN_COMMAND",))
     assert code == 0 and result["isError"] and "CloudCallError" in result["content"][0]["text"]
     assert SECRET not in json.dumps(result)
+
+
+def test_watch_for_refuses_a_one_second_clip_before_bounds_checks(tmp_path):
+    """Owner 2026-11-14: Workers AI is off. The refusal comes before any bounds check or frame extraction, so a 1 s clip
+    with the default 5 s interval gets the switched-off refusal, not ExtractionBoundsError."""
+    from src.core.errors import AgenticVideoError, ExtractionBoundsError
+    from src.executor import mcp_server
+
+    clip = tmp_path / "one_second.mp4"
+    subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=blue:s=160x120:d=1:r=10",
+                    str(clip)], check=True)
+    with pytest.raises(AgenticVideoError, match="switched off") as caught:
+        mcp_server.handle_call("watch_for", {"source": str(clip), "conditions": ["Is a red box visible?"]})
+    assert not isinstance(caught.value, ExtractionBoundsError)
+    assert "Nothing was sent" in str(caught.value)

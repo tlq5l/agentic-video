@@ -29,7 +29,8 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from src.core.cache import MediaCache
 from src.core.config import Config
 from src.core.errors import AgenticVideoError, ExtractionBoundsError
-from src.media.cloudflare import DEFAULT_DEADLINE_SEC, REQUEST_GRACE_SEC, CloudCallError, credentials, hide_token, run_model
+from src.media.cloudflare import (DEFAULT_DEADLINE_SEC, REQUEST_GRACE_SEC, CloudCallError, credentials, hide_token,
+                                  require_switched_on, run_model)
 from src.media.frames import extract_single_frame
 from src.media.probe import probe_video
 
@@ -135,6 +136,7 @@ def watch_for(
     deadline_sec: Optional[float] = DEFAULT_DEADLINE_SEC,
 ) -> Dict[str, Any]:
     """Sample the range every interval_sec and wake on conditions that hold on `consecutive` samples in a row."""
+    require_switched_on("watch_for", "video frames")  # first: no bounds check, probe or extraction while switched off
     started = time.monotonic()  # the 60 s tool limit also counts the file hash and the token command below
     questions = _check_args(conditions, interval_sec, cut, consecutive, cooldown_sec)
     cache = cache or MediaCache()
