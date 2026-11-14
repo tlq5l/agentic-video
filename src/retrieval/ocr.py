@@ -3,12 +3,14 @@ import io
 import re
 import unicodedata
 
+from src.core.errors import VisualSetupError
+
 TEXT_LINE_CAP = 40
 
 
 def _unavailable(feature, alternative):
-    return (f"{feature} needs Apple Vision through pyobjc (macOS only). "
-            "Run: python -m pip install -r requirements-visual.txt (adds pyobjc-framework-Vision), "
+    return (f"{feature} needs Apple Vision through pyobjc, which runs on macOS only. "
+            "On a Mac, run: python -m pip install 'agentic-video[visual]' (in a source checkout: pip install -r requirements-visual.txt), "
             f"or {alternative}.")
 
 
@@ -21,7 +23,7 @@ def ensure_available(message=OCR_UNAVAILABLE):
     try:
         import Vision  # noqa: F401
     except ImportError as exc:
-        raise RuntimeError(message) from exc
+        raise VisualSetupError(message) from exc
 
 
 def recognize(image):
