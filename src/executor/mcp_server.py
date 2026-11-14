@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Dict, Any, Iterator, List, Optional, Tuple
 
+from src.media.cloudflare import require_switched_on
 from src.retrieval import ocr
 from src.retrieval.engine import AgenticVideoEngine
 from src.core.config import Config
@@ -794,6 +795,8 @@ def _checked_arguments(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
 
 # Tools whose read_text argument runs Apple Vision OCR on the returned frames.
 READ_TEXT_TOOLS = ("frame_at", "inspect_window")
+# Workers AI tools and the (feature, what it sends) that require_switched_on checks before any other work.
+CLOUD_TOOLS = {"watch_for": ("watch_for", "video frames"), "label_sounds": ("label_sounds", "audio")}
 
 
 def handle_call(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -802,6 +805,8 @@ def handle_call(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": False, "error": {"code": "unknown_tool", "message": f"Tool '{name}' not found; available tools: {', '.join(sorted(_TOOL_SCHEMAS))}"}}
     if not isinstance(args, dict):
         raise ValueError(f"{name} arguments must be an object of named parameters, e.g. {{\"source\": \"/path/to/video.mp4\"}}")
+    if name in CLOUD_TOOLS:
+        require_switched_on(*CLOUD_TOOLS[name])  # first: no argument check, URL download or probe while Workers AI is off
     schema = _TOOL_SCHEMAS[name]
     required = schema.get("required", [])
     missing = [key for key in required if args.get(key) in (None, "")]
