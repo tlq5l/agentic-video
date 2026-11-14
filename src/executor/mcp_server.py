@@ -1346,6 +1346,10 @@ def run_stdio_server():
             
         req_id = req.get("id")
         method = req.get("method")
+
+        if "id" not in req:
+            # A JSON-RPC notification (notifications/initialized, notifications/cancelled, ...) gets no reply, so none is written.
+            continue
         
         if method == "initialize":
             resp = {
@@ -1376,8 +1380,10 @@ def run_stdio_server():
             sys.stdout.write(tool_call_response(req_id, name, arguments) + "\n")
             sys.stdout.flush()
 
-        elif method == "notifications/initialized":
-            pass
+        elif method == "ping":
+            resp = {"jsonrpc": "2.0", "id": req_id, "result": {}}
+            sys.stdout.write(json.dumps(resp) + "\n")
+            sys.stdout.flush()
 
         else:
             # Unknown methods must produce a bounded JSON-RPC response rather
