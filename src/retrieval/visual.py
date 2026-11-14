@@ -59,9 +59,9 @@ def clip_missing_message():
 
 CLIP_WEIGHTS_MISSING_MESSAGE = (
     f"Visual search needs the CLIP model weights ({MODEL_ID}) in the local Hugging Face cache, and they are not there. "
-    "To download them (about 605 MB), run this once, and only when you choose to: "
+    "Nothing was downloaded. To download them (about 605 MB), run this command once, only when you choose to, then retry the call: "
     f"{shlex.quote(sys.executable)} -c 'from huggingface_hub import snapshot_download; snapshot_download(repo_id=\"openai/clip-vit-base-patch32\", "
-    f"revision=\"{MODEL_REVISION}\", allow_patterns=[\"*.json\", \"*.txt\", \"pytorch_model.bin\"])'. Nothing was downloaded."
+    f"revision=\"{MODEL_REVISION}\", allow_patterns=[\"*.json\", \"*.txt\", \"pytorch_model.bin\"])'"
 )
 
 

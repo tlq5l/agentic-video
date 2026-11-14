@@ -579,7 +579,7 @@ def test_missing_clip_weights_answer_at_once_without_loading_or_downloading(tmp_
         with pytest.raises(RuntimeError, match="needs the CLIP model weights") as caught:
             mcp_server.handle_call(operation, args)
         reply = mcp_server.format_tool_error(caught.value, operation)
-        assert f"choose to: {shlex.quote(sys.executable)} -c " in reply, reply  # the running Python, not a fixed .venv path
+        assert f"retry the call: {shlex.quote(sys.executable)} -c " in reply, reply  # the running Python, not a fixed .venv path
         assert "bug in the tool" not in reply, reply
         assert "snapshot_download" in str(caught.value) and "Nothing was downloaded" in str(caught.value)
     assert loads == [] and not (tmp_path / "empty-hf").exists()
