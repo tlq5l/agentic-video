@@ -25,6 +25,8 @@ pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg n
 VISUAL_TOOLS = ("build_visual_index", "search_visual", "count_occurrences")
 VISUAL_HINT = "python -m pip install 'agentic-video[visual]'"
 WEIGHTS_HINT = "needs the CLIP model weights"
+# The gap a count_occurrences job ends on when the visual extra or the CLIP weights are missing: its later poll reports it as an error.
+END_HINT = {"extra_missing": VISUAL_HINT, "weights_missing": WEIGHTS_HINT}
 # A job still working: the same tool call polls it, as the CLI does (mcp_server._settled_call settles on these too).
 JOB_STATUSES = ("queued", "running", "in_progress", "busy")
 # The status a background tool reports once its job has finished (visual.py, occurrence.py, repetition.py, motion_probe.py).
@@ -68,7 +70,10 @@ def _assert_visual_reply(name, reply, text, state):
     result = reply["result"]
     status = (result.get("structuredContent") or {}).get("status")
     if state == "extra_missing":
-        assert result.get("isError") and VISUAL_HINT in text, (name, text[:500])
+        if name == "count_occurrences" and not result.get("isError"):
+            assert status == "in_progress", (name, text[:500])  # a description starts a job; the missing-extra error comes on a later poll
+        else:
+            assert result.get("isError") and VISUAL_HINT in text, (name, text[:500])
     elif state == "weights_missing":
         if name == "count_occurrences" and not result.get("isError"):
             assert status == "in_progress", (name, text[:500])  # a description starts a job; the weights gap comes on a later poll
@@ -216,8 +221,8 @@ def _settle_jobs(server, pending, next_id, state, timeout_sec=600):
             if _is_done(name, result):
                 finished[name] = result
                 del pending[name]
-            elif state == "weights_missing" and name == "count_occurrences" and WEIGHTS_HINT in text:
-                # The one expected end without weights: the later poll reports the weights gap as an error.
+            elif state in END_HINT and name == "count_occurrences" and END_HINT[state] in text:
+                # The one expected end without the extra or the weights: the later poll reports that gap as an error.
                 assert result.get("isError") or _status(result) in FAILED_STATUSES, (name, text[:500])
                 finished[name] = result
                 del pending[name]
