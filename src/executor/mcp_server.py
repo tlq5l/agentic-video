@@ -1495,6 +1495,14 @@ def _cli(argv):
     return 2
 
 
+def _exit_without_teardown():
+    """End the stdio server with os._exit after stdout is flushed. A visual build still running in a daemon thread (torch
+    threads) makes interpreter teardown abort the process with "terminate called without an active exception" (exit -6)."""
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)
+
+
 def main(argv=None):
     """Console-script entry point: `agentic-video` starts the stdio MCP server."""
     args = sys.argv[1:] if argv is None else list(argv)
@@ -1509,6 +1517,7 @@ def main(argv=None):
         return 0 if args in (["-h"], ["--help"]) else 2
     else:
         run_stdio_server()
+        _exit_without_teardown()
     return 0
 
 
@@ -1516,3 +1525,4 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         sys.exit(_cli(sys.argv[1:]))
     run_stdio_server()
+    _exit_without_teardown()

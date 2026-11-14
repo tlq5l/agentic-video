@@ -6,6 +6,7 @@ The protocol test checks two stdio rules: a notification (no id) gets no reply, 
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -13,12 +14,16 @@ from pathlib import Path
 
 import pytest
 
+from src.retrieval.visual import clip_missing_message, clip_weights_missing_message, hf_hub_cache
 from test_pip_user_matrix_e2e import _good_args
 
 ROOT = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
 VISUAL_TOOLS = ("build_visual_index", "search_visual", "count_occurrences")
 VISUAL_HINT = "python -m pip install 'agentic-video[visual]'"
+WEIGHTS_HINT = "needs the CLIP model weights"
+# Statuses a visual tool may return without an error on a first call (visual.py and the job record it reads from).
+VISUAL_LIVE_STATUSES = ("queued", "running", "in_progress", "busy", "partial", "complete", "index_required")
 INITIALIZE = {"jsonrpc": "2.0", "id": 1, "method": "initialize",
               "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "test", "version": "0"}}}
 INITIALIZED = {"jsonrpc": "2.0", "method": "notifications/initialized"}
@@ -33,11 +38,43 @@ def clip(tmp_path_factory):
     return str(path)
 
 
+def _server_env(home):
+    """The stdio server's environment. Its CLIP weights come from the test host's own Hugging Face cache when that holds them,
+    else from an empty cache, so the server sees the same weights state the test decides on (see _visual_state)."""
+    env = {"PATH": os.environ["PATH"], "HOME": str(home), "HF_HOME": str(home / "hf"), "LANG": "C.UTF-8"}
+    if clip_weights_missing_message() is None:
+        env["HF_HUB_CACHE"] = str(hf_hub_cache())
+    return env
+
+
+def _visual_state():
+    """What the visual tools must answer: the [visual] extra is missing, the CLIP weights are missing, or both are present."""
+    if clip_missing_message():
+        return "extra_missing"
+    if clip_weights_missing_message():
+        return "weights_missing"
+    return "weights_present"
+
+
+def _assert_visual_reply(name, reply, text, state):
+    result = reply["result"]
+    status = (result.get("structuredContent") or {}).get("status")
+    if state == "extra_missing":
+        assert result.get("isError") and VISUAL_HINT in text, (name, text[:500])
+    elif state == "weights_missing":
+        if name == "count_occurrences" and not result.get("isError"):
+            assert status == "in_progress", (name, text[:500])  # a description starts a job; the weights gap comes on a later poll
+        else:
+            assert result.get("isError") and WEIGHTS_HINT in text and shlex.quote(sys.executable) in text, (name, text[:500])
+    else:
+        assert not result.get("isError") and status in VISUAL_LIVE_STATUSES, (name, text[:500])
+
+
 def _talk(lines, tmp_path):
     """Send the lines to one stdio server process; return its reply lines in order."""
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
-    env = {"PATH": os.environ["PATH"], "HOME": str(home), "HF_HOME": str(home / "hf"), "LANG": "C.UTF-8"}
+    env = _server_env(home)
     payload = "".join((line if isinstance(line, str) else json.dumps(line)) + "\n" for line in lines)
     done = subprocess.run([sys.executable, "-m", "src.executor.mcp_server"], input=payload, capture_output=True,
                           text=True, cwd=ROOT, env=env, timeout=600)
@@ -55,6 +92,7 @@ def test_every_tool_answers_over_stdio(clip, tmp_path):
     lines += [{"jsonrpc": "2.0", "id": calls[name], "method": "tools/call", "params": {"name": name, "arguments": args[name]}}
               for name in args]
     replies = {reply.get("id"): reply for reply in _talk(lines, tmp_path)}
+    state = _visual_state()
 
     listed = {tool["name"] for tool in replies[listing_id]["result"]["tools"]}
     assert listed == set(args), f"tools without valid arguments here: {sorted(listed ^ set(args))}"
@@ -63,8 +101,8 @@ def test_every_tool_answers_over_stdio(clip, tmp_path):
         assert reply is not None and "result" in reply, (name, reply)
         text = "".join(item.get("text", "") for item in reply["result"]["content"])
         assert "Traceback" not in text, (name, text[:500])
-        if reply["result"].get("isError") and name in VISUAL_TOOLS:
-            assert VISUAL_HINT in text, (name, text[:500])  # the documented message when the [visual] extra is missing
+        if name in VISUAL_TOOLS:
+            _assert_visual_reply(name, reply, text, state)
 
 
 def test_notifications_get_no_reply_and_ping_gets_an_empty_result(tmp_path):
