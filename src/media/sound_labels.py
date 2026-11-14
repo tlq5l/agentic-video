@@ -38,7 +38,7 @@ from src.core.errors import (
     SubprocessTimeoutError,
 )
 from src.media.cloudflare import (
-    DEFAULT_DEADLINE_SEC, REQUEST_GRACE_SEC, CloudCallError, credentials, reply_excerpt, run_model,
+    DEFAULT_DEADLINE_SEC, REQUEST_GRACE_SEC, CloudCallError, credentials, reply_excerpt, require_switched_on, run_model,
 )
 
 MODEL = "clef-omni"
@@ -149,6 +149,7 @@ def label_sounds(
     finished in time are returned in order with complete=false and next_start_sec to continue from.
     """
     started = time.monotonic()  # the 60 s tool limit also counts the token command and the audio decode below
+    require_switched_on("label_sounds", "audio")  # first: no label, bounds or extraction check while switched off
     labels = _check_labels(labels)
     if not (math.isfinite(start_sec) and math.isfinite(end_sec) and math.isfinite(window_sec)):
         raise ValueError("start_sec, end_sec and window_sec must be finite numbers")
