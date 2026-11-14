@@ -1,6 +1,8 @@
 """Offline on-screen text recognition through Apple Vision (macOS, via pyobjc)."""
 import io
+import platform
 import re
+import sys
 import unicodedata
 
 from src.core.errors import VisualSetupError
@@ -9,6 +11,10 @@ TEXT_LINE_CAP = 40
 
 
 def _unavailable(feature, alternative):
+    if sys.platform != "darwin":
+        osname = platform.system() or sys.platform
+        return (f"{feature} needs Apple Vision, which runs only on macOS, so it is not available on {osname}. "
+                f"Installing packages cannot change that. To get the result without it, {alternative}.")
     return (f"{feature} needs Apple Vision through pyobjc, which runs on macOS only. "
             "On a Mac, run: python -m pip install 'agentic-video[visual]' (in a source checkout: pip install -r requirements-visual.txt), "
             f"or {alternative}.")

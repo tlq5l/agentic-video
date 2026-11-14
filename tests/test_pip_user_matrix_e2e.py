@@ -34,6 +34,7 @@ PIP_HINT_CELLS = {("search_visual", "good"), ("build_visual_index", "good"),
 # count_occurrences with a CLIP description answers in_progress and reports the weights gap on a later poll, so it is not one call's reply.
 WEIGHTS_CELLS = {("search_visual", "good"), ("build_visual_index", "good")}
 VISUAL_TOOLS = ("search_visual", "build_visual_index", "count_occurrences")
+OCR_TEXT_CELL = ("count_occurrences", "good: text (OCR)")  # off macOS its reply must say the tool runs only on macOS
 SWITCHED_OFF_TOOLS = ("label_sounds", "watch_for")
 
 REQUIRED = {
@@ -162,7 +163,10 @@ def _matrix_failures(python, env, clip, tmp_path):
                 problems.append("names a .venv path")
             if re.search(r"\bbug\b", shown, re.IGNORECASE):
                 problems.append("says this is a bug")
-        if env == "base" and (tool, case) in PIP_HINT_CELLS and PIP_HINT not in text:
+        if (tool, case) == OCR_TEXT_CELL and sys.platform != "darwin":
+            if "runs only on macOS" not in text or "pip install" in text:
+                problems.append("text search off macOS does not say it runs only on macOS, or names a pip command")
+        elif env == "base" and (tool, case) in PIP_HINT_CELLS and PIP_HINT not in text:
             problems.append(f"setup reply lacks the pip command {PIP_HINT!r}")
         if env == "visual" and (tool, case) in WEIGHTS_CELLS and str(python) not in text:
             problems.append("weights command does not name the running Python")
