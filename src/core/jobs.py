@@ -15,10 +15,15 @@ _LOCK = threading.Lock()
 _THREADS: List[threading.Thread] = []
 
 
+def _alive(thread) -> bool:
+    # A test may swap threading.Thread for a stand-in without is_alive; such a stand-in is not a job to wait for.
+    return bool(getattr(thread, "is_alive", lambda: False)())
+
+
 def track(thread: threading.Thread) -> threading.Thread:
     """Register a job thread (not started yet) so finish() waits for it. Returns the thread."""
     with _LOCK:
-        _THREADS[:] = [item for item in _THREADS if item.is_alive()]
+        _THREADS[:] = [item for item in _THREADS if _alive(item)]
         _THREADS.append(thread)
     return thread
 
@@ -38,7 +43,7 @@ def finish(bound_sec: float = SHUTDOWN_BOUND_SEC) -> List[str]:
             threads = list(_THREADS)
         for thread in threads:
             thread.join(max(0.0, deadline - time.monotonic()))
-        return [thread.name for thread in threads if thread.is_alive()]
+        return [thread.name for thread in threads if _alive(thread)]
     finally:
         # Cleared on return: a stdio run that happens in-process (tests) must not leave later jobs cancelled.
         _CANCEL.clear()
