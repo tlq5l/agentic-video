@@ -16,6 +16,10 @@ class AgenticVideoError(Exception):
             "details": self.details,
         }
 
+class VisualSetupError(AgenticVideoError, RuntimeError):
+    """Raised when visual search's optional packages or CLIP weights are not installed; the message says how to install them."""
+    pass
+
 class MediaNotFoundError(AgenticVideoError):
     """Raised when the specified video file or URL does not exist or cannot be accessed."""
     pass

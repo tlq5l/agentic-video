@@ -29,7 +29,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from src.core.config import Config
-from src.core.errors import as_dependency_error
+from src.core.errors import VisualSetupError, as_dependency_error
 from src.retrieval import ocr
 
 ALGORITHM_VERSION = "occurrences-v8"
@@ -556,8 +556,9 @@ def _dependencies_ok(args):
         ocr.ensure_available()
     if args.get("description") and _needs_clip(parse_description(args["description"])):
         if importlib.util.find_spec("torch") is None or importlib.util.find_spec("transformers") is None:
-            raise RuntimeError("Describing this object needs the local CLIP model: run python -m pip install "
-                               "-r requirements-visual.txt and cache the model (see README visual search setup). "
+            raise VisualSetupError("Describing this object needs the local CLIP model: run python -m pip install "
+                                   "'agentic-video[visual]' (source checkout: -r requirements-visual.txt) and cache the model "
+                                   "(see README visual search setup). "
                                "A plain coloured shape (e.g. 'yellow circle') and exact `text` work without it.")
 
 
