@@ -558,7 +558,7 @@ def _dependencies_ok(args):
         if importlib.util.find_spec("torch") is None or importlib.util.find_spec("transformers") is None:
             raise VisualSetupError("Describing this object needs the local CLIP model: run python -m pip install "
                                    "'agentic-video[visual]' (source checkout: -r requirements-visual.txt) and cache the model "
-                                   "(see README visual search setup). "
+                                   "(setup: https://github.com/tlq5l/agentic-video#optional-visual-search-clip-and-on-screen-text). "
                                "A plain coloured shape (e.g. 'yellow circle') and exact `text` work without it.")
 
 
