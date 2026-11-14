@@ -1,8 +1,20 @@
 {
   "check": [
-    "bash",
-    "-c",
-    ".venv/bin/python -m pytest -q -p no:cacheprovider -m \"not model and not slow\" -k \"not frame_at\" --ignore=tests/test_mcpb_bundle.py tests"
+    "uv",
+    "run",
+    "--no-sync",
+    "python",
+    "-m",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "-m",
+    "not model and not slow",
+    "-k",
+    "not frame_at",
+    "--ignore=tests/test_mcpb_bundle.py",
+    "tests"
   ],
   "setup": [
     "bash",
