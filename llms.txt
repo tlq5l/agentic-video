@@ -4,6 +4,7 @@
 
 ## Docs
 
+- [When to use](https://github.com/tlq5l/agentic-video/blob/main/docs/when-to-use.md?ref=agentic-video-llms-txt-docs-index): When to use agentic-video, and when a native video-understanding model fits better, with the repo's own stated limits.
 - [Where each tool runs](https://github.com/tlq5l/agentic-video/blob/main/docs/llms/capabilities.md?ref=agentic-video-llms-txt-docs-index): One row per tool (25 in `src/adapters/mcp_schemas.json`). The last three columns say what a tool needs. "yes" means the code needs it; "no" means it does not.
 - [Claude Code plugin](https://github.com/tlq5l/agentic-video/blob/main/docs/llms/claude-code-plugin.md?ref=agentic-video-llms-txt-docs-index): Installs the agentic-video MCP server and its skill into Claude Code in two commands. Install ffmpeg first (`brew install ffmpeg` on macOS, `sudo apt-get install -y ffmpeg` on Debian or Ubuntu) and install `uv` so `uvx` is on your PATH. The first run downloads the Python package.
 - [Argument shapes](https://github.com/tlq5l/agentic-video/blob/main/docs/llms/features/argument-shapes.md?ref=agentic-video-llms-txt-docs-index): What it does: the server reads three wrong shapes whose meaning is certain, and rewrites each to the documented shape before the schema check:

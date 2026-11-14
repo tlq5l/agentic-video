@@ -1,6 +1,8 @@
 """Name the sounds in audio windows with Cloudflare Workers AI (Clef-omni).
 
-Each window of the requested range is cut out with FFmpeg, sent as a 16 kHz
+Switched off: Cloudflare Workers AI is not used; this option refuses before sending anything.
+
+When it is switched on, each window of the requested range is cut out with FFmpeg, sent as a 16 kHz
 mono WAV with one multiple-choice question over the label list, and the
 per-label chances come back. The media leaves the machine, so personal
 recordings must not be passed in. No model is loaded locally and nothing stays
@@ -235,7 +237,7 @@ def label_sounds(
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
-    parser = argparse.ArgumentParser(description="Name the sounds in a video's audio windows (sends audio to Cloudflare Workers AI).")
+    parser = argparse.ArgumentParser(description="Name the sounds in a video's audio windows. Switched off: Cloudflare Workers AI is not used; this option refuses before sending anything.")
     parser.add_argument("source")
     parser.add_argument("start_sec", type=float)
     parser.add_argument("end_sec", type=float)
