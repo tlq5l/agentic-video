@@ -519,3 +519,16 @@ def test_index_ffmpeg_calls_limit_threads(tmp_path, monkeypatch):
     monkeypatch.setattr(visual.subprocess, "run", check_threads)
     visual.build_index(engine)
     assert len(commands) >= 3
+
+
+def test_search_visual_without_clip_returns_setup_error_at_once(tmp_path, monkeypatch):
+    """README: without CLIP, search_visual returns the setup error; it must not queue and then report index_required forever."""
+    import importlib.util
+    from src.executor import mcp_server
+
+    real_find_spec = importlib.util.find_spec
+    monkeypatch.setattr(importlib.util, "find_spec",
+                        lambda name, *a, **k: None if name in ("torch", "transformers") else real_find_spec(name, *a, **k))
+    source = _make_video(tmp_path / "colors.mp4")
+    with pytest.raises(RuntimeError, match="Visual search needs requirements-visual.txt"):
+        mcp_server.handle_call("search_visual", {"source": str(source), "query": "red"})
