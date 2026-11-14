@@ -64,11 +64,22 @@ CLIP_WEIGHTS_MISSING_MESSAGE = (
 )
 
 
+def hf_hub_cache():
+    """The Hugging Face hub cache as huggingface_hub/constants.py resolves it: HF_HUB_CACHE, else HF_HOME/hub, else
+    XDG_CACHE_HOME/huggingface/hub. Values may start with ~ or hold $VARS, as they do there."""
+    def resolve(value):
+        return os.path.expandvars(os.path.expanduser(value))
+    if os.environ.get("HF_HUB_CACHE"):
+        return Path(resolve(os.environ["HF_HUB_CACHE"]))
+    if os.environ.get("HF_HOME"):
+        return Path(resolve(os.environ["HF_HOME"])) / "hub"
+    return Path(resolve(os.environ.get("XDG_CACHE_HOME") or "~/.cache")) / "huggingface" / "hub"
+
+
 def clip_weights_missing_message():
     """The setup error when the CLIP weights are not in the local Hugging Face cache, else None. Reads the cache folder
-    only (HF_HUB_CACHE, else HF_HOME/hub), so it never downloads and never loads the model."""
-    hf_home = os.environ.get("HF_HOME") or str(Path.home() / ".cache" / "huggingface")
-    hub = Path(os.environ.get("HF_HUB_CACHE") or Path(hf_home) / "hub")
+    only (see hf_hub_cache), so it never downloads and never loads the model."""
+    hub = hf_hub_cache()
     snapshot = hub / f"models--{MODEL_ID.replace('/', '--')}" / "snapshots" / MODEL_REVISION
 
     def cached(name):
