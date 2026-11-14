@@ -32,9 +32,13 @@ def finish(bound_sec: float = SHUTDOWN_BOUND_SEC) -> List[str]:
     """Ask the jobs to stop, then wait for every tracked thread up to bound_sec. Returns the names of the threads still alive
     (empty when every job finished)."""
     _CANCEL.set()
-    deadline = time.monotonic() + bound_sec
-    with _LOCK:
-        threads = list(_THREADS)
-    for thread in threads:
-        thread.join(max(0.0, deadline - time.monotonic()))
-    return [thread.name for thread in threads if thread.is_alive()]
+    try:
+        deadline = time.monotonic() + bound_sec
+        with _LOCK:
+            threads = list(_THREADS)
+        for thread in threads:
+            thread.join(max(0.0, deadline - time.monotonic()))
+        return [thread.name for thread in threads if thread.is_alive()]
+    finally:
+        # Cleared on return: a stdio run that happens in-process (tests) must not leave later jobs cancelled.
+        _CANCEL.clear()
