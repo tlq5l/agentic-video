@@ -202,9 +202,9 @@ def test_missing_ffmpeg_error_tells_the_user_the_fix(bundle, tmp_path, missing, 
         if missing == "ffprobe":
             text = probe["content"][0]["text"]
             assert probe.get("isError") is True
-            assert "ffprobe binary not found" in text
+            assert "ffmpeg is missing from PATH (ffprobe not found)" in text
             assert "brew install ffmpeg" in text
-            assert "restart Claude Desktop" in text
+            assert "an MCP client must restart" in text
         else:
             assert not probe.get("isError"), probe  # ffprobe is linked here, so probe_video works
 
@@ -227,6 +227,6 @@ def test_missing_ffmpeg_error_tells_the_user_the_fix(bundle, tmp_path, missing, 
             proc.kill()
 
     assert json.loads(reply_text)["status"] == "error", reply_text
-    assert f"{missing} binary not found" in reply_text, reply_text
+    assert f"ffmpeg is missing from PATH ({missing} not found)" in reply_text, reply_text
     assert reply_text.count("brew install ffmpeg") == 1, reply_text
-    assert reply_text.count("restart Claude Desktop") == 1, reply_text
+    assert reply_text.count("an MCP client must restart") == 1, reply_text

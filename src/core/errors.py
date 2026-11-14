@@ -42,13 +42,14 @@ class ASRModelError(AgenticVideoError):
 
 class DependencyNotFoundError(AgenticVideoError):
     """Raised when an external system dependency (e.g. ffmpeg, ffprobe) is missing or not executable."""
-    FFMPEG_FIX = (". Install FFmpeg with `brew install ffmpeg` on macOS (Windows: `winget install Gyan.FFmpeg`), "
-                  "then restart Claude Desktop (or the MCP client) so it starts the server again.")
+    FFMPEG_FIX = (". Install ffmpeg (it includes ffprobe): macOS `brew install ffmpeg`; Debian or Ubuntu `sudo apt install ffmpeg`; "
+                  "Windows `winget install Gyan.FFmpeg`. Then run it again (an MCP client must restart so it starts the server again).")
 
     def __init__(self, message: str, details: dict | None = None):
-        # The fix is part of the message, so every caller (tools that raise it and workers that turn it into a string) shows it.
-        if (details or {}).get("dependency") in ("ffmpeg", "ffprobe"):
-            message += self.FFMPEG_FIX
+        # One plain line for every caller (tools that raise it and workers that turn it into a string): which tool is missing, then the install command per OS.
+        dependency = (details or {}).get("dependency")
+        if dependency in ("ffmpeg", "ffprobe"):
+            message = f"ffmpeg is missing from PATH ({dependency} not found){self.FFMPEG_FIX}"
         super().__init__(message, details)
 
 def as_dependency_error(exc: BaseException) -> BaseException:
