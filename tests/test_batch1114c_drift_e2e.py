@@ -59,7 +59,7 @@ def test_d5_ffmpeg_path_reports_truncated_from_240_frames(tmp_path, monkeypatch)
 
 def test_d4_motion_probe_doc_states_the_real_test_count(tmp_path):
     """docs/features/motion-probe.md must give the number of tests the file really has."""
-    words = {"seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12}
+    words = {"seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13}
     doc = (DOCS / "motion-probe.md").read_text(encoding="utf-8")
     stated = words[re.search(r"\((\w+) end-to-end tests", doc).group(1)]
     out = subprocess.run([sys.executable, "-m", "pytest", "--collect-only", "-q", "tests/test_motion_probe_e2e.py"],

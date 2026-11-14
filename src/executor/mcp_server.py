@@ -803,10 +803,10 @@ def handle_call(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
     """Validate the call, download URL sources, clamp over-cap arguments, and dispatch to AgenticVideoEngine."""
     if name not in _TOOL_SCHEMAS:
         return {"ok": False, "error": {"code": "unknown_tool", "message": f"Tool '{name}' not found; available tools: {', '.join(sorted(_TOOL_SCHEMAS))}"}}
+    if name in CLOUD_TOOLS:
+        require_switched_on(*CLOUD_TOOLS[name])  # first: no argument check, URL download or probe while Workers AI is off
     if not isinstance(args, dict):
         raise ValueError(f"{name} arguments must be an object of named parameters, e.g. {{\"source\": \"/path/to/video.mp4\"}}")
-    if name in CLOUD_TOOLS:
-        require_switched_on(name, CLOUD_TOOLS[name])  # first: no argument check, URL download or probe while Workers AI is off
     schema = _TOOL_SCHEMAS[name]
     required = schema.get("required", [])
     missing = [key for key in required if args.get(key) in (None, "")]

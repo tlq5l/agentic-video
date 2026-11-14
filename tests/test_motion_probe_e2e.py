@@ -355,3 +355,19 @@ def test_repeated_frames_still_count_as_duplicates(tmp_path, monkeypatch):
     dups = {f["frame"] for f in reply["data"]["flags"] if f["kind"] == "duplicate"}
     assert repeats <= dups, dups
     motion_probe.clear_memory_store()
+
+
+def test_motion_cache_version_named_in_docs_is_the_one_the_tool_writes(tmp_path, monkeypatch):
+    """docs/features/motion-probe.md names the cache version folder; it must be the folder motion_stats really writes."""
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    motion_probe.clear_memory_store()
+    frames = [Image.new("RGB", (64, 64), (100 + 20 * t, 100, 100)) for t in range(4)]
+    clip = tmp_path / "ramp.gif"
+    frames[0].save(clip, save_all=True, append_images=frames[1:], duration=40, loop=0)
+    reply = mcp_server.handle_call("motion_stats", {"source": str(clip)})
+    assert reply["ok"], reply
+    written = sorted({p.name for p in (tmp_path / "cache").rglob("motion-v*") if p.is_dir()})
+    assert written, "motion_stats wrote no motion cache folder"
+    doc = (REPO / "docs" / "features" / "motion-probe.md").read_text(encoding="utf-8")
+    assert all(f"`{name}`" in doc for name in written), (written, motion_probe.VERSION)
+    motion_probe.clear_memory_store()

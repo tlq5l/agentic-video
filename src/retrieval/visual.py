@@ -10,8 +10,10 @@ import importlib.util
 import math
 import os
 import re
+import shlex
 import shutil
 import subprocess
+import sys
 import sqlite3
 import tempfile
 import threading
@@ -22,7 +24,7 @@ from pathlib import Path
 
 import numpy as np
 
-from src.core.errors import as_dependency_error
+from src.core.errors import VisualSetupError, as_dependency_error
 from src.core.types import FrameInfo, format_timestamp
 from src.media.contact_sheet import compose_contact_sheet
 from src.media.frames import extract_single_frame
@@ -41,7 +43,10 @@ ORPHAN_TEMP_AGE_SEC = 300
 PREFETCH_CHUNKS = 3  # chunks decoded ahead of the embedding step, one FFmpeg each
 
 
-CLIP_MISSING_MESSAGE = "Visual search needs requirements-visual.txt (torch and transformers)."
+CLIP_MISSING_MESSAGE = (
+    "Visual search needs the optional visual packages (torch and transformers). Install them with: "
+    "python -m pip install 'agentic-video[visual]' (in a source checkout: pip install -r requirements-visual.txt)."
+)
 
 
 def clip_missing_message():
@@ -54,16 +59,27 @@ def clip_missing_message():
 CLIP_WEIGHTS_MISSING_MESSAGE = (
     f"Visual search needs the CLIP model weights ({MODEL_ID}) in the local Hugging Face cache, and they are not there. "
     "To download them (about 605 MB), run this once, and only when you choose to: "
-    ".venv/bin/python -c 'from huggingface_hub import snapshot_download; snapshot_download(repo_id=\"openai/clip-vit-base-patch32\", "
+    f"{shlex.quote(sys.executable)} -c 'from huggingface_hub import snapshot_download; snapshot_download(repo_id=\"openai/clip-vit-base-patch32\", "
     f"revision=\"{MODEL_REVISION}\", allow_patterns=[\"*.json\", \"*.txt\", \"pytorch_model.bin\"])'. Nothing was downloaded."
 )
 
 
+def hf_hub_cache():
+    """The Hugging Face hub cache as huggingface_hub/constants.py resolves it: HF_HUB_CACHE, else HF_HOME/hub, else
+    XDG_CACHE_HOME/huggingface/hub. Values may start with ~ or hold $VARS, as they do there."""
+    def resolve(value):
+        return os.path.expandvars(os.path.expanduser(value))
+    if os.environ.get("HF_HUB_CACHE"):
+        return Path(resolve(os.environ["HF_HUB_CACHE"]))
+    if os.environ.get("HF_HOME"):
+        return Path(resolve(os.environ["HF_HOME"])) / "hub"
+    return Path(resolve(os.environ.get("XDG_CACHE_HOME") or "~/.cache")) / "huggingface" / "hub"
+
+
 def clip_weights_missing_message():
     """The setup error when the CLIP weights are not in the local Hugging Face cache, else None. Reads the cache folder
-    only (HF_HUB_CACHE, else HF_HOME/hub), so it never downloads and never loads the model."""
-    hf_home = os.environ.get("HF_HOME") or str(Path.home() / ".cache" / "huggingface")
-    hub = Path(os.environ.get("HF_HUB_CACHE") or Path(hf_home) / "hub")
+    only (see hf_hub_cache), so it never downloads and never loads the model."""
+    hub = hf_hub_cache()
     snapshot = hub / f"models--{MODEL_ID.replace('/', '--')}" / "snapshots" / MODEL_REVISION
 
     def cached(name):
@@ -80,14 +96,14 @@ class ClipEncoder:
             import torch
             from transformers import CLIPModel, CLIPProcessor
         except ImportError as exc:
-            raise RuntimeError(CLIP_MISSING_MESSAGE) from exc
+            raise VisualSetupError(CLIP_MISSING_MESSAGE) from exc
         self.torch = torch
         torch.set_num_threads(TORCH_THREADS)
         try:
             self.processor = CLIPProcessor.from_pretrained(MODEL_ID, revision=MODEL_REVISION, local_files_only=True)
             self.model = CLIPModel.from_pretrained(MODEL_ID, revision=MODEL_REVISION, local_files_only=True).cpu().eval()
         except OSError as exc:
-            raise RuntimeError(CLIP_WEIGHTS_MISSING_MESSAGE) from exc
+            raise VisualSetupError(CLIP_WEIGHTS_MISSING_MESSAGE) from exc
 
     def _normalize(self, features):
         values = features.float().cpu().numpy()
@@ -509,7 +525,7 @@ def submit(engine, operation, **args):
         _validate_search(query, top_k, start, end)
     missing = clip_missing_message() or clip_weights_missing_message()
     if missing:  # answer now: a queued job would only end in index_required or this same error on the next poll
-        raise RuntimeError(missing)
+        raise VisualSetupError(missing)
     source = Path(engine.source_path).resolve()
     stat = source.stat()
     key = (str(engine._cache.base_dir.resolve()), str(source), stat.st_size, stat.st_mtime_ns,

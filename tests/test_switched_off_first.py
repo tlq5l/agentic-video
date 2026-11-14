@@ -57,3 +57,12 @@ def test_switched_off_refusal_comes_before_any_other_error(short_clip, tool, arg
     assert result["isError"], result
     assert "switched off" in text and "Nothing was sent" in text, text
     assert not any(word in text for word in BAD_ARGUMENT_WORDS), text
+
+
+@pytest.mark.parametrize("tool", ["label_sounds", "watch_for"])
+def test_switched_off_refusal_comes_before_a_non_object_arguments_error(tool):
+    """0.3.6 break-it: arguments sent as a list got the 'must be an object' error instead of the switched-off refusal."""
+    result = _call(tool, [])
+    text = result["content"][0]["text"]
+    assert result["isError"], result
+    assert "switched off" in text and "Nothing was sent" in text, text

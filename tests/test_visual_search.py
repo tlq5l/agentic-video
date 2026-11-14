@@ -1,5 +1,6 @@
 """Visual retrieval tests use tiny local FFmpeg clips and a deterministic encoder."""
 import os
+import shlex
 import shutil
 import subprocess
 import time
@@ -532,8 +533,12 @@ def test_search_visual_without_clip_returns_setup_error_at_once(tmp_path, monkey
     monkeypatch.setattr(importlib.util, "find_spec",
                         lambda name, *a, **k: None if name in ("torch", "transformers") else real_find_spec(name, *a, **k))
     source = _make_video(tmp_path / "colors.mp4")
-    with pytest.raises(RuntimeError, match="Visual search needs requirements-visual.txt"):
+    with pytest.raises(RuntimeError, match="Visual search needs the optional visual packages") as caught:
         mcp_server.handle_call("search_visual", {"source": str(source), "query": "red"})
+    # 0.3.6 PyPI check: the reply named a repo-only file and called the setup gap a bug to retry.
+    reply = mcp_server.format_tool_error(caught.value, "search_visual")
+    assert "pip install 'agentic-video[visual]'" in reply, reply
+    assert "bug in the tool" not in reply and "Retry once" not in reply, reply
 
 
 def test_missing_clip_weights_answer_at_once_without_loading_or_downloading(tmp_path, monkeypatch):
@@ -573,5 +578,8 @@ def test_missing_clip_weights_answer_at_once_without_loading_or_downloading(tmp_
                             ("build_visual_index", {"source": str(source)})):
         with pytest.raises(RuntimeError, match="needs the CLIP model weights") as caught:
             mcp_server.handle_call(operation, args)
+        reply = mcp_server.format_tool_error(caught.value, operation)
+        assert f"choose to: {shlex.quote(sys.executable)} -c " in reply, reply  # the running Python, not a fixed .venv path
+        assert "bug in the tool" not in reply, reply
         assert "snapshot_download" in str(caught.value) and "Nothing was downloaded" in str(caught.value)
     assert loads == [] and not (tmp_path / "empty-hf").exists()
