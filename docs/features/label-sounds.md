@@ -6,7 +6,7 @@ How a user reaches it: the `label_sounds` tool, and `python -m src.media.sound_l
 
 Code: `src/media/sound_labels.py` (`label_sounds`, `_decode_range`, `_ask`), `src/media/cloudflare.py` (credentials shared with watch_for), `src/retrieval/engine.py` (`AgenticVideoEngine.label_sounds`), `src/executor/mcp_server.py` (dispatch), contract in `src/adapters/mcp_schemas.json`, `src/adapters/mcp_definitions.ts`, `src/executor/types.d.ts`.
 
-How to check it works: `pytest tests/test_label_sounds.py tests/test_cloud_token_command.py` (the live test runs only with Cloudflare credentials set; the rest need none). Live: set `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` (or `AGENTIC_VIDEO_CF_TOKEN_COMMAND`, a command that prints the token) and call the tool on a range with a clear sound; the right label has the highest chance.
+How to check it works: `pytest tests/test_label_sounds.py tests/test_cloud_token_command.py` (the live test runs only with Cloudflare credentials set; the rest need none). Live: set `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` (or `AGENTIC_VIDEO_CF_TOKEN_COMMAND`, a command that prints the token) and call the tool on a range with a clear sound; the right label has the highest chance. While Workers AI is switched off (owner 2026-11-14), the feature tests in that command skip and only the refusal tests run.
 
 What depends on it: nothing else calls it; `audio_onsets` and `AGENTS.md` point to it for naming a sound.
 

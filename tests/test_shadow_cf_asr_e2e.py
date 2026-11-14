@@ -251,6 +251,7 @@ def test_an_expired_trial_sends_nothing_and_writes_trial_ended_once(speech_clip,
     expired_at = time.time() - (shadow_cf_asr.TRIAL_DAYS + 1) * 86400
     _write_trial_state(state, expired_at, count=3)
     monkeypatch.setenv(shadow_cf_asr.SWITCH_ENV, HOSTNAME)
+    monkeypatch.setattr(cloudflare, "WORKERS_AI_ON", True)  # the trial is only reached once the switch gate passes
 
     _transcribe(speech_clip)
     _wait_for_background_worker()
