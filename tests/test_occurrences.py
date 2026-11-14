@@ -2,6 +2,7 @@
 import dataclasses
 import json
 import math
+import platform
 import shutil
 import subprocess
 import sys
@@ -379,13 +380,31 @@ def test_errors_tell_the_agent_what_to_change(clips, tmp_path):
         AgenticVideoEngine(str(tmp_path / "missing.mp4"), cache=MediaCache(tmp_path / "c")).count_occurrences(description="circle")
 
 
-def test_missing_ocr_fails_with_install_instructions(monkeypatch, tmp_path):
+def test_missing_ocr_says_what_the_platform_needs(monkeypatch, tmp_path):
     monkeypatch.setitem(sys.modules, "Vision", None)
     source = tmp_path / "clip.mp4"
     source.write_bytes(b"x")
     engine = AgenticVideoEngine(str(source), cache=MediaCache(tmp_path / "cache"))
-    with pytest.raises(RuntimeError, match=r"requirements-visual\.txt.*omit `text`"):
+    expected = r"requirements-visual\.txt.*omit `text`" if sys.platform == "darwin" else r"runs only on macOS.*omit `text`"
+    with pytest.raises(RuntimeError, match=expected):
         engine.count_occurrences(text="RELEASE")
+
+
+@pytest.mark.skipif(sys.platform == "darwin", reason="macOS has Apple Vision; this checks the message on other systems")
+@needs_ffmpeg
+def test_text_search_off_macos_says_it_needs_macos_not_pip(tmp_path):
+    """The real CLI tool call with `text` on a non-macOS system names macOS as the limit, not a pip command that cannot fix it."""
+    clip = tmp_path / "clip.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=10:duration=6",
+                    "-pix_fmt", "yuv420p", str(clip)], check=True)
+    proc = subprocess.run([sys.executable, "-m", "src.executor.mcp_server", "call", "count_occurrences",
+                           json.dumps({"source": str(clip), "text": "RELEASE"})],
+                          cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True, timeout=240)
+    reply = json.loads(proc.stdout.strip().splitlines()[-1])
+    text = "".join(item.get("text", "") for item in reply.get("content", []))
+    assert reply.get("isError") is True and "Traceback" not in proc.stderr, proc.stderr
+    assert f"not available on {platform.system()}" in text and "runs only on macOS" in text, text
+    assert "pip install" not in text and "requirements-visual" not in text, text
 
 
 def test_schema_and_mcp_wiring(tmp_path):
