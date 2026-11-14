@@ -29,6 +29,10 @@ from src.retrieval import periodicity
 ALGORITHM_VERSION = "repcount-v5"
 # Real footage has cycles shorter than 0.4 s and clips under 3 s, so short windows are sampled at the fps cap.
 MAX_FPS = 15.0
+# Longest window a count may cover; longer windows are refused with a message that says to split them.
+MAX_WINDOW_SEC = 180.0
+# Shortest cycle that can be sampled at the fps cap: two frames.
+MIN_CYCLE_SEC = 2 / MAX_FPS
 MAX_ANALYSIS_FRAMES = 900
 # Minimum decode timeout; long windows get more, since ffmpeg decodes every source frame.
 DECODE_TIMEOUT_SEC = Config.SUBPROCESS_TIMEOUT_SEC
@@ -258,8 +262,8 @@ def _validate(start_sec, end_sec, fps, method, region, min_period_sec, max_perio
         raise ValueError("start_sec, end_sec, fps, min_period_sec and max_period_sec must be finite numbers")
     if start_sec < 0 or end_sec <= start_sec:
         raise ValueError(f"Need 0 <= start_sec < end_sec (got start_sec={start_sec:g}, end_sec={end_sec:g}); omit end_sec to count to the end of the video")
-    if end_sec - start_sec > 180:
-        raise ValueError(f"Repetition window is {end_sec - start_sec:g}s but must be within 180 seconds; split longer clips into windows "
+    if end_sec - start_sec > MAX_WINDOW_SEC:
+        raise ValueError(f"Repetition window is {end_sec - start_sec:g}s but must be within {MAX_WINDOW_SEC:g} seconds; split longer clips into windows "
                          "(pass start_sec/end_sec around the action, found with search_visual or contact_sheet). "
                          "A cycle that crosses a window edge can be lost, so cut windows at pauses between cycles")
     if fps <= 0 or fps > 15 or min_period_sec <= 0 or max_period_sec <= min_period_sec:

@@ -9,3 +9,5 @@
 - The README's MCP and Python examples say they run from a git checkout, because a pip install has no `fixtures/` folder; pip users are pointed to their own video. (#89)
 - Docs: the Claude Desktop bundle page quotes the current ffmpeg error text word for word.
 - MCP over stdio: a notification (a message with no id) gets no reply, as JSON-RPC requires, and `ping` returns an empty result instead of "Method not found". All 33 tools were run once over stdio on 0.3.7 and main; each answered.
+- MCP over stdio: `initialize` echoes the client's `protocolVersion` when the server supports it, and otherwise answers with the newest version it supports. The server supports only 2024-11-05 for now: 2025-03-26 requires accepting JSON-RPC batches, which this server does not do yet. Before, it always answered 2024-11-05.
+- `count_repetitions`: `min_period_sec` and `max_period_sec` outside 0.133 to 180 s are moved into that range, and the note says so. Before, such values were used as given, with no note. The fps cap (15) and the 180 s window limit were already in place.
