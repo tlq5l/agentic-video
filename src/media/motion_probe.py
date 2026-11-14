@@ -23,7 +23,6 @@ import json
 import os
 import subprocess
 import threading
-import time
 import uuid
 from collections import OrderedDict
 from pathlib import Path
@@ -246,28 +245,6 @@ _BUILD_LOCKS: Dict[str, threading.Lock] = {}
 _PENDING: Dict[str, threading.Thread] = {}
 _FAILED: Dict[str, str] = {}  # fingerprint -> decode error, so motion_open can report it
 
-_STOP = threading.Event()  # set when the stdio server's client closes stdin
-
-
-class _Stopped(RuntimeError):
-    """The server is shutting down; the build stopped before it wrote any cache file."""
-
-
-def _stop_checkpoint() -> None:
-    if _STOP.is_set():
-        raise _Stopped("The server is shutting down; the motion index was not built.")
-
-
-def stop_background_work(timeout_sec: float) -> List[str]:
-    """Set the stop flag, then wait up to timeout_sec for the running motion builds. Returns the names still alive."""
-    _STOP.set()
-    deadline = time.monotonic() + timeout_sec
-    with _STORE_LOCK:
-        threads = list(_PENDING.values())
-    for thread in threads:
-        thread.join(max(0.0, deadline - time.monotonic()))
-    return [t.name for t in threads if t.is_alive()]
-
 
 def clear_memory_store() -> None:
     """Forget every in-memory clip (the disk copy stays). Tests and timing runs use it."""
@@ -287,28 +264,17 @@ def _entry(fingerprint: str) -> Path:
 
 
 def _write_disk(entry: Path, clip: _Clip) -> None:
-    """Arrays first, meta.json last (it marks a complete entry). No stop check runs after the first write, and a failed
-    write removes its own temp files and any array it placed, so an interrupted build leaves no partial entry."""
-    _stop_checkpoint()
     entry.mkdir(parents=True, exist_ok=True)
     tag = f"{os.getpid()}.{uuid.uuid4().hex[:8]}"
     arrays = {"rgb": clip.rgb, **{k: clip.index[k] for k in ARRAYS if k != "rgb"}}
-    temps = {name: entry / f".{name}.{tag}.npy" for name in arrays}
-    tmp_meta = entry / f".meta.{tag}.json"  # written last: it marks a complete entry
+    for name, arr in arrays.items():
+        tmp = entry / f".{name}.{tag}.npy"
+        np.save(tmp, np.asarray(arr))
+        os.replace(tmp, entry / f"{name}.npy")
     meta = dict(clip.meta, version=VERSION, fingerprint=clip.fingerprint, scalars=clip.index["scalars"])
-    placed = []
-    try:
-        for name, arr in arrays.items():
-            np.save(temps[name], np.asarray(arr))
-        tmp_meta.write_text(json.dumps(meta))
-        for name in arrays:
-            os.replace(temps[name], entry / f"{name}.npy")
-            placed.append(entry / f"{name}.npy")
-        os.replace(tmp_meta, entry / "meta.json")
-    except BaseException:
-        for path in [*temps.values(), tmp_meta, *placed]:
-            path.unlink(missing_ok=True)
-        raise
+    tmp = entry / f".meta.{tag}.json"  # meta is written last: it marks a complete entry
+    tmp.write_text(json.dumps(meta))
+    os.replace(tmp, entry / "meta.json")
 
 
 def _read_disk(entry: Path, fingerprint: str) -> Optional[_Clip]:
@@ -351,7 +317,6 @@ def _clip(source: Any) -> Tuple[_Clip, str]:
         clip = _read_disk(entry, fingerprint)
         origin = "disk"
         if clip is None:
-            _stop_checkpoint()
             rgb, meta = decode(path)
             clip = _Clip(fingerprint, meta, rgb, build_index(rgb))
             _write_disk(entry, clip)

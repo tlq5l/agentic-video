@@ -296,7 +296,6 @@ def _build_locked(engine, stamp, duration, report):
     try:
         report(_progress(conn, duration))
         while True:
-            _stop_checkpoint()
             start = _progress(conn, duration)["indexed_until_sec"]
             if start >= duration:
                 return {"status": "complete", **_progress(conn, duration)}
@@ -316,7 +315,6 @@ def _build_locked(engine, stamp, duration, report):
                 # Each chunk starts fresh, so its first frame is always kept; the last kept frame covers up to the chunk end.
                 kept = drop_duplicate_frames(frames, end_of_chunk)
                 for offset in range(0, len(kept), BATCH_SIZE):
-                    _stop_checkpoint()
                     batch = kept[offset:offset+BATCH_SIZE]
                     vectors = encoder.images([frame.file_path for frame, _ in batch])
                     if len(vectors) != len(batch) or not np.isfinite(vectors).all():
@@ -507,30 +505,6 @@ def search_index(engine, query, top_k=5, start_sec=0.0, end_sec=None):
                 "note": "Cosine similarity is not confidence. Sample-based intervals are approximate; the interval holding rank 1 grows from its best frames only over frames that score close to the best, up to 8 s, so it can be shorter; a span already longer than 8 s, such as a held frame or hits merged together, is kept whole, so it can be longer and can include lower-scoring hits. Verify badges and inspect_window. Empty results do not establish absence."}
     finally:
         conn.close()
-
-
-# Set when the stdio server's client closes stdin. A visual build stops at its next checkpoint (before the next
-# embedding batch); chunks already committed stay, and the next build resumes from them.
-STOP_EVENT = threading.Event()
-
-
-class BuildStopped(RuntimeError):
-    """The server is shutting down; the build stopped at a checkpoint."""
-
-
-def _stop_checkpoint():
-    if STOP_EVENT.is_set():
-        raise BuildStopped("The server is shutting down; the visual build stopped and the next build resumes from the last committed chunk.")
-
-
-def stop_background_work(timeout_sec):
-    """Set the stop flag, then wait up to timeout_sec for the visual build and search threads. Returns the names still alive."""
-    STOP_EVENT.set()
-    deadline = time.monotonic() + timeout_sec
-    workers = [w for w in (_worker, _search_worker) if w is not None]
-    for worker in workers:
-        worker.join(max(0.0, deadline - time.monotonic()))
-    return [w.name for w in workers if w.is_alive()]
 
 
 _jobs = OrderedDict()
