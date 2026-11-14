@@ -304,3 +304,24 @@ def test_count_repetitions_over_stdio_notes_period_bounds(clip, tmp_path):
     reply = {item.get("id"): item for item in _talk(lines, tmp_path)}[2]
     text = "".join(item.get("text", "") for item in reply["result"]["content"])
     assert "min_period_sec set to" in text and "max_period_sec set to" in text, text[:500]
+
+
+def test_closing_stdin_while_jobs_run_exits_cleanly(clip, tmp_path):
+    """The every-tool calls start background jobs; stdin closes at once, before they settle. The server must still exit 0 with no abort."""
+    args = _good_args(clip)
+    args["count_repetitions"] = {**args["count_repetitions"], "end_sec": 5}  # this clip is 5 s; the shared matrix clip is 6 s
+    calls = {name: 3 + index for index, name in enumerate(args)}
+    requests = {name: {"jsonrpc": "2.0", "id": calls[name], "method": "tools/call", "params": {"name": name, "arguments": args[name]}}
+                for name in args}
+    server = _Server(tmp_path)
+    try:
+        for message in (INITIALIZE, INITIALIZED, *requests.values()):
+            server.send(message)
+        for request_id in calls.values():
+            assert "result" in server.reply(request_id), request_id
+        returncode, stderr = server.close()
+    finally:
+        server.abort()
+    assert "terminate called" not in stderr, stderr[-2000:]
+    assert returncode == 0, stderr[-2000:]
+    assert "Traceback" not in stderr, stderr[-2000:]
