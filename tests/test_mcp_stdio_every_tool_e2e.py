@@ -325,3 +325,8 @@ def test_closing_stdin_while_jobs_run_exits_cleanly(clip, tmp_path):
     assert "terminate called" not in stderr, stderr[-2000:]
     assert returncode == 0, stderr[-2000:]
     assert "Traceback" not in stderr, stderr[-2000:]
+    # The jobs finished before the exit, so no cache entry holds arrays without their meta.json, and no visual chunk folder is left.
+    home = tmp_path / "home"
+    partial = [str(d) for d in home.rglob("*") if d.is_dir() and any(d.glob("*.npy")) and not (d / "meta.json").exists()]
+    assert not partial, partial
+    assert not list(home.rglob("visual-chunk-*")), "a visual chunk folder was left behind"

@@ -25,6 +25,7 @@ from pathlib import Path
 
 import numpy as np
 
+from src.core import jobs
 from src.core.errors import VisualSetupError, as_dependency_error
 from src.core.types import FrameInfo, format_timestamp
 from src.media.contact_sheet import compose_contact_sheet
@@ -296,6 +297,8 @@ def _build_locked(engine, stamp, duration, report):
     try:
         report(_progress(conn, duration))
         while True:
+            if jobs.cancelled():  # stdin closed: keep the chunks already committed, start no new one
+                return {"status": "partial", **_progress(conn, duration)}
             start = _progress(conn, duration)["indexed_until_sec"]
             if start >= duration:
                 return {"status": "complete", **_progress(conn, duration)}
@@ -562,7 +565,7 @@ def submit(engine, operation, **args):
             with _jobs_lock:
                 _jobs[key] = result
 
-        worker = threading.Thread(target=work, name=f"visual-{operation}", daemon=True)
+        worker = jobs.track(threading.Thread(target=work, name=f"visual-{operation}", daemon=True))
         if operation == "build":
             _worker = worker
         else:

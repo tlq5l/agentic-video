@@ -15,6 +15,8 @@ import shutil
 import subprocess
 import tempfile
 import threading
+
+from src.core import jobs
 import time
 
 import numpy as np
@@ -589,7 +591,7 @@ def submit(engine, **args):
                 result = {"status": "error", "message": str(as_dependency_error(exc))}
             with _jobs_lock:
                 _jobs[key] = result
-        _worker = threading.Thread(target=work, name="repetition-count", daemon=True)
+        _worker = jobs.track(threading.Thread(target=work, name="repetition-count", daemon=True))
         _worker_key = key
         _worker.start()
         return {"status": "in_progress", "retry_after_seconds": 2}

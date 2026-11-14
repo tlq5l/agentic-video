@@ -22,6 +22,8 @@ import select
 import subprocess
 import sys
 import threading
+
+from src.core import jobs
 import time
 from collections import OrderedDict
 from pathlib import Path
@@ -291,7 +293,7 @@ def _chunk_vectors(fingerprint: str, chunks: List[dict]) -> np.ndarray:
         job = _JOBS.get(key)
         if job is None:
             job = _JOBS[key] = _Job()
-            threading.Thread(target=_build, args=(fingerprint, key, chunks, job), daemon=True).start()
+            jobs.track(threading.Thread(target=_build, args=(fingerprint, key, chunks, job), daemon=True)).start()
     if not job.done.wait(INDEX_WAIT_SEC):
         raise SemanticUnavailable(
             f"the semantic index for this video is still building ({time.monotonic() - job.started:.0f} s so far); "
