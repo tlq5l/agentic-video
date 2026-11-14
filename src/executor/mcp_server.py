@@ -319,11 +319,21 @@ def _clamp_args(name: str, args: Dict[str, Any]) -> tuple:
             clamped[arg] = value
     for arg, (low, high, _advice) in CLAMPED_RANGES.get(name, {}).items():
         value = args.get(arg)
-        if (isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+        # An int is compared exactly, so a huge one is not converted to float (that raises OverflowError); NaN and inf go on to the engine.
+        if (isinstance(value, (int, float)) and not isinstance(value, bool)
+                and (isinstance(value, int) or math.isfinite(value))
                 and not low <= value <= high):
             limited[arg] = min(max(value, low), high)
             clamped[arg] = value
     return limited, clamped
+
+
+def _fmt_num(value: Any) -> str:
+    """A requested value for a note; an int too large for a float is described by its size, since :g would overflow."""
+    try:
+        return f"{value:g}"
+    except OverflowError:
+        return f"an integer of {value.bit_length()} bits"
 
 
 def _report_clamps(name: str, data: Dict[str, Any], clamped: Dict[str, Any]) -> None:
@@ -332,11 +342,11 @@ def _report_clamps(name: str, data: Dict[str, Any], clamped: Dict[str, Any]) -> 
         if arg in CLAMPED_ARGS.get(name, {}):
             cap, advice = CLAMPED_ARGS[name][arg]
             data[f"{arg}_clamped_from"] = requested
-            _add_note(data, f"{arg} capped at {cap} (requested {requested:g}). {advice}")
+            _add_note(data, f"{arg} capped at {cap} (requested {_fmt_num(requested)}). {advice}")
         else:
             low, high, advice = CLAMPED_RANGES[name][arg]
             kept = min(max(requested, low), high)
-            _add_note(data, f"{arg} set to {kept:g} (requested {requested:g}; valid range {low:g} to {high:g}). {advice}")
+            _add_note(data, f"{arg} set to {kept:g} (requested {_fmt_num(requested)}; valid range {low:g} to {high:g}). {advice}")
 
 
 def _bound_list(data: Dict[str, Any], key: str, limit: int, advice: str) -> None:

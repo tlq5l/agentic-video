@@ -460,3 +460,9 @@ def test_clamped_period_bounds_count_like_their_limits(tmp_path):
     assert "min_period_sec set to" in clamped["note"] and "max_period_sec set to" in clamped["note"]
     assert "set to" not in in_range["note"]
     assert clamped["count"] == limits["count"] == in_range["count"] > 0, (clamped["count"], limits["count"], in_range["count"])
+    huge = count({"min_period_sec": 2 / 15, "max_period_sec": 10 ** 1000})
+    assert "max_period_sec set to 180" in huge["note"] and "min_period_sec set to" not in huge["note"]
+    assert huge["count"] == limits["count"], (huge["count"], limits["count"])
+    capped = count({"fps": 10 ** 1000})
+    assert "fps capped at 15" in capped["note"]
+    assert capped["count"] == count({"fps": 15})["count"], capped["count"]
