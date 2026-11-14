@@ -195,7 +195,7 @@ You cannot watch video. For any .mp4/.mov/.webm question, use the agentic-video 
 
 ### Five-line example
 
-From the repository folder: a handshake, the video's metadata, and a 6-frame contact sheet (its JPEG path is in `file_path`):
+From the repository folder (a git checkout, since it needs the repo's `fixtures/` clip and `.venv`): a handshake, the video's metadata, and a 6-frame contact sheet (its JPEG path is in `file_path`). A PyPI-only install has no `fixtures/` clip, so put the absolute path of your own video in `source` instead.
 
 ```sh
 printf '%s\n' \
@@ -205,7 +205,7 @@ printf '%s\n' \
   | .venv/bin/python -m src.executor.mcp_server
 ```
 
-The same from Python:
+The same from Python (same repo folder and clip; with a PyPI-only install, use your own video's absolute path instead):
 
 ```python
 from src.retrieval.engine import AgenticVideoEngine
