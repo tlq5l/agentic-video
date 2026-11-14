@@ -4,6 +4,7 @@ import json
 import math
 import re
 import sys
+import threading
 import time
 import base64
 import hashlib
@@ -1439,6 +1440,9 @@ def run_stdio_server():
             sys.stdout.write(json.dumps(resp) + "\n")
             sys.stdout.flush()
 
+    _stop_background_work()
+
+
 def _package_version():
     """Installed package version; "dev" when run from a source checkout (how Executor starts it)."""
     from importlib.metadata import PackageNotFoundError, version
@@ -1495,12 +1499,23 @@ def _cli(argv):
     return 2
 
 
-def _exit_without_teardown():
-    """End the stdio server with os._exit after stdout is flushed. A visual build still running in a daemon thread (torch
-    threads) makes interpreter teardown abort the process with "terminate called without an active exception" (exit -6)."""
-    sys.stdout.flush()
-    sys.stderr.flush()
-    os._exit(0)
+def _stop_background_work():
+    """The client closed stdin. Running visual and motion builds stop at their next checkpoint, then every other daemon
+    thread that is still working is waited for, 30 s in all. A daemon thread still inside torch or numpy code when the
+    interpreter exits can abort the process with -6 ("terminate called without an active exception"), so none is left
+    running. The ASR parent watchdog only sleeps between checks and is not waited for."""
+    deadline = time.monotonic() + 30
+    for name in ("src.retrieval.visual", "src.media.motion_probe"):
+        module = sys.modules.get(name)
+        if module is not None:
+            module.stop_background_work(max(0.0, deadline - time.monotonic()))
+    me = threading.current_thread()
+    busy = [t for t in threading.enumerate() if t.daemon and t is not me and t.name != "asr-parent-watchdog"]
+    for thread in busy:
+        thread.join(max(0.0, deadline - time.monotonic()))
+    still = [t.name for t in busy if t.is_alive()]
+    if still:
+        print("background work still running after 30 s, exiting: " + ", ".join(still), file=sys.stderr)
 
 
 def main(argv=None):
@@ -1517,7 +1532,6 @@ def main(argv=None):
         return 0 if args in (["-h"], ["--help"]) else 2
     else:
         run_stdio_server()
-        _exit_without_teardown()
     return 0
 
 
@@ -1525,4 +1539,3 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         sys.exit(_cli(sys.argv[1:]))
     run_stdio_server()
-    _exit_without_teardown()
