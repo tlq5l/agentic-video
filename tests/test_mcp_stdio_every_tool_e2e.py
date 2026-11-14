@@ -78,3 +78,28 @@ def test_notifications_get_no_reply_and_ping_gets_an_empty_result(tmp_path):
     assert replies[1]["result"] == {}, replies[1]
     assert replies[2]["error"]["code"] == -32601, replies[2]
     assert replies[3]["error"]["code"] == -32700, replies[3]
+
+
+def test_initialize_echoes_supported_version_else_newest(tmp_path):
+    # The server supports only 2024-11-05: 2025-03-26 requires servers to accept JSON-RPC batches, and this one answers
+    # an array with Invalid Request. So 2024-11-05 is also the newest supported version here.
+    client = {"capabilities": {}, "clientInfo": {"name": "test", "version": "0"}}
+    lines = [
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05", **client}},
+        {"jsonrpc": "2.0", "id": 2, "method": "initialize", "params": {"protocolVersion": "2099-01-01", **client}},
+        {"jsonrpc": "2.0", "id": 3, "method": "initialize", "params": {"protocolVersion": ["2024-11-05"]}},
+        {"jsonrpc": "2.0", "id": 4, "method": "initialize", "params": "not an object"},
+        {"jsonrpc": "2.0", "id": 5, "method": "ping"},
+    ]
+    replies = {reply.get("id"): reply for reply in _talk(lines, tmp_path)}
+    for request_id in (1, 2, 3, 4):
+        assert replies[request_id]["result"]["protocolVersion"] == "2024-11-05", replies[request_id]
+    assert replies[5]["result"] == {}, replies[5]
+
+
+def test_count_repetitions_over_stdio_notes_period_bounds(clip, tmp_path):
+    lines = [INITIALIZE, INITIALIZED, {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {
+        "name": "count_repetitions", "arguments": {"source": clip, "end_sec": 5, "min_period_sec": 1e-9, "max_period_sec": 1e300}}}]
+    reply = {item.get("id"): item for item in _talk(lines, tmp_path)}[2]
+    text = "".join(item.get("text", "") for item in reply["result"]["content"])
+    assert "min_period_sec set to" in text and "max_period_sec set to" in text, text[:500]

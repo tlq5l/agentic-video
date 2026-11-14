@@ -438,3 +438,31 @@ def test_periodic_override_caps_confidence_and_states_both_counts():
     assert "14 cycles" in note and "amplitude count of 4" in note and "motion 4, embedding 5" in note
     assert "confidence is capped" in note
     assert "embedding" not in repetition._override_note(found, {"count": 4}, {"count": 4}, None)
+
+
+def test_clamped_period_bounds_count_like_their_limits(tmp_path):
+    from src.executor import mcp_server
+    from tests.fixtures.repetition_dev import generate
+    source = tmp_path / "ball.mp4"
+    generate(("tool_clamp_ball", "ball", 4, .8, 0, -1, 0, False, (.7, .7)), source)
+
+    def count(extra):
+        for _ in range(240):
+            data = mcp_server.handle_call("count_repetitions", {"source": str(source), "fps": 10, **extra})["data"]
+            if data.get("status") != "in_progress":
+                return data
+            time.sleep(0.5)
+        raise AssertionError("repetition count did not finish")
+
+    clamped = count({"min_period_sec": 1e-9, "max_period_sec": 1e300})
+    limits = count({"min_period_sec": 2 / 15, "max_period_sec": 180})
+    in_range = count({})
+    assert "min_period_sec set to" in clamped["note"] and "max_period_sec set to" in clamped["note"]
+    assert "set to" not in in_range["note"]
+    assert clamped["count"] == limits["count"] == in_range["count"] > 0, (clamped["count"], limits["count"], in_range["count"])
+    huge = count({"min_period_sec": 2 / 15, "max_period_sec": 10 ** 1000})
+    assert "max_period_sec set to 180" in huge["note"] and "min_period_sec set to" not in huge["note"]
+    assert huge["count"] == limits["count"], (huge["count"], limits["count"])
+    capped = count({"fps": 10 ** 1000})
+    assert "fps capped at 15" in capped["note"]
+    assert capped["count"] == count({"fps": 15})["count"], capped["count"]

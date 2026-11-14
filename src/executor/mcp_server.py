@@ -264,6 +264,16 @@ CLAMPED_ARGS: Dict[str, Dict[str, tuple]] = {
     "sync_check": {"tolerance_ms": (5000, "Tolerances beyond 5 seconds stop being sync checks.")},
 }
 
+# Numeric arguments with a valid range but no schema maximum: over the top they are lowered, under the bottom raised,
+# each with a note in the result. The bounds mirror src/retrieval/repetition.py (MIN_CYCLE_SEC, MAX_WINDOW_SEC),
+# kept as literals here so this module does not import numpy at startup.
+CLAMPED_RANGES: Dict[str, Dict[str, tuple]] = {
+    "count_repetitions": {
+        "min_period_sec": (2 / 15, 180.0, "Cycles shorter than two frames at the 15 fps cap cannot be resolved."),
+        "max_period_sec": (2 / 15, 180.0, "No cycle can be longer than the 180 s window."),
+    },
+}
+
 # Bounds for list-valued results. Each tool has a range argument to page through
 # what was left out, and the result says which one to use.
 MAX_CUTS = 500
@@ -300,7 +310,7 @@ def _add_note(data: Dict[str, Any], text: str) -> None:
 
 
 def _clamp_args(name: str, args: Dict[str, Any]) -> tuple:
-    """Lower over-cap arguments to their cap. Returns (args, {arg: requested value})."""
+    """Lower over-cap arguments to their cap and move out-of-range ones into their range. Returns (args, {arg: requested value})."""
     clamped: Dict[str, Any] = {}
     limited = dict(args)
     for arg, (cap, _advice) in CLAMPED_ARGS.get(name, {}).items():
@@ -308,15 +318,36 @@ def _clamp_args(name: str, args: Dict[str, Any]) -> tuple:
         if isinstance(value, (int, float)) and not isinstance(value, bool) and value > cap:
             limited[arg] = cap
             clamped[arg] = value
+    for arg, (low, high, _advice) in CLAMPED_RANGES.get(name, {}).items():
+        value = args.get(arg)
+        # An int is compared exactly, so a huge one is not converted to float (that raises OverflowError); NaN and inf go on to the engine.
+        if (isinstance(value, (int, float)) and not isinstance(value, bool)
+                and (isinstance(value, int) or math.isfinite(value))
+                and not low <= value <= high):
+            limited[arg] = min(max(value, low), high)
+            clamped[arg] = value
     return limited, clamped
+
+
+def _fmt_num(value: Any) -> str:
+    """A requested value for a note; an int too large for a float is described by its size, since :g would overflow."""
+    try:
+        return f"{value:g}"
+    except OverflowError:
+        return f"an integer of {value.bit_length()} bits"
 
 
 def _report_clamps(name: str, data: Dict[str, Any], clamped: Dict[str, Any]) -> None:
     """Say which arguments were lowered to their cap, and what to do instead."""
     for arg, requested in clamped.items():
-        cap, advice = CLAMPED_ARGS[name][arg]
-        data[f"{arg}_clamped_from"] = requested
-        _add_note(data, f"{arg} capped at {cap} (requested {requested:g}). {advice}")
+        if arg in CLAMPED_ARGS.get(name, {}):
+            cap, advice = CLAMPED_ARGS[name][arg]
+            data[f"{arg}_clamped_from"] = requested
+            _add_note(data, f"{arg} capped at {cap} (requested {_fmt_num(requested)}). {advice}")
+        else:
+            low, high, advice = CLAMPED_RANGES[name][arg]
+            kept = min(max(requested, low), high)
+            _add_note(data, f"{arg} set to {kept:g} (requested {_fmt_num(requested)}; valid range {low:g} to {high:g}). {advice}")
 
 
 def _bound_list(data: Dict[str, Any], key: str, limit: int, advice: str) -> None:
@@ -1306,6 +1337,17 @@ def tool_call_response(req_id: Any, name: Any, arguments: Any) -> str:
     return line
 
 
+# Versions this server meets. 2025-03-26 is not listed: it requires servers to accept JSON-RPC batches (arrays), which
+# this loop answers with Invalid Request. The newest entry is the answer when the client asks for a version not listed.
+SUPPORTED_PROTOCOL_VERSIONS = ("2024-11-05",)
+
+
+def _negotiated_protocol_version(params: Any) -> str:
+    """Echo the client's protocolVersion when supported, else the newest supported one (MCP lifecycle rule)."""
+    requested = params.get("protocolVersion") if isinstance(params, dict) else None
+    return requested if requested in SUPPORTED_PROTOCOL_VERSIONS else SUPPORTED_PROTOCOL_VERSIONS[-1]
+
+
 def run_stdio_server():
     """Run JSON-RPC stdio loop for MCP clients (Executor, Claude, Cursor)."""
     # Force UTF-8 on Windows stdio
@@ -1357,7 +1399,7 @@ def run_stdio_server():
                 "jsonrpc": "2.0",
                 "id": req_id,
                 "result": {
-                    "protocolVersion": "2024-11-05",
+                    "protocolVersion": _negotiated_protocol_version(req.get("params")),
                     "capabilities": {"tools": {}},
                     "serverInfo": {"name": "agentic-video", "version": _package_version()}
                 }
