@@ -217,6 +217,7 @@ def test_mcp_visual_tools_poll_and_attach_contact_sheet(tmp_path, monkeypatch):
 
 def test_worker_returns_promptly_deduplicates_and_reports_errors(tmp_path, monkeypatch):
     import threading
+    monkeypatch.setattr(visual, "clip_missing_message", lambda: None)  # this test is about the worker, not CLIP
     source = tmp_path / "dummy.mp4"
     source.write_bytes(b"dummy")
     engine = AgenticVideoEngine(str(source), cache=MediaCache(tmp_path / "cache"))
