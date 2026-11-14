@@ -25,10 +25,13 @@ pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg n
 VISUAL_TOOLS = ("build_visual_index", "search_visual", "count_occurrences")
 VISUAL_HINT = "python -m pip install 'agentic-video[visual]'"
 WEIGHTS_HINT = "needs the CLIP model weights"
-# Statuses a visual tool may return without an error on a first call (visual.py and the job record it reads from).
-VISUAL_LIVE_STATUSES = ("queued", "running", "in_progress", "busy", "partial", "complete", "index_required")
 # A job still working: the same tool call polls it, as the CLI does (mcp_server._settled_call settles on these too).
 JOB_STATUSES = ("queued", "running", "in_progress", "busy")
+# The status a background tool reports once its job has finished (visual.py, occurrence.py, repetition.py, motion_probe.py).
+DONE_STATUS = {"build_visual_index": "complete", "search_visual": "complete", "count_occurrences": "complete",
+               "count_repetitions": "complete", "motion_open": "ready"}
+# Statuses that end a job with a failure: the wait fails on them, with the reply printed.
+FAILED_STATUSES = ("error", "failed")
 INITIALIZE = {"jsonrpc": "2.0", "id": 1, "method": "initialize",
               "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "test", "version": "0"}}}
 INITIALIZED = {"jsonrpc": "2.0", "method": "notifications/initialized"}
@@ -72,7 +75,8 @@ def _assert_visual_reply(name, reply, text, state):
         else:
             assert result.get("isError") and WEIGHTS_HINT in text and shlex.quote(sys.executable) in text, (name, text[:500])
     else:
-        assert not result.get("isError") and status in VISUAL_LIVE_STATUSES, (name, text[:500])
+        # weights present: a queued or running reply only starts the job; _assert_visual_done checks the finished reply after the wait
+        assert not result.get("isError") and status not in FAILED_STATUSES, (name, text[:500])
 
 
 def _talk(lines, tmp_path):
@@ -147,19 +151,79 @@ class _Server:
         self.stderr.close()
 
 
-def _settle_jobs(server, pending, next_id, timeout_sec=600):
-    """Repeat each pending tool call (name -> request) until its job leaves JOB_STATUSES. The same call polls the same job."""
+def _payload(result):
+    """A tool reply's fields: its structuredContent, else the JSON in its text."""
+    if result.get("structuredContent") is not None:
+        return result["structuredContent"]
+    try:
+        return json.loads(result["content"][0]["text"])
+    except (KeyError, IndexError, TypeError, ValueError):
+        return {}
+
+
+# Tools that finish with a result of their own shape and no status (asr.py, search.py): the field that proves the finished result.
+DONE_SHAPE = {"transcribe": "segments", "search_transcript": "hits"}
+
+
+def _has_done_rule(name):
+    return name in DONE_STATUS or name in DONE_SHAPE
+
+
+def _is_done(name, result):
+    """True when a reply is the tool's finished answer: its done status, or its finished shape with no status."""
+    if name in DONE_STATUS:
+        return _status(result) == DONE_STATUS[name]
+    return _status(result) is None and isinstance(_payload(result).get(DONE_SHAPE[name]), list)
+
+
+def _still_running(name, result, state):
+    """True when a call's reply starts or keeps a job, so the wait polls it until it is done."""
+    if _status(result) in JOB_STATUSES:
+        return True
+    return state == "weights_present" and name in VISUAL_TOOLS and not result.get("isError") and not _is_done(name, result)
+
+
+def _assert_visual_done(name, result, text):
+    """With weights present, a visual tool's finished reply: its done status and the fields of its finished shape."""
+    payload = _payload(result)
+    assert not result.get("isError") and _is_done(name, result), (name, text[:500])
+    if name == "build_visual_index":
+        assert payload.get("frames_indexed", 0) > 0, (name, text[:500])
+    elif name == "search_visual":
+        assert isinstance(payload.get("hits"), list) and payload.get("index_status") == "complete", (name, text[:500])
+    elif name == "count_occurrences":
+        assert "count" in payload and isinstance(payload.get("spans"), list), (name, text[:500])
+
+
+def _settle_jobs(server, pending, next_id, state, timeout_sec=600):
+    """Repeat each pending tool call (name -> request) until its job reports its done status. The same call polls the same job.
+    Returns the finished reply of each call by name. Only a done status counts: an error, a missing status, a tool with no
+    done rule, or a timeout fails the test, with the reply printed. Other statuses (queued, partial, index_required...) keep polling."""
+    for name in pending:
+        assert _has_done_rule(name), f"no done rule for {name}"
     deadline = time.monotonic() + timeout_sec
+    finished = {}
     while pending:
-        assert time.monotonic() < deadline, f"jobs still running after {timeout_sec} s: {sorted(pending)}"
+        assert time.monotonic() < deadline, f"jobs not done after {timeout_sec} s: {sorted(pending)}"
         time.sleep(1)
         for name, request in list(pending.items()):
             server.send({**request, "id": next_id})
             reply = server.reply(next_id)
             next_id += 1
             assert "result" in reply, (name, reply)
-            if _status(reply["result"]) not in JOB_STATUSES:
+            result = reply["result"]
+            text = "".join(item.get("text", "") for item in result.get("content", []))
+            if _is_done(name, result):
+                finished[name] = result
                 del pending[name]
+            elif state == "weights_missing" and name == "count_occurrences" and WEIGHTS_HINT in text:
+                # The one expected end without weights: the later poll reports the weights gap as an error.
+                assert result.get("isError") or _status(result) in FAILED_STATUSES, (name, text[:500])
+                finished[name] = result
+                del pending[name]
+            else:
+                assert not result.get("isError") and _status(result) is not None and _status(result) not in FAILED_STATUSES, (name, text[:500])
+    return finished
 
 
 def test_every_tool_answers_over_stdio(clip, tmp_path):
@@ -187,8 +251,12 @@ def test_every_tool_answers_over_stdio(clip, tmp_path):
                 _assert_visual_reply(name, reply, text, state)
 
         # Stdin closes only after the jobs the calls started have settled, so this checks that each tool answers, not what the server does at shutdown.
-        pending = {name: requests[name] for name, request_id in calls.items() if _status(replies[request_id]["result"]) in JOB_STATUSES}
-        _settle_jobs(server, pending, max(calls.values()) + 1)
+        pending = {name: requests[name] for name, request_id in calls.items() if _still_running(name, replies[request_id]["result"], state)}
+        finished = _settle_jobs(server, pending, max(calls.values()) + 1, state)
+        if state == "weights_present":
+            for name in VISUAL_TOOLS:
+                result = finished.get(name, replies[calls[name]]["result"])
+                _assert_visual_done(name, result, "".join(item.get("text", "") for item in result.get("content", [])))
         returncode, stderr = server.close()
     finally:
         server.abort()
