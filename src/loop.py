@@ -9,6 +9,7 @@ import math
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -17,6 +18,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from src.core.cache import MediaCache
+from src.core.errors import DependencyNotFoundError, as_dependency_error
 from src.media.audio import (audio_onsets, clipping_runs, loudness_timeline, spectrogram_window, stereo_balance_shifts,
                              sync_check)
 from src.media.contact_sheet import build_contact_sheet
@@ -2007,9 +2009,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     run.set_defaults(func=_cmd_run)
     args = parser.parse_args(argv)
     try:
+        # Every command here measures a video with ffmpeg and ffprobe: say so before any work starts.
+        for name in ("ffmpeg", "ffprobe"):
+            if shutil.which(name) is None:
+                raise DependencyNotFoundError(f"{name} binary not found on system PATH", {"dependency": name})
         return args.func(args)
     except Exception as exc:
-        print("error: {}".format(scrub_jev(exc)), file=sys.stderr)
+        print("error: {}".format(scrub_jev(as_dependency_error(exc))), file=sys.stderr)
         return 2
 
 

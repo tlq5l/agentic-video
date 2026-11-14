@@ -23,6 +23,6 @@ Output from agentic-video 0.3.3 on synthetic_bench_60s.mp4 (structuredContent, t
 
 I opened that PNG. It shows "PROJECT CYGNUS CODE [CYGNUS-VERIFIED-77]" and "TOKEN: CYGNUS-VERIFIED-77", with "TIME: 00:35.000" burned in. The text was read by eye from the image, not by OCR.
 
-`"read_text": true` adds Apple Vision OCR. On the Linux box it returns an error instead: `read_text needs Apple Vision through pyobjc (macOS only)`. That call was not run on a Mac.
+`"read_text": true` adds Apple Vision OCR. On the Linux box it returns an error instead: `read_text needs Apple Vision, which runs only on macOS, so it is not available on Linux. Installing packages cannot change that. To get the result without it, leave read_text out (the default) to get the frames without text.` That call was not run on a Mac.
 
 Can miss: this is one frame at one time. Text that is on screen for less than the gap between your chosen times can be missed. Small text can be misread by eye, so crop and scale it (see the arguments above) before you quote it.
