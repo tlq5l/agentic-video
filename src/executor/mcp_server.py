@@ -796,7 +796,7 @@ def _checked_arguments(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
 # Tools whose read_text argument runs Apple Vision OCR on the returned frames.
 READ_TEXT_TOOLS = ("frame_at", "inspect_window")
 # Workers AI tools and the (feature, what it sends) that require_switched_on checks before any other work.
-CLOUD_TOOLS = {"watch_for": "video frames", "label_sounds": "audio"}
+CLOUD_TOOLS = {"watch_for": ("watch_for", "video frames"), "label_sounds": ("label_sounds", "audio")}
 
 
 def handle_call(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
