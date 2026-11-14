@@ -56,8 +56,8 @@ def require_switched_on(feature: str, sends: str) -> None:
     """Refuse while Workers AI is switched off. Each Workers AI feature calls this before any other work."""
     if not WORKERS_AI_ON:
         raise CloudCredentialsError(
-            f"{feature} sends {sends} to Cloudflare Workers AI, which is switched off (billed to the card from 2026-12-01; "
-            f"owner 2026-11-14). Nothing was sent. Free alternative: {FREE_ALTERNATIVES.get(feature, 'none in this repo')}."
+            f"{feature} sends {sends} to Cloudflare Workers AI, which is switched off in this release. "
+            f"Nothing was sent. Free alternative: {FREE_ALTERNATIVES.get(feature, 'none in this repo')}."
         )
 
 

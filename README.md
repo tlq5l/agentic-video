@@ -2,7 +2,7 @@
 
 <!-- mcp-name: io.github.tlq5l/agentic-video -->
 
-agentic-video lets an AI agent that reads text and images, but not video, work with video files on your own machine. It is a Python library plus a stdio MCP server. The agent asks small, targeted questions ("show me 12 frames from 0:40 to 1:10", "when is 'launch' spoken?") and gets back measurements, transcripts and contact sheets: grids of frames, each with its timestamp burned into the pixels. Everything runs locally with FFmpeg, Whisper and optional local models, except two optional cloud tools (`watch_for`, `label_sounds`), which are switched off: they refuse every call and send nothing, because Cloudflare Workers AI is disabled (billed to the card from 2026-12-01). The opt-in shadow transcription trial is switched off too.
+agentic-video lets an AI agent that reads text and images, but not video, work with video files on your own machine. It is a Python library plus a stdio MCP server. The agent asks small, targeted questions ("show me 12 frames from 0:40 to 1:10", "when is 'launch' spoken?") and gets back measurements, transcripts and contact sheets: grids of frames, each with its timestamp burned into the pixels. Everything runs locally with FFmpeg, Whisper and optional local models, except two optional cloud tools (`watch_for`, `label_sounds`), which are switched off: they refuse every call and send nothing, because Cloudflare Workers AI is disabled in this release. The opt-in shadow transcription trial is switched off too.
 
 **See it work:** https://agentic-video-gallery.infra-1b7.workers.dev (the gallery: real tasks, including the misses).
 
