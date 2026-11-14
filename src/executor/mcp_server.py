@@ -4,6 +4,7 @@ import json
 import math
 import re
 import sys
+import time
 import base64
 import hashlib
 import os
@@ -1447,6 +1448,32 @@ def _package_version():
         return "dev"
 
 
+# A one-line `call` is a new process each time, so a background job (visual index, search, count_occurrences)
+# would stay "queued" forever if the CLI answered at once. The CLI asks again inside this one process until the job
+# settles, for at most CLI_SETTLE_LIMIT_SEC seconds, then prints the last answer.
+CLI_SETTLE_STATUSES = ("queued", "running", "in_progress", "busy")
+CLI_SETTLE_LIMIT_SEC = 900
+
+
+def _status_of(result):
+    status = (result.get("structuredContent") or {}).get("status")
+    if status is None:
+        try:
+            status = json.loads(result["content"][0]["text"]).get("status")
+        except (KeyError, IndexError, TypeError, ValueError, AttributeError):
+            status = None
+    return status
+
+
+def _settled_call(name, arguments):
+    deadline = time.monotonic() + CLI_SETTLE_LIMIT_SEC
+    while True:
+        result = json.loads(tool_call_response(None, name, arguments))["result"]
+        if _status_of(result) not in CLI_SETTLE_STATUSES or time.monotonic() >= deadline:
+            return result
+        time.sleep(1)
+
+
 def _cli(argv):
     """`list [--schemas]` prints tool names or full schemas; `call <tool> '<json>'` prints the tools/call result the server returns."""
     if argv == ["list"]:
@@ -1461,7 +1488,7 @@ def _cli(argv):
         except json.JSONDecodeError as exc:
             print(f"arguments must be a JSON object: {exc}", file=sys.stderr)
             return 2
-        result = json.loads(tool_call_response(None, argv[1], arguments))["result"]
+        result = _settled_call(argv[1], arguments)
         print(json.dumps(result))
         return 1 if result.get("isError") else 0
     print("usage: python -m src.executor.mcp_server [list [--schemas] | call <tool> '<json arguments>']", file=sys.stderr)

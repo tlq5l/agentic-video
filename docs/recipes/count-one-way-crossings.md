@@ -8,7 +8,7 @@ Paste into your agent:
 
 > Use agentic-video count_occurrences on `/path/to/video.mp4` for the purple diamond, counting only left-to-right passes. List each span's time, then check each one with inspect_window at its representative_sec.
 
-Tool call. `count_occurrences` runs as a background job inside the process that starts it. The one-line `call` form returns `status: in_progress` and never finishes, because each CLI run is a new process. Send the request to one server process, wait, and send it again in that same process:
+Tool call. `count_occurrences` runs as a background job inside the process that starts it. The one-line `call` form keeps asking inside its own process until the job finishes (15 minutes at most), so it prints the final count. An MCP client gets the same by sending the request to one server process, waiting, and sending it again in that same process:
 
 ```sh
 { echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
