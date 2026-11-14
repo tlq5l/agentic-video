@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 import jsonschema
+import numpy as np
 from PIL import Image
 
 import src.executor.mcp_server as mcp_server
@@ -305,4 +306,52 @@ def test_motion_open_disk_origin_matches_its_output_schema(tmp_path, monkeypatch
     assert reopened["ok"] and reopened["data"]["origin"] == "disk", reopened
     schema = json.loads((REPO / "src" / "adapters" / "mcp_schemas.json").read_text(encoding="utf-8"))["tools"]["motion_open"]["outputSchema"]
     jsonschema.validate(reopened["data"], schema)
+    motion_probe.clear_memory_store()
+
+
+def test_one_pixel_move_is_not_a_duplicate_frame(tmp_path, monkeypatch):
+    """A 1-pixel dot that moves on every frame of a 256x256 clip is motion, so motion_profile reports no
+    duplicate frame. Old code flagged every frame: one moving dot changes the frame mean by about 0.008 levels,
+    under DUP_LEVEL 0.05."""
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    motion_probe.clear_memory_store()
+    frames = []
+    for t in range(16):
+        frame = Image.new("RGB", (256, 256), (128, 128, 128))
+        frame.putpixel((40 + t, 120), (255, 255, 255))
+        frames.append(frame)
+    clip = tmp_path / "dot-move.gif"
+    frames[0].save(clip, save_all=True, append_images=frames[1:], duration=40, loop=0)
+    reply = mcp_server.handle_call("motion_profile", {"source": str(clip)})
+    assert reply["ok"], reply
+    dups = [f["frame"] for f in reply["data"]["flags"] if f["kind"] == "duplicate"]
+    assert dups == [], dups
+    motion_probe.clear_memory_store()
+
+
+def test_repeated_frames_still_count_as_duplicates(tmp_path, monkeypatch):
+    """Frames that repeat the one before with codec-like +-1 noise on 5 percent of pixels are still duplicate
+    frames. The other frames carry a moving 1-pixel dot, so the repeats must appear among the flags."""
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    motion_probe.clear_memory_store()
+    rng = np.random.default_rng(5)
+    repeats = {3, 7, 10}
+    frames, prev = [], None
+    for t in range(12):
+        if t in repeats:
+            base = prev.astype(np.int64)
+            mask = rng.random(base.shape[:2]) < 0.05
+            noise = rng.integers(-1, 2, size=base.shape) * mask[..., None]
+            cur = np.clip(base + noise, 0, 255).astype(np.uint8)
+        else:
+            cur = np.full((256, 256, 3), 128, np.uint8)
+            cur[60, 20 + t] = 255
+        frames.append(Image.fromarray(cur))
+        prev = cur
+    clip = tmp_path / "repeats.gif"
+    frames[0].save(clip, save_all=True, append_images=frames[1:], duration=40, loop=0)
+    reply = mcp_server.handle_call("motion_profile", {"source": str(clip)})
+    assert reply["ok"], reply
+    dups = {f["frame"] for f in reply["data"]["flags"] if f["kind"] == "duplicate"}
+    assert repeats <= dups, dups
     motion_probe.clear_memory_store()

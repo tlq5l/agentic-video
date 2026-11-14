@@ -13,6 +13,8 @@ Measures, on luma 0-255:
 - boil: mean |f_t - (f_{t-1} + f_{t+1}) / 2| over still pixels, all frames. Flicker where
   nothing should move. (The temporal-std version failed its planted test: it reads slow drift
   as boil.)
+- peak[t]: largest |frame t - frame t-1| over any pixel. A frame is a duplicate only when change[t] < DUP_LEVEL and
+  peak[t] <= DUP_MAX_DIFF, so one pixel that moves is motion, not a repeat.
 - speed[t]: mean |frame t - frame t-1| counting only changes above 2 levels. A stand-in for
   the moving parts' speed; there is no optical flow, cv2 is not a repo dependency.
 """
@@ -31,7 +33,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from src.core.cache import MediaCache
 
-VERSION = "motion-v1"
+VERSION = "motion-v2"  # v2 adds the per-frame peak array; v1 entries are rebuilt
 BLOCK = 8
 STILL_T = 2.0
 WIDTH_CAP = 512
@@ -45,10 +47,11 @@ STUTTER_FLOOR = 0.05  # fraction of the median speed; stops near-zero neighbours
 FREEZE_RATIO = 0.10
 FREEZE_MIN_RUN = 2
 DUP_LEVEL = 0.05
+DUP_MAX_DIFF = 24  # luma levels: lossy-codec noise on true copies peaked at 18; a 1-pixel move peaks at 105 or more
 SEAM_RATIO = 3.0
 BOIL_FAULT_DELTA = 1.0
 STORE_MAX_BYTES = 384 * 1024 * 1024
-ARRAYS = ("rgb", "change", "speed", "still", "flicker", "median")
+ARRAYS = ("rgb", "change", "peak", "speed", "still", "flicker", "median")
 DEFAULT_FIXTURE = Path(__file__).resolve().parent / "clean-sprite-256.gif"  # ships in the wheel with src/
 
 
@@ -157,6 +160,7 @@ def build_index(rgb: np.ndarray) -> Dict[str, Any]:
                    ((0, h - hb * BLOCK), (0, w - wb * BLOCK)), mode="edge")
     change = np.empty(n, np.float64)
     speed = np.empty(n, np.float64)
+    peak = np.empty(n, np.float64)
     flicker_acc = np.zeros((h, w), np.float32)
     for t in range(n):
         cur = lum[t].astype(np.float32)
@@ -164,6 +168,7 @@ def build_index(rgb: np.ndarray) -> Dict[str, Any]:
         nxt = lum[(t + 1) % n].astype(np.float32)
         d = np.abs(cur - prev)
         change[t] = d.mean()
+        peak[t] = d.max()
         speed[t] = np.where(d > STILL_T, d, 0.0).mean()
         flicker_acc += np.abs(cur - (prev + nxt) / 2)
     flicker = flicker_acc / n
@@ -172,12 +177,12 @@ def build_index(rgb: np.ndarray) -> Dict[str, Any]:
     median = np.partition(rgb[sub], k, axis=0)[k]
     boil = float(flicker[still].mean()) if still.any() else 0.0
     return {
-        "change": change, "speed": speed, "still": still, "flicker": flicker, "median": median,
+        "change": change, "peak": peak, "speed": speed, "still": still, "flicker": flicker, "median": median,
         "scalars": {"boil": boil, "still_frac": float(still.mean())},
     }
 
 
-def find_flags(change: np.ndarray, speed: np.ndarray) -> List[Dict[str, Any]]:
+def find_flags(change: np.ndarray, speed: np.ndarray, peak: np.ndarray) -> List[Dict[str, Any]]:
     """stutter, freeze, duplicate and loop_seam flags, each with its frame index."""
     n = len(change)
     flags: List[Dict[str, Any]] = []
@@ -188,7 +193,7 @@ def find_flags(change: np.ndarray, speed: np.ndarray) -> List[Dict[str, Any]]:
         base = max(float(np.median(neigh)), floor)
         if base > 0 and speed[t] > STUTTER_RATIO * base:
             flags.append({"kind": "stutter", "frame": t, "value": round(float(speed[t] / base), 2)})
-        if change[t] < DUP_LEVEL:
+        if change[t] < DUP_LEVEL and peak[t] <= DUP_MAX_DIFF:
             flags.append({"kind": "duplicate", "frame": t, "value": round(float(change[t]), 3)})
     if med_speed > 0:
         low = speed < FREEZE_RATIO * med_speed
@@ -544,7 +549,7 @@ def _tool_zoom(args: Dict[str, Any]) -> Dict[str, Any]:
 def _tool_profile(args: Dict[str, Any]) -> Dict[str, Any]:
     clip, origin = _clip(args["source"])
     idx = clip.index
-    flags = find_flags(idx["change"], idx["speed"])
+    flags = find_flags(idx["change"], idx["speed"], idx["peak"])
     counts: Dict[str, int] = {}
     for f in flags:
         counts[f["kind"]] = counts.get(f["kind"], 0) + 1
@@ -638,7 +643,7 @@ def _plant(rgb: np.ndarray, fault: str, still: np.ndarray) -> np.ndarray:
 
 def selftest_report(rgb: np.ndarray) -> Dict[str, Any]:
     clean = build_index(rgb)
-    clean_flags = find_flags(clean["change"], clean["speed"])
+    clean_flags = find_flags(clean["change"], clean["speed"], clean["peak"])
     clean_boil = clean["scalars"]["boil"]
     kinds = {"dropped_frames": "stutter", "swapped_frames": "stutter", "duplicated_frame": "duplicate",
              "frozen_hold": "freeze", "loop_seam_jump": "loop_seam"}
@@ -646,7 +651,7 @@ def selftest_report(rgb: np.ndarray) -> Dict[str, Any]:
 
     def run_fault(fault: str) -> Dict[str, Any]:
         idx = build_index(_plant(rgb, fault, clean["still"]))
-        flags = find_flags(idx["change"], idx["speed"])
+        flags = find_flags(idx["change"], idx["speed"], idx["peak"])
         hits = [f for f in flags if f["kind"] == kinds[fault]]
         return {"caught": bool(hits), "evidence": hits[:2]}
 
