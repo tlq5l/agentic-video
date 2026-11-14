@@ -201,10 +201,10 @@ def _token_source_set() -> bool:
 def start_after_fresh_run(source_path: str, model_size: str, result: Any, fingerprint: str,
                           local_wall_sec: float) -> bool:
     """Start the shadow job for one fresh local run. Returns True when a child was started. Never raises.
-    The cheap checks (switch, account id, token source, trial) all run before the token command, so a refused run starts no process."""
+    The cheap checks (switch, Workers AI on, account id, token source, trial) all run before the token command, so a refused run starts no process."""
     job_path = None
     try:
-        if not _switch_names_this_host() or not _account_id_set() or not _token_source_set():
+        if not _switch_names_this_host() or not cloudflare.WORKERS_AI_ON or not _account_id_set() or not _token_source_set():
             return False
         if not _trial_open(admit=False):  # the child admits the job itself, right before it sends
             return False

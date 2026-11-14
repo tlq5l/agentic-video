@@ -6,7 +6,7 @@ How a user reaches it: the `watch_for` tool, and `python -m src.media.watch VIDE
 
 Code: `src/media/watch.py` (`watch_for`, `find_wakes`, `_ask`), `src/media/cloudflare.py` (credentials shared with label_sounds), `src/retrieval/engine.py` (`AgenticVideoEngine.watch_for`), `src/executor/mcp_server.py` (dispatch), contract in `src/adapters/mcp_schemas.json`, `src/adapters/mcp_definitions.ts`, `src/executor/types.d.ts`.
 
-How to check it works: `pytest tests/test_watch_for.py tests/test_cloud_token_command.py` (a local stand-in for Cloudflare answers, so no credentials are needed; the live test runs only with `CLOUDFLARE_ACCOUNT_ID` plus `CLOUDFLARE_API_TOKEN` or `AGENTIC_VIDEO_CF_TOKEN_COMMAND`). Live: call the tool on a clip where something appears and check that `wakes` has its time within one `interval_sec` of the first sample that shows it.
+How to check it works: `pytest tests/test_watch_for.py tests/test_cloud_token_command.py` (a local stand-in for Cloudflare answers, so no credentials are needed; the live test runs only with `CLOUDFLARE_ACCOUNT_ID` plus `CLOUDFLARE_API_TOKEN` or `AGENTIC_VIDEO_CF_TOKEN_COMMAND`). Live: call the tool on a clip where something appears and check that `wakes` has its time within one `interval_sec` of the first sample that shows it. While Workers AI is switched off (owner 2026-11-14), the feature tests in that command skip and only the refusal tests run.
 
 What depends on it: nothing else calls it; `AGENTS.md` points to it.
 
