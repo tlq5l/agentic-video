@@ -1,7 +1,8 @@
 """Local CLIP retrieval: bounded chunks, transactional resume, nonblocking jobs.
 
-No model downloads occur at tool runtime. Install requirements-visual.txt and
-pre-fetch the model explicitly. One build and one search worker run per process.
+No model downloads occur at tool runtime. Install the visual extra
+(pip install 'agentic-video[visual]'; in a source checkout, requirements-visual.txt)
+and pre-fetch the model explicitly. One build and one search worker run per process.
 """
 import heapq
 import errno
