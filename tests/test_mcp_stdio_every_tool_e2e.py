@@ -1,15 +1,18 @@
 """End to end over the stdio MCP server: a subprocess reads JSON-RPC lines on stdin and answers on stdout, as an MCP client drives it.
 
-The every-tool test calls each tool once with valid small arguments on a 5 s clip and checks that each call gets its own JSON-RPC reply.
+The every-tool test calls each tool once with valid small arguments on a 5 s clip, lets the jobs those calls start settle, and checks that each call gets its own JSON-RPC reply.
 The protocol test checks two stdio rules: a notification (no id) gets no reply, and ping gets an empty result.
 """
 
 import json
 import os
+import queue
 import shlex
 import shutil
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -24,6 +27,8 @@ VISUAL_HINT = "python -m pip install 'agentic-video[visual]'"
 WEIGHTS_HINT = "needs the CLIP model weights"
 # Statuses a visual tool may return without an error on a first call (visual.py and the job record it reads from).
 VISUAL_LIVE_STATUSES = ("queued", "running", "in_progress", "busy", "partial", "complete", "index_required")
+# A job still working: the same tool call polls it, as the CLI does (mcp_server._settled_call settles on these too).
+JOB_STATUSES = ("queued", "running", "in_progress", "busy")
 INITIALIZE = {"jsonrpc": "2.0", "id": 1, "method": "initialize",
               "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "test", "version": "0"}}}
 INITIALIZED = {"jsonrpc": "2.0", "method": "notifications/initialized"}
@@ -83,27 +88,112 @@ def _talk(lines, tmp_path):
     return [json.loads(line) for line in done.stdout.splitlines()]
 
 
+def _status(result):
+    status = (result.get("structuredContent") or {}).get("status")
+    if status is None:
+        try:
+            status = json.loads(result["content"][0]["text"]).get("status")
+        except (KeyError, IndexError, TypeError, ValueError, AttributeError):
+            status = None
+    return status
+
+
+class _Server:
+    """One stdio server process kept open: requests go in as the test makes them, replies come back by id, and stdin closes only on close()."""
+
+    def __init__(self, tmp_path):
+        home = tmp_path / "home"
+        home.mkdir(exist_ok=True)
+        self.stderr_path = tmp_path / "server-stderr.txt"
+        self.stderr = self.stderr_path.open("w")
+        self.proc = subprocess.Popen([sys.executable, "-m", "src.executor.mcp_server"], stdin=subprocess.PIPE,
+                                     stdout=subprocess.PIPE, stderr=self.stderr, text=True, cwd=ROOT, env=_server_env(home))
+        self.replies = queue.Queue()
+        self.by_id = {}
+        threading.Thread(target=self._read_replies, daemon=True).start()
+
+    def _read_replies(self):
+        for line in self.proc.stdout:
+            self.replies.put(json.loads(line))
+        self.replies.put(None)  # stdout closed
+
+    def send(self, message):
+        self.proc.stdin.write(json.dumps(message) + "\n")
+        self.proc.stdin.flush()
+
+    def reply(self, request_id, timeout_sec=600):
+        deadline = time.monotonic() + timeout_sec
+        while request_id not in self.by_id:
+            try:
+                item = self.replies.get(timeout=max(0.0, deadline - time.monotonic()))
+            except queue.Empty:
+                raise AssertionError(f"no reply to request {request_id} within {timeout_sec} s") from None
+            assert item is not None, "the server closed stdout before replying"
+            self.by_id[item.get("id")] = item
+        return self.by_id[request_id]
+
+    def close(self, timeout_sec=600):
+        """Close stdin, the server's end of file; return its exit code and its stderr text."""
+        self.proc.stdin.close()
+        returncode = self.proc.wait(timeout=timeout_sec)
+        self.stderr.close()
+        return returncode, self.stderr_path.read_text()
+
+    def abort(self):
+        """Stop the server if a failed assertion left it running."""
+        if self.proc.poll() is None:
+            self.proc.kill()
+            self.proc.wait()
+        self.stderr.close()
+
+
+def _settle_jobs(server, pending, next_id, timeout_sec=600):
+    """Repeat each pending tool call (name -> request) until its job leaves JOB_STATUSES. The same call polls the same job."""
+    deadline = time.monotonic() + timeout_sec
+    while pending:
+        assert time.monotonic() < deadline, f"jobs still running after {timeout_sec} s: {sorted(pending)}"
+        time.sleep(1)
+        for name, request in list(pending.items()):
+            server.send({**request, "id": next_id})
+            reply = server.reply(next_id)
+            next_id += 1
+            assert "result" in reply, (name, reply)
+            if _status(reply["result"]) not in JOB_STATUSES:
+                del pending[name]
+
+
 def test_every_tool_answers_over_stdio(clip, tmp_path):
     args = _good_args(clip)
     args["count_repetitions"] = {**args["count_repetitions"], "end_sec": 5}  # this clip is 5 s; the shared matrix clip is 6 s
     listing_id = 2
     calls = {name: 3 + index for index, name in enumerate(args)}
-    lines = [INITIALIZE, INITIALIZED, {"jsonrpc": "2.0", "id": listing_id, "method": "tools/list"}]
-    lines += [{"jsonrpc": "2.0", "id": calls[name], "method": "tools/call", "params": {"name": name, "arguments": args[name]}}
-              for name in args]
-    replies = {reply.get("id"): reply for reply in _talk(lines, tmp_path)}
-    state = _visual_state()
+    requests = {name: {"jsonrpc": "2.0", "id": calls[name], "method": "tools/call", "params": {"name": name, "arguments": args[name]}}
+                for name in args}
+    server = _Server(tmp_path)
+    try:
+        for message in (INITIALIZE, INITIALIZED, {"jsonrpc": "2.0", "id": listing_id, "method": "tools/list"}, *requests.values()):
+            server.send(message)
+        replies = {request_id: server.reply(request_id) for request_id in (listing_id, *calls.values())}
+        state = _visual_state()
 
-    listed = {tool["name"] for tool in replies[listing_id]["result"]["tools"]}
-    assert listed == set(args), f"tools without valid arguments here: {sorted(listed ^ set(args))}"
-    for name, request_id in calls.items():
-        reply = replies.get(request_id)
-        assert reply is not None and "result" in reply, (name, reply)
-        text = "".join(item.get("text", "") for item in reply["result"]["content"])
-        assert "Traceback" not in text, (name, text[:500])
-        if name in VISUAL_TOOLS:
-            _assert_visual_reply(name, reply, text, state)
+        listed = {tool["name"] for tool in replies[listing_id]["result"]["tools"]}
+        assert listed == set(args), f"tools without valid arguments here: {sorted(listed ^ set(args))}"
+        for name, request_id in calls.items():
+            reply = replies[request_id]
+            assert "result" in reply, (name, reply)
+            text = "".join(item.get("text", "") for item in reply["result"]["content"])
+            assert "Traceback" not in text, (name, text[:500])
+            if name in VISUAL_TOOLS:
+                _assert_visual_reply(name, reply, text, state)
 
+        # Stdin closes only after the jobs the calls started have settled, so this checks that each tool answers, not what the server does at shutdown.
+        pending = {name: requests[name] for name, request_id in calls.items() if _status(replies[request_id]["result"]) in JOB_STATUSES}
+        _settle_jobs(server, pending, max(calls.values()) + 1)
+        returncode, stderr = server.close()
+    finally:
+        server.abort()
+    assert returncode == 0, stderr[-2000:]
+    assert "Traceback" not in stderr, stderr[-2000:]
 
 def test_notifications_get_no_reply_and_ping_gets_an_empty_result(tmp_path):
     lines = [INITIALIZE, INITIALIZED,
