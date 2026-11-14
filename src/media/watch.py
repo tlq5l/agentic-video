@@ -1,6 +1,8 @@
 """Watch a video for yes/no conditions with Cloudflare Workers AI (Clef).
 
-One frame every ``interval_sec`` is cut out with FFmpeg and sent with every
+Switched off: Cloudflare Workers AI is not used; this option refuses before sending anything.
+
+When it is switched on, one frame every ``interval_sec`` is cut out with FFmpeg and sent with every
 condition as a yes/no question; Clef returns a chance of "yes" for each. A
 condition wakes the caller when its chance is at or above ``cut`` on
 ``consecutive`` samples in a row, and at most once per ``cooldown_sec``. The
@@ -252,7 +254,7 @@ def watch_for(
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
-    parser = argparse.ArgumentParser(description="Watch a video for yes/no conditions (sends frames to Cloudflare Workers AI).")
+    parser = argparse.ArgumentParser(description="Watch a video for yes/no conditions. Switched off: Cloudflare Workers AI is not used; this option refuses before sending anything.")
     parser.add_argument("video")
     parser.add_argument("--when", action="append", required=True, metavar="QUESTION", help="a yes/no question about one frame; repeat for several")
     parser.add_argument("--start", type=float, default=0.0)

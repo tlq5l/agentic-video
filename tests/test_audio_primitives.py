@@ -12,6 +12,7 @@ from PIL import Image
 
 from src.core.cache import MediaCache
 from src.core.config import Config
+from src.executor import mcp_server
 from src.executor.mcp_server import handle_call, tool_call_response
 from src.media import audio
 from src.media.audio import _outlier_sections, audio_onsets, loudness_timeline, spectrogram_window, sync_check
@@ -395,3 +396,71 @@ def test_audio_onsets_merged_count_includes_strength_pass(tmp_path, monkeypatch)
 
     assert result["total"] == 1
     assert result["merged_count"] == 1
+
+
+CLICKS = [0.5, 1.0, 1.5, 2.0, 2.5]
+QUIET_BEEPS = [0.75, 1.25, 1.75, 2.25]
+
+
+def _planted_starts(duration, clicks, beeps, noise=0.0, seed=3):
+    """Loud clicks at `clicks`, quiet 2 kHz beeps (30 ms, 0.06 peak) at `beeps`, over optional white noise."""
+    rng = np.random.default_rng(seed)
+    samples = _clicks(duration, clicks) + rng.normal(0.0, noise, int(duration * RATE)).astype(np.float32)
+    count = int(0.03 * RATE)
+    local_time = np.arange(count, dtype=np.float32) / RATE
+    for timestamp in beeps:
+        first = int(round(timestamp * RATE))
+        samples[first:first + count] += (0.06 * np.sin(2 * np.pi * 2000 * local_time) * np.hanning(count)).astype(np.float32)
+    return samples
+
+
+def test_audio_onsets_keeps_every_click_and_adds_quiet_beeps_through_handle_call(monkeypatch, tmp_path):
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    clicks_only = _write_wav(tmp_path / "clicks.wav", _planted_starts(3.0, CLICKS, []))
+    with_beeps = _write_wav(tmp_path / "clicks-beeps.wav", _planted_starts(3.0, CLICKS, QUIET_BEEPS))
+
+    alone = handle_call("audio_onsets", {"source": str(clicks_only)})
+    union = handle_call("audio_onsets", {"source": str(with_beeps)})
+
+    assert alone["ok"] is True and union["ok"] is True
+    alone_times = [onset["time_sec"] for onset in alone["data"]["onsets"]]
+    union_times = [onset["time_sec"] for onset in union["data"]["onsets"]]
+    assert len(alone_times) == len(CLICKS)
+    # Every start found without the beeps is still found with them, and each planted beep is added.
+    assert all(any(abs(hit - target) <= 0.01 for hit in union_times) for target in alone_times)
+    assert all(any(abs(hit - target) <= 0.01 for hit in union_times) for target in QUIET_BEEPS)
+    assert len(union_times) == len(CLICKS) + len(QUIET_BEEPS)
+
+
+@pytest.mark.parametrize("min_gap_sec", [0.035, 0.05])
+def test_audio_onsets_never_lists_two_starts_closer_than_min_gap(monkeypatch, tmp_path, min_gap_sec):
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    # Noise bed: the detectors fire many close starts here, so the gap has real work to do.
+    source = _write_wav(tmp_path / "noisy.wav", _planted_starts(3.0, CLICKS, QUIET_BEEPS, noise=0.002))
+
+    unmerged = handle_call("audio_onsets", {"source": str(source), "min_gap_sec": 0})["data"]
+    result = handle_call("audio_onsets", {"source": str(source), "min_gap_sec": min_gap_sec})
+    times = [onset["time_sec"] for onset in result["data"]["onsets"]]
+
+    assert result["ok"] is True
+    assert result["data"]["total"] < unmerged["total"]
+    assert len(times) > len(CLICKS)
+    assert all(later - earlier >= min_gap_sec - 1e-6 for earlier, later in zip(times, times[1:]))
+
+
+def test_audio_onsets_reply_is_capped_and_says_how_many_it_left_out(monkeypatch, tmp_path):
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    source = _write_wav(tmp_path / "clicks-beeps.wav", _planted_starts(3.0, CLICKS, QUIET_BEEPS))
+    everything = handle_call("audio_onsets", {"source": str(source)})["data"]
+    # The cap is a module constant; 4 is small enough that this clip goes over it.
+    monkeypatch.setattr(mcp_server, "MAX_ONSETS", 4)
+
+    response = handle_call("audio_onsets", {"source": str(source)})
+
+    assert response["ok"] is True
+    capped = response["data"]
+    assert everything["total"] > 4
+    assert len(capped["onsets"]) == 4
+    assert capped["onsets_omitted"] == everything["total"] - 4
+    assert all(item in everything["onsets"] for item in capped["onsets"])
+    assert "(5 omitted" in capped["note"]

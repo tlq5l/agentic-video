@@ -1285,7 +1285,7 @@ class AgenticVideoEngine:
         consecutive: int = 2,
         cooldown_sec: float = 30.0,
     ) -> Dict[str, Any]:
-        """Wake on yes/no conditions found in sampled frames by a cloud model (sends frames to Cloudflare)."""
+        """Wake on yes/no conditions found in sampled frames by a cloud model (Cloudflare Workers AI). Switched off: Cloudflare Workers AI is not used; this option refuses before sending anything."""
         return watch_frames(
             self.source_path, conditions, start_sec=start_sec, end_sec=end_sec, interval_sec=interval_sec,
             cut=cut, consecutive=consecutive, cooldown_sec=cooldown_sec, cache=self._cache,
@@ -1298,7 +1298,7 @@ class AgenticVideoEngine:
         labels: Optional[List[str]] = None,
         window_sec: float = 5.0,
     ) -> Dict[str, Any]:
-        """Name the sounds in audio windows with a cloud model (sends the audio to Cloudflare)."""
+        """Name the sounds in audio windows with a cloud model (Cloudflare Workers AI). Switched off: Cloudflare Workers AI is not used; this option refuses before sending anything."""
         return name_sounds(self.source_path, start_sec, end_sec, labels=labels, window_sec=window_sec)
 
     def build_evidence(

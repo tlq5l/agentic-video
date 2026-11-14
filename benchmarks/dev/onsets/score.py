@@ -299,7 +299,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         import noloss
 
         baseline = Path(args.baseline_audio) if args.baseline_audio else noloss.export_ref(args.baseline_ref, work / "noloss" / "baseline_audio.py")
-        noloss.run(baseline, args.family or ["legacy", "real", "short", "pair", "ranged"], work / "noloss")
+        summary = noloss.run(baseline, args.family or ["legacy", "real", "short", "pair", "ranged"], work / "noloss")
+        if sum(row["lost"] for row in summary.values()):
+            sys.exit(1)  # a planted start the baseline finds and this tree misses
         return
     if args.split is None:
         parser.error("--split is required")

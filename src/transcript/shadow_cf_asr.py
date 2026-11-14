@@ -1,10 +1,12 @@
 """Shadow trial: send each fresh local transcription's audio to Cloudflare and log both transcripts.
 
+Switched off: Cloudflare Workers AI is not used; this option refuses before sending anything.
+
 Model: @cf/openai/whisper-large-v3-turbo. The request body (audio as base64, language, vad_filter) and the
 reply (result.text and result.segments with start, end and text) follow Cloudflare's docs:
 https://developers.cloudflare.com/workers-ai/models/whisper-large-v3-turbo/ (schema-input.json and schema-output.json).
 
-This SENDS AUDIO TO CLOUDFLARE. It is a trial switch for the maintainer only: it runs only when
+When Workers AI is switched on, this SENDS AUDIO TO CLOUDFLARE. It is a trial switch for the maintainer only: it runs only when
 AGENTIC_VIDEO_SHADOW_CF_ASR names this machine's hostname, and it stops by itself after 14 days or 200 uses.
 The user never gets its output; the local transcript is returned unchanged.
 
