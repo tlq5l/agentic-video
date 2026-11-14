@@ -8,7 +8,7 @@
     {
       "name": "agentic-video",
       "source": "./",
-      "version": "0.3.6",
+      "version": "0.3.7",
       "description": "Look at, listen to and check local video files: contact sheets, transcripts, cuts, loudness and sync checks"
     }
   ]
