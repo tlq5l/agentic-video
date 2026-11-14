@@ -8,4 +8,4 @@
 - On Linux and Windows, `count_occurrences` with `text` and `read_text` say that Apple Vision runs only on macOS, instead of giving a pip install command that cannot supply it. The macOS message is unchanged. (#90)
 - The README's MCP and Python examples say they run from a git checkout, because a pip install has no `fixtures/` folder; pip users are pointed to their own video. (#89)
 - Docs: the Claude Desktop bundle page quotes the current ffmpeg error text word for word.
-- Pending: MCP stdio fixes on branch `fix/mcp-stdio-every-tool`. Not merged yet; this line is a placeholder until it lands.
+- MCP over stdio: a notification (a message with no id) gets no reply, as JSON-RPC requires, and `ping` returns an empty result instead of "Method not found". All 33 tools were run once over stdio on 0.3.7 and main; each answered.
