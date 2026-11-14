@@ -533,3 +533,44 @@ def test_search_visual_without_clip_returns_setup_error_at_once(tmp_path, monkey
     source = _make_video(tmp_path / "colors.mp4")
     with pytest.raises(RuntimeError, match="Visual search needs requirements-visual.txt"):
         mcp_server.handle_call("search_visual", {"source": str(source), "query": "red"})
+
+
+def test_missing_clip_weights_answer_at_once_without_loading_or_downloading(tmp_path, monkeypatch):
+    """Packages importable, CLIP weights not in the Hugging Face cache: search_visual and build_visual_index must
+    answer at once with the weights setup error (no queued/index_required polling loop), load nothing and start no download."""
+    import importlib.machinery
+    import sys
+    import types
+
+    from src.executor import mcp_server
+
+    loads = []
+
+    def stub(name):
+        module = types.ModuleType(name)
+        module.__spec__ = importlib.machinery.ModuleSpec(name, None)
+        return module
+
+    class NoCachedWeights:
+        @classmethod
+        def from_pretrained(cls, model_id, **kwargs):
+            loads.append(model_id)
+            raise OSError(f"{model_id} is not a cached local model")
+
+    torch = stub("torch")
+    torch.set_num_threads = lambda threads: None
+    transformers = stub("transformers")
+    transformers.CLIPModel = NoCachedWeights
+    transformers.CLIPProcessor = NoCachedWeights
+    monkeypatch.setitem(sys.modules, "torch", torch)
+    monkeypatch.setitem(sys.modules, "transformers", transformers)
+    monkeypatch.delenv("HF_HUB_CACHE", raising=False)
+    monkeypatch.setenv("HF_HOME", str(tmp_path / "empty-hf"))
+    monkeypatch.setenv("HF_HUB_OFFLINE", "1")
+    source = _make_video(tmp_path / "colors.mp4")
+    for operation, args in (("search_visual", {"source": str(source), "query": "red"}),
+                            ("build_visual_index", {"source": str(source)})):
+        with pytest.raises(RuntimeError, match="needs the CLIP model weights") as caught:
+            mcp_server.handle_call(operation, args)
+        assert "snapshot_download" in str(caught.value) and "Nothing was downloaded" in str(caught.value)
+    assert loads == [] and not (tmp_path / "empty-hf").exists()
