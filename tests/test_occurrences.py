@@ -553,3 +553,42 @@ def test_direction_narrows_the_count_through_the_mcp_tool(tmp_path, monkeypatch)
     assert "holds only" not in down["verify"]
     with pytest.raises(ValueError, match="argument 'direction'"):
         mcp_server.handle_call("count_occurrences", {"source": str(clip), "description": "green diamond", "direction": "up"})
+
+
+def test_direction_lists_the_spans_it_leaves_out(tmp_path, monkeypatch):
+    """Guards excluded_spans through handle_call: one green diamond crosses left to right, turns and comes back, so it is one
+    span that reads stationary. With direction=left_to_right the filter leaves that span out of count and spans, and
+    excluded_spans lists it; with direction=any nothing is left out and excluded_spans is empty."""
+    from src.core.config import Config
+    from src.executor import mcp_server
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+
+    def bounce(d, t):  # left to right over 0-2 s, back right to left over 2-4 s, never off screen
+        if t < 4.0:
+            phase = t / 2.0 if t < 2.0 else (4.0 - t) / 2.0
+            shape(d, "diamond", 40 + (W * 0.8 - 40) * phase, 100, 14, GREEN)
+
+    clip = make_clip(tmp_path / "bounce.mp4", 5, bounce, crf="0")
+
+    def call(**args):
+        for _ in range(600):
+            data = mcp_server.handle_call("count_occurrences", {"source": str(clip), "description": "green diamond", **args})["data"]
+            if data["status"] != "in_progress":
+                return data
+            time.sleep(0.5)
+        raise AssertionError("count_occurrences did not finish")
+
+    passes = call(direction="left_to_right")
+    assert passes["count"] == 0 and passes["spans"] == []
+    (left_out,) = passes["excluded_spans"]
+    assert left_out["start_sec"] == pytest.approx(0.0, abs=0.25) and left_out["end_sec"] == pytest.approx(4.0, abs=0.25)
+    assert left_out["travel"] == "stationary"
+    everything = call()
+    assert everything["count"] == 1 and [span["travel"] for span in everything["spans"]] == ["stationary"]
+    assert everything["excluded_spans"] == []
+    for cached in (tmp_path / "cache").rglob("*.occurrences.json"):  # rewrite each stored result as one from before the field
+        stored = json.loads(cached.read_text())
+        stored.pop("excluded_spans")
+        cached.write_text(json.dumps(stored))
+    fresh = count(clip, tmp_path, description="green diamond")  # a fresh engine reads the disk cache
+    assert fresh["count"] == 1 and fresh["excluded_spans"] == []

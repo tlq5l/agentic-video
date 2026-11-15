@@ -722,7 +722,9 @@ def count_video(engine, progress=lambda done, total: None, **args):
     result_path = cache_dir / f"{tag}.occurrences.json"
     if result_path.exists():
         cached = json.loads(result_path.read_text())
-        if not cached["contact_sheet"] or Path(cached["contact_sheet"]["file_path"]).exists():
+        # stored before the excluded_spans field existed: recount from the saved judgments rather than serve it
+        fresh = "excluded_spans" in cached
+        if fresh and (not cached["contact_sheet"] or Path(cached["contact_sheet"]["file_path"]).exists()):
             return cached
     # Only SpanBuilder reads min_gap_sec and max_spans, so the per-frame judgments are kept under a key without them.
     judgments_path = cache_dir / f"{hashlib.sha256(json.dumps(judged).encode()).hexdigest()[:20]}.judgments.json"
@@ -743,6 +745,9 @@ def count_video(engine, progress=lambda done, total: None, **args):
     filtered = direction != "any"
     travels = [_direction(span["points"], mark_brief=filtered) for span in spans]
     matched = [span for span, way in zip(spans, travels) if not filtered or way in (direction, "unknown")]
+    left_out = [(span, way) for span, way in zip(spans, travels) if filtered and way not in (direction, "unknown")]
+    excluded_spans = [{"start_sec": round(span["start"], 3), "end_sec": round(min(span["end"], end), 3), "travel": way}
+                      for span, way in left_out]
     shown = matched[:max_spans]
     missing_tiles = [span for span in shown[:SHEET_TILES] if span["rep"][3] is None]  # replayed runs, or spans past the builder's tile limit
     if missing_tiles:
@@ -759,7 +764,8 @@ def count_video(engine, progress=lambda done, total: None, **args):
     omitted = len(matched) - len(shown)
     spec = judge.spec
     result = {"status": "complete", "count": None if capped else len(matched), "spans": entries, "spans_returned": len(shown),
-              "spans_omitted": omitted, "window": {"start_sec": round(start, 3), "end_sec": round(end, 3)},
+              "spans_omitted": omitted, "excluded_spans": excluded_spans,
+              "window": {"start_sec": round(start, 3), "end_sec": round(end, 3)},
               "fps_used": fps, "frames_sampled": total, "frames_analyzed": analyzed,
               "checks": {"text": text, "description": description, "color": spec and spec["color"],
                          "shape": spec and (spec["shape"] or spec["other_shape"])},
