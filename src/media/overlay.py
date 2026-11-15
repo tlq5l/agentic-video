@@ -1,4 +1,6 @@
 """Pillow-based deterministic timestamp burning and visual badges."""
+import os
+import tempfile
 from pathlib import Path
 from typing import Union, Tuple, Optional
 from PIL import Image, ImageDraw, ImageFont
@@ -85,7 +87,18 @@ def apply_overlay_to_file(
     
     with Image.open(in_path) as im:
         annotated = burn_timestamp_badge(im.copy(), timestamp_sec, frame_index, position=position)
-        annotated.save(out_path, quality=90)
+        suffix = out_path.suffix or ".jpg"
+        fd, tmp_name = tempfile.mkstemp(dir=str(out_path.parent), suffix=suffix)
+        os.close(fd)
+        try:
+            annotated.save(tmp_name, quality=90)
+            os.replace(tmp_name, out_path)
+        except BaseException:
+            try:
+                os.unlink(tmp_name)
+            except FileNotFoundError:
+                pass
+            raise
     return str(out_path)
 
 

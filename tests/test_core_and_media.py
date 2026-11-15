@@ -113,3 +113,34 @@ def test_mcp_server_dispatch():
     res = handle_call("inspect_window", {"source": FIXTURE_VIDEO, "start_sec": 14.0, "end_sec": 15.0, "fps": 2.0})
     assert res["ok"] is True
     assert "tool_file" in res["data"]
+
+
+def test_output_path_reused_for_other_video_is_not_returned_as_cached(tmp_path, monkeypatch):
+    import subprocess as sp
+    from PIL import Image
+    from src.media import frames as frames_mod
+
+    video_a = tmp_path / "videoA.mp4"
+    video_b = tmp_path / "videoB.mp4"
+    video_a.write_bytes(b"video A bytes")
+    video_b.write_bytes(b"different video B bytes")
+
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        target = cmd[-1]
+        color = (255, 0, 0) if len(calls) == 1 else (0, 0, 255)
+        Image.new("RGB", (320, 180), color=color).save(target)
+        return sp.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(frames_mod.subprocess, "run", fake_run)
+
+    cache = MediaCache(base_dir=tmp_path / "cache")
+    out = tmp_path / "a.jpg"
+    first = extract_single_frame(video_a, 1.0, output_path=out, overlay_timestamp=False, cache=cache)
+    first_bytes = Path(first.file_path).read_bytes()
+    second = extract_single_frame(video_b, 9.0, output_path=out, overlay_timestamp=False, cache=cache)
+
+    assert len(calls) == 2
+    assert Path(second.file_path).read_bytes() != first_bytes

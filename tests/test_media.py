@@ -13,7 +13,7 @@ from src.media.contact_sheet import compose_contact_sheet
 import shutil
 import subprocess
 
-from src.media.scene import detect_scenes, detect_soft_transitions, partition_into_scene_segments
+from src.media.scene import SceneCut, detect_scenes, detect_soft_transitions, partition_into_scene_segments
 from PIL import Image
 
 FIXTURE_PATH = Path(__file__).resolve().parents[1] / "fixtures" / "synthetic_bench_60s.mp4"
@@ -106,6 +106,24 @@ def test_burn_timestamp_overlay(tmp_path):
     # Test apply_overlay_to_file
     apply_overlay_to_file(test_img_path, timestamp_sec=20.0, frame_index=2)
     assert test_img_path.exists()
+
+
+def test_apply_overlay_to_file_keeps_original_on_save_failure(tmp_path, monkeypatch):
+    frame_path = tmp_path / "frame.jpg"
+    Image.new("RGB", (64, 32), color=(50, 50, 50)).save(frame_path)
+    original = frame_path.read_bytes()
+
+    def failing_save(self, fp, format=None, **params):
+        Path(fp).write_bytes(b"truncated")
+        raise OSError("disk full")
+
+    monkeypatch.setattr(Image.Image, "save", failing_save)
+
+    with pytest.raises(OSError, match="disk full"):
+        apply_overlay_to_file(frame_path, timestamp_sec=20.0, frame_index=2)
+
+    assert frame_path.read_bytes() == original
+    assert set(tmp_path.iterdir()) == {frame_path}
 
 
 def test_sample_sparse_frames(tmp_path):
@@ -205,6 +223,36 @@ def test_compose_contact_sheet(tmp_path):
     assert len(sheet_result.timestamps) == len(frames)
 
 
+def test_compose_contact_sheet_move_failure_is_not_swallowed(tmp_path, monkeypatch):
+    from src.core.types import FrameInfo
+
+    frames = []
+    for i in (0, 1):
+        img_path = tmp_path / f"frame_{i}.jpg"
+        Image.new("RGB", (64, 36), color=(i * 40, 30, 20)).save(img_path)
+        frames.append(FrameInfo(
+            index=i + 1,
+            timestamp_sec=float(i),
+            timecode=f"00:00:0{i}.000",
+            file_path=str(img_path),
+            width=64,
+            height=36,
+        ))
+
+    def fail_replace(*args, **kwargs):
+        raise OSError("replace failed")
+
+    def fail_move(*args, **kwargs):
+        raise OSError("move failed")
+
+    monkeypatch.setattr("os.replace", fail_replace)
+    monkeypatch.setattr("shutil.move", fail_move)
+    monkeypatch.setattr("src.media.contact_sheet.time.sleep", lambda *a, **k: None)
+
+    with pytest.raises(OSError, match="move failed"):
+        compose_contact_sheet(frames=frames, output_path=str(tmp_path / "sheet.jpg"), cols=2)
+
+
 def test_scene_detection_and_partition(tmp_path):
     cache = MediaCache(base_dir=tmp_path / "cache")
     # Detect cuts around the optical flash (13-17s) at threshold 0.10
@@ -223,6 +271,21 @@ def test_scene_detection_and_partition(tmp_path):
     assert len(segments) == len(cuts) + 1
     assert segments[0].start_sec == 0.0
     assert segments[-1].end_sec == 60.0
+
+
+def test_partition_into_scene_segments_sorts_unsorted_cuts():
+    cuts = [
+        SceneCut(timestamp_sec=5.0, score=0.9, timecode="00:00:05.000"),
+        SceneCut(timestamp_sec=2.0, score=0.8, timecode="00:00:02.000"),
+    ]
+
+    segments = partition_into_scene_segments(cuts, total_duration_sec=10.0)
+
+    assert [(s.start_sec, s.end_sec, s.duration_sec) for s in segments] == [
+        (0.0, 2.0, 2.0),
+        (2.0, 5.0, 3.0),
+        (5.0, 10.0, 5.0),
+    ]
 
 
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
