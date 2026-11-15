@@ -6,6 +6,9 @@ import shutil
 import pytest
 
 from src.core.config import Config
+from src.core.errors import MediaNotFoundError
+from src.core.types import VideoMetadata
+from src.transcript import asr
 from src.transcript.asr import parse_srt_or_vtt, transcribe_video
 from src.transcript.search import search_transcript
 
@@ -140,3 +143,17 @@ def test_gate_b_parser_keeps_digit_only_caption_text(tmp_path):
     assert [(s.start_sec, s.end_sec, s.text) for s in segments] == [
         (1.0, 2.0, "123"),
     ]
+
+
+def test_missing_subtitle_override_raises(isolated_cache, monkeypatch, tmp_path):
+    video = tmp_path / "video.mp4"
+    video.write_bytes(b"test media")
+    sidecar = video.with_suffix(".vtt")
+    sidecar.write_text("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHi\n", encoding="utf-8")
+    monkeypatch.setattr(asr, "probe_video", lambda path, **kwargs: VideoMetadata(
+        source_path=path, duration_sec=10.0, width=640, height=360, fps=30.0,
+        format_name="mp4", size_bytes=123, has_audio=True,
+        fingerprint="missing-override-media"))
+
+    with pytest.raises(MediaNotFoundError, match="Subtitle override not found"):
+        transcribe_video(str(video), subtitle_override=str(tmp_path / "missing" / "override.vtt"))
