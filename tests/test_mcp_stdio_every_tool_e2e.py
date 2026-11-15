@@ -468,3 +468,21 @@ def test_yt_dlp_beside_the_server_python_is_found(tmp_path):
         server.abort()
     assert "ERROR: fake yt-dlp ran" in raw, raw[-600:]
     assert "is not installed" not in raw, raw[-600:]
+
+
+def test_home_local_bin_yt_dlp_still_wins_over_the_server_venv(tmp_path):
+    """A yt-dlp in ~/.local/bin keeps winning over the server venv's copy, as it did before the venv was searched at all."""
+    python, extra = _space_venv(tmp_path)
+    for folder, label in ((python.parent, "venv"), (tmp_path / "home" / ".local" / "bin", "home")):
+        folder.mkdir(parents=True, exist_ok=True)
+        exe = folder / "yt-dlp"
+        exe.write_text(f"#!/bin/sh\necho 'ERROR: fake yt-dlp from {label} ran' >&2\nexit 1\n", encoding="utf-8")
+        exe.chmod(0o755)
+    server = _Server(tmp_path, python=str(python), env_extra={"PATH": "/usr/bin:/bin", **extra})
+    try:
+        server.send(INITIALIZE)
+        server.send(INITIALIZED)
+        raw = _probe_until_settled(server, 3, HINT_URL)
+    finally:
+        server.abort()
+    assert "from home ran" in raw, raw[-600:]
