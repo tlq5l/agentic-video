@@ -6,6 +6,9 @@ import shutil
 import pytest
 
 from src.core.config import Config
+from src.core.errors import MediaNotFoundError
+from src.core.types import VideoMetadata
+from src.transcript import asr
 from src.transcript.asr import parse_srt_or_vtt, transcribe_video
 from src.transcript.search import search_transcript
 
@@ -113,6 +116,27 @@ def test_gate_b_parser_accepts_unicode_srt_directly(tmp_path):
     assert segments[1].text == "Unicode café 東京 spaces."
     assert segments[1].start_sec == pytest.approx(4.005)
     assert segments[3].end_sec == pytest.approx(9.900)
+
+
+def test_gate_b_missing_subtitle_override_is_an_error_not_a_sidecar_fallback(
+    isolated_cache, monkeypatch, tmp_path
+):
+    video = tmp_path / "override_gate.mp4"
+    video.write_bytes(b"test media")
+    video.with_suffix(".vtt").write_text(
+        "WEBVTT\n\n00:00.000 --> 00:01.000\nSidecar words\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        asr,
+        "probe_video",
+        lambda path: VideoMetadata(
+            source_path=path, duration_sec=120.0, width=640, height=360, fps=30.0,
+            format_name="mp4", size_bytes=123, has_audio=True, audio_codec="aac",
+            video_codec="h264", fingerprint="override-gate-media",
+        ),
+    )
+    with pytest.raises(MediaNotFoundError):
+        transcribe_video(str(video), subtitle_override=str(tmp_path / "missing" / "file.vtt"))
 
 
 def test_gate_b_parser_accepts_short_webvtt_and_skips_invalid_cues(tmp_path):
