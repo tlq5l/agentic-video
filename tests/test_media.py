@@ -108,6 +108,24 @@ def test_burn_timestamp_overlay(tmp_path):
     assert test_img_path.exists()
 
 
+def test_apply_overlay_to_file_keeps_original_on_save_failure(tmp_path, monkeypatch):
+    frame_path = tmp_path / "frame.jpg"
+    Image.new("RGB", (64, 32), color=(50, 50, 50)).save(frame_path)
+    original = frame_path.read_bytes()
+
+    def failing_save(self, fp, format=None, **params):
+        Path(fp).write_bytes(b"truncated")
+        raise OSError("disk full")
+
+    monkeypatch.setattr(Image.Image, "save", failing_save)
+
+    with pytest.raises(OSError, match="disk full"):
+        apply_overlay_to_file(frame_path, timestamp_sec=20.0, frame_index=2)
+
+    assert frame_path.read_bytes() == original
+    assert set(tmp_path.iterdir()) == {frame_path}
+
+
 def test_sample_sparse_frames(tmp_path):
     cache = MediaCache(base_dir=tmp_path / "cache")
     # Sample 0.1 FPS over first 20 seconds -> ~2 frames
