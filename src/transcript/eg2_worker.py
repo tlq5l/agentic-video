@@ -141,7 +141,7 @@ def _serve(model_dir: Path, embedders: list) -> None:
             vectors = embedders[0].embed(request["texts"], request["prompt"])
             reply = {"id": request["id"], "vectors": base64.b64encode(vectors.tobytes()).decode("ascii")}
         except Exception as exc:  # reported to the parent; the worker keeps serving
-            reply = {"id": request["id"], "error": f"{type(exc).__name__}: {exc}"}
+            reply = {"id": request.get("id"), "error": f"{type(exc).__name__}: {exc}"}
         try:
             replies.write(json.dumps(reply) + "\n")
             replies.flush()
