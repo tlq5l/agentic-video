@@ -144,6 +144,22 @@ def test_jev_error_and_report_scrub_configured_keys(monkeypatch):
     assert candidates[0]["confirmed"] is True
 
 
+def test_jev_error_truncation_does_not_leak_key_prefix(monkeypatch):
+    secret = "synthetic-typesafe-private-token"
+    monkeypatch.setenv("TYPESAFE_API_KEY", secret)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
+    def failing_urlopen(request, timeout):
+        body = ("a" * 495 + secret).encode()
+        raise urllib.error.HTTPError(request.full_url, 401, "unauthorized", {}, io.BytesIO(body))
+
+    with pytest.raises(RuntimeError) as excinfo:
+        jev.decide({}, {}, urlopen=failing_urlopen)
+    error = str(excinfo.value)
+    assert secret[:5] not in error
+    assert secret not in error
+
+
 def test_ambiguous_items_are_separate_from_confirmed_problems_in_fixer_brief(tmp_path):
     candidates = [
         {

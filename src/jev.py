@@ -92,7 +92,7 @@ def decide(
             return body
         except urllib.error.HTTPError as exc:
             try:
-                detail = exc.read().decode("utf-8", errors="replace")[:500]
+                detail = scrub(exc.read().decode("utf-8", errors="replace"), keys)[:500]
             except Exception:
                 detail = "request failed"
             message = "{} HTTP {} {}".format(name, exc.code, detail)
