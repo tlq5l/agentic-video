@@ -205,6 +205,36 @@ def test_compose_contact_sheet(tmp_path):
     assert len(sheet_result.timestamps) == len(frames)
 
 
+def test_compose_contact_sheet_move_failure_is_not_swallowed(tmp_path, monkeypatch):
+    from src.core.types import FrameInfo
+
+    frames = []
+    for i in (0, 1):
+        img_path = tmp_path / f"frame_{i}.jpg"
+        Image.new("RGB", (64, 36), color=(i * 40, 30, 20)).save(img_path)
+        frames.append(FrameInfo(
+            index=i + 1,
+            timestamp_sec=float(i),
+            timecode=f"00:00:0{i}.000",
+            file_path=str(img_path),
+            width=64,
+            height=36,
+        ))
+
+    def fail_replace(*args, **kwargs):
+        raise OSError("replace failed")
+
+    def fail_move(*args, **kwargs):
+        raise OSError("move failed")
+
+    monkeypatch.setattr("os.replace", fail_replace)
+    monkeypatch.setattr("shutil.move", fail_move)
+    monkeypatch.setattr("src.media.contact_sheet.time.sleep", lambda *a, **k: None)
+
+    with pytest.raises(OSError, match="move failed"):
+        compose_contact_sheet(frames=frames, output_path=str(tmp_path / "sheet.jpg"), cols=2)
+
+
 def test_scene_detection_and_partition(tmp_path):
     cache = MediaCache(base_dir=tmp_path / "cache")
     # Detect cuts around the optical flash (13-17s) at threshold 0.10

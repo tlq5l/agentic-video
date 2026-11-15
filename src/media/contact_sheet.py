@@ -129,7 +129,7 @@ def compose_contact_sheet(
                     import shutil
                     shutil.move(str(tmp_out), str(out_path))
                 except Exception:
-                    pass
+                    raise
     
     return ContactSheetResult(
         file_path=str(out_path.resolve()),
