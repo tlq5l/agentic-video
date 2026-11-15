@@ -61,3 +61,25 @@ def test_search_visual_rank_one_window_stays_short_and_covers_shot(tmp_path, mon
     top = next(item for item in data["intervals"] if 1 in item["ranks"])
     assert top["end_sec"] - top["start_sec"] < 15.0
     assert top["start_sec"] < SHOT_END and top["end_sec"] > SHOT_START
+
+
+def test_search_visual_lower_hits_merge_into_rank_one_interval(tmp_path, monkeypatch):
+    """With top_k 5 on the flat-colour clip, the hits ranked 2 and 3 sit next to rank 1, so search_index merges them into
+    the rank-1 interval. That merged interval is longer than the 8 s window cap (MAX_WINDOW_SEC), which only merging allows."""
+    try:
+        visual.get_encoder()
+    except RuntimeError as exc:
+        pytest.skip(f"real CLIP needs requirements-visual.txt and cached weights: {exc}")
+    cache = MediaCache(tmp_path / "cache")
+    monkeypatch.setattr(mcp_server, "AgenticVideoEngine", lambda source: AgenticVideoEngine(source, cache=cache))
+    source = str(_make_spliced_clip(tmp_path / "spliced.mp4"))
+    built = _poll("build_visual_index", {"source": source},
+                  lambda data: data.get("status") in ("complete", "error"))
+    assert built["status"] == "complete", built
+    data = _poll("search_visual", {"source": source, "query": QUERY, "top_k": 5},
+                 lambda found: "intervals" in found or found.get("status") == "error")
+    assert "intervals" in data, data
+    top = next(item for item in data["intervals"] if 1 in item["ranks"])
+    assert {2, 3} <= set(top["ranks"]), top
+    assert top["start_sec"] < SHOT_END and top["end_sec"] > SHOT_START, top
+    assert top["end_sec"] - top["start_sec"] > visual.MAX_WINDOW_SEC, top
