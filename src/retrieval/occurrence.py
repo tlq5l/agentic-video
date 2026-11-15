@@ -716,7 +716,7 @@ def count_video(engine, progress=lambda done, total: None, **args):
     fps = round(fps, 3)
     judged = [ALGORITHM_VERSION, meta.fingerprint, description, text, case_sensitive, start, end, requested_fps]
     direction = args.get("direction", "any")
-    direction_key = [] if direction == "any" else [direction]
+    direction_key = [] if direction == "any" else [direction, "excluded_spans"]  # filtered results gained excluded_spans
     tag = hashlib.sha256(json.dumps(judged + [min_gap, max_spans] + direction_key).encode()).hexdigest()[:20]
     cache_dir = engine._cache.get_entry_dir(meta.fingerprint)
     result_path = cache_dir / f"{tag}.occurrences.json"
@@ -743,6 +743,9 @@ def count_video(engine, progress=lambda done, total: None, **args):
     filtered = direction != "any"
     travels = [_direction(span["points"], mark_brief=filtered) for span in spans]
     matched = [span for span, way in zip(spans, travels) if not filtered or way in (direction, "unknown")]
+    left_out = [(span, way) for span, way in zip(spans, travels) if filtered and way not in (direction, "unknown")]
+    excluded_spans = [{"start_sec": round(span["start"], 3), "end_sec": round(min(span["end"], end), 3), "travel": way}
+                      for span, way in left_out]
     shown = matched[:max_spans]
     missing_tiles = [span for span in shown[:SHEET_TILES] if span["rep"][3] is None]  # replayed runs, or spans past the builder's tile limit
     if missing_tiles:
@@ -759,7 +762,8 @@ def count_video(engine, progress=lambda done, total: None, **args):
     omitted = len(matched) - len(shown)
     spec = judge.spec
     result = {"status": "complete", "count": None if capped else len(matched), "spans": entries, "spans_returned": len(shown),
-              "spans_omitted": omitted, "window": {"start_sec": round(start, 3), "end_sec": round(end, 3)},
+              "spans_omitted": omitted, "excluded_spans": excluded_spans,
+              "window": {"start_sec": round(start, 3), "end_sec": round(end, 3)},
               "fps_used": fps, "frames_sampled": total, "frames_analyzed": analyzed,
               "checks": {"text": text, "description": description, "color": spec and spec["color"],
                          "shape": spec and (spec["shape"] or spec["other_shape"])},

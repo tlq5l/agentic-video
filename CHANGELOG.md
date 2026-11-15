@@ -4,6 +4,8 @@
 
 - A URL whose download thread the system refused to start no longer blocks the next call for that URL: the next call starts the download and answers ready, instead of answering in_progress forever.
 
+- `count_occurrences` with `direction` lists the spans the filter leaves out (stationary, or moving another way) in a new `excluded_spans` field, each with start_sec, end_sec and travel; count, spans and every other field are unchanged.
+
 ## 0.3.8 (2026-11-15)
 
 - Missing ffmpeg: the one-line error names the tool that is missing (ffmpeg or ffprobe) and gives the install command for macOS, Debian or Ubuntu, and Windows. The `agentic-video-check` command exits with code 2 in that case. (#91)

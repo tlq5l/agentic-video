@@ -420,6 +420,13 @@ export interface OccurrenceContactSheet extends VisualContactSheet {
   labels?: string[];
 }
 
+export interface ExcludedOccurrenceSpan {
+  start_sec: number;
+  end_sec: number;
+  /** Motion of the match (stationary, or the other direction's name) that made the filter leave this span out. */
+  travel: "stationary" | "left_to_right" | "right_to_left" | "top_to_bottom" | "bottom_to_top";
+}
+
 export interface CountOccurrencesOutput {
   status: "in_progress" | "complete" | "error";
   retry_after_seconds?: number;
@@ -439,6 +446,8 @@ export interface CountOccurrencesOutput {
   spans?: OccurrenceSpan[];
   spans_returned?: number;
   spans_omitted?: number;
+  /** With `direction`: every span the filter left out of count and spans, by start time; empty for any or when none was left out. Not capped at max_spans. */
+  excluded_spans?: ExcludedOccurrenceSpan[];
   window?: { start_sec: number; end_sec: number };
   fps_used?: number;
   frames_sampled?: number;
