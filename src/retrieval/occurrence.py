@@ -716,13 +716,15 @@ def count_video(engine, progress=lambda done, total: None, **args):
     fps = round(fps, 3)
     judged = [ALGORITHM_VERSION, meta.fingerprint, description, text, case_sensitive, start, end, requested_fps]
     direction = args.get("direction", "any")
-    direction_key = [] if direction == "any" else [direction, "excluded_spans"]  # filtered results gained excluded_spans
+    direction_key = [] if direction == "any" else [direction]
     tag = hashlib.sha256(json.dumps(judged + [min_gap, max_spans] + direction_key).encode()).hexdigest()[:20]
     cache_dir = engine._cache.get_entry_dir(meta.fingerprint)
     result_path = cache_dir / f"{tag}.occurrences.json"
     if result_path.exists():
         cached = json.loads(result_path.read_text())
-        if not cached["contact_sheet"] or Path(cached["contact_sheet"]["file_path"]).exists():
+        # stored before the excluded_spans field existed: recount from the saved judgments rather than serve it
+        fresh = "excluded_spans" in cached
+        if fresh and (not cached["contact_sheet"] or Path(cached["contact_sheet"]["file_path"]).exists()):
             return cached
     # Only SpanBuilder reads min_gap_sec and max_spans, so the per-frame judgments are kept under a key without them.
     judgments_path = cache_dir / f"{hashlib.sha256(json.dumps(judged).encode()).hexdigest()[:20]}.judgments.json"

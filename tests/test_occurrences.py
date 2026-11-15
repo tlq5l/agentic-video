@@ -586,3 +586,9 @@ def test_direction_lists_the_spans_it_leaves_out(tmp_path, monkeypatch):
     everything = call()
     assert everything["count"] == 1 and [span["travel"] for span in everything["spans"]] == ["stationary"]
     assert everything["excluded_spans"] == []
+    for cached in (tmp_path / "cache").rglob("*.occurrences.json"):  # rewrite each stored result as one from before the field
+        stored = json.loads(cached.read_text())
+        stored.pop("excluded_spans")
+        cached.write_text(json.dumps(stored))
+    fresh = count(clip, tmp_path, description="green diamond")  # a fresh engine reads the disk cache
+    assert fresh["count"] == 1 and fresh["excluded_spans"] == []
