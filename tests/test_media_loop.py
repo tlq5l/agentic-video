@@ -575,3 +575,38 @@ def test_partial_judge_verdict_survives_missing_choice_for_later_candidate():
     assert candidates[1]["judge_verdict"]["verdict"] == "unavailable"
     assert candidates[1]["confirmed"] is True
     assert candidates[1]["disagreement"] is False
+
+
+def test_spectrogram_error_is_recorded_not_fatal(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    import src.loop as loop_module
+    from src.core.cache import MediaCache
+    from src.loop import _copy_evidence
+
+    def _bad_spectrogram(*args, **kwargs):
+        raise RuntimeError("corrupt window: bad PCM")
+
+    def _ok_sheet(*args, **kwargs):
+        output = kwargs["output_path"]
+        Path(output).write_bytes(b"jpg")
+        return SimpleNamespace(file_path=str(output))
+
+    monkeypatch.setattr(loop_module, "spectrogram_window", _bad_spectrogram)
+    monkeypatch.setattr(loop_module, "build_contact_sheet", _ok_sheet)
+    candidates = [
+        {"id": "cue-missing-1000", "start_sec": 1.0, "end_sec": 1.0, "_marks": []},
+        {"id": "cue-late-2000", "start_sec": 2.0, "end_sec": 2.0, "_marks": []},
+    ]
+    evidence_dir = tmp_path / "evidence"
+    # Must not raise: the spectrogram failure is recorded like a contact-sheet
+    # failure, and every candidate still gets its evidence row.
+    _copy_evidence(candidates, tmp_path / "video.mp4", 5.0, True, evidence_dir, MediaCache(tmp_path / "cache"))
+    assert len(candidates) == 2
+    for item in candidates:
+        evidence = item["evidence"]
+        assert evidence["spectrogram"] is None
+        assert "corrupt window" in evidence["spectrogram_error"]
+        assert evidence["contact_sheet"] is not None
+        assert Path(tmp_path / evidence["contact_sheet"]).is_file()
+        assert "_marks" not in item
