@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union, cast
 
 from src.core.config import Config
-from src.core.errors import SubprocessTimeoutError, MediaCorruptError, DependencyNotFoundError, ExtractionBoundsError
+from src.core.errors import SubprocessTimeoutError, MediaCorruptError, DependencyNotFoundError, ExtractionBoundsError, CacheWriteError
 from src.core.types import FrameInfo, format_timestamp
 from src.core.cache import MediaCache
 from src.media.seeking import build_seek_arguments
@@ -320,7 +320,7 @@ def extract_single_frame(
     if burn_timestamps is not None:
         overlay_timestamp = burn_timestamps
 
-    if timestamp_sec < 0:
+    if not math.isfinite(timestamp_sec) or timestamp_sec < 0:
         raise ExtractionBoundsError(
             f"timestamp_sec must be >= 0 (got {timestamp_sec})",
             {"timestamp_sec": timestamp_sec}
@@ -387,8 +387,11 @@ def extract_single_frame(
                 try:
                     import shutil
                     shutil.move(str(tmp_file), str(out_file))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    raise CacheWriteError(
+                        f"Failed to store extracted frame at {out_file}: {exc}",
+                        {"video": str(vpath), "output": str(out_file)},
+                    ) from exc
         
     # ``showinfo`` was part of the exact FFmpeg command that wrote this
     # artifact, so its PTS identifies the selected frame rather than merely a

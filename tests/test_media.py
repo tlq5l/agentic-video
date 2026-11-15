@@ -2,7 +2,7 @@
 import pytest
 from pathlib import Path
 from src.core.cache import MediaCache
-from src.core.errors import MediaNotFoundError, ExtractionBoundsError
+from src.core.errors import MediaNotFoundError, ExtractionBoundsError, CacheWriteError
 from src.media.probe import probe_video
 from src.media.seeking import build_seek_arguments, extract_single_frame
 from src.media.frames import extract_single_frame as extract_frame_with_provenance
@@ -408,3 +408,77 @@ def test_detect_cuts_raised_threshold_drops_the_low_scoring_cut(tmp_path):
     assert [(cut.kind, round(cut.timestamp_sec)) for cut in found] == [("cut", 3)]
     assert found[0].score < 0.25
     assert engine.detect_cuts(threshold=0.5) == []
+
+
+@pytest.mark.parametrize("bad_timestamp", [float("nan"), float("inf"), float("-inf")])
+def test_extract_single_frame_rejects_nonfinite_timestamp(bad_timestamp, tmp_path):
+    with pytest.raises(ExtractionBoundsError):
+        extract_frame_with_provenance(
+            str(FIXTURE_PATH),
+            timestamp_sec=bad_timestamp,
+            output_path=tmp_path / "bad.jpg",
+        )
+
+
+def test_detect_scenes_cache_key_includes_min_scene_len_sec(tmp_path, monkeypatch):
+    import src.media.scene as scene
+    from types import SimpleNamespace
+
+    video = tmp_path / "fake.mp4"
+    video.write_bytes(b"not a real video")
+    cache = MediaCache(base_dir=tmp_path / "cache")
+
+    # Two cuts 2 seconds apart; only the 10 s minimum should debounce them to one.
+    stderr = "pts_time:2.000\nlavfi.scene_score=0.900\npts_time:4.000\nlavfi.scene_score=0.900\n"
+
+    def fake_run(*args, **kwargs):
+        return SimpleNamespace(returncode=0, stderr=stderr, stdout="")
+
+    def fake_gap(*args, **kwargs):
+        return 0.0
+
+    monkeypatch.setattr(scene.subprocess, "run", fake_run)
+    monkeypatch.setattr(scene, "_frame_gap_sec", fake_gap)
+
+    first = detect_scenes(str(video), threshold=0.3, min_scene_len_sec=0.5, cache=cache)
+    assert [cut.timestamp_sec for cut in first] == [2.0, 4.0]
+
+    second = detect_scenes(str(video), threshold=0.3, min_scene_len_sec=10, cache=cache)
+    assert [cut.timestamp_sec for cut in second] == [2.0]
+
+
+def test_extract_single_frame_raises_when_final_move_fails(tmp_path, monkeypatch):
+    """Final shutil.move failure must raise instead of returning stale success."""
+    import src.media.frames as frames_mod
+
+    out_file = tmp_path / "out.jpg"
+    cache = MediaCache(base_dir=tmp_path / "cache")
+
+    def fake_run(cmd, **kwargs):
+        tmp = Path(cmd[-1])
+        Image.new("RGB", (320, 180), color=(10, 20, 30)).save(tmp, "JPEG")
+        return subprocess.CompletedProcess(
+            args=cmd, returncode=0, stdout="",
+            stderr="[Parsed_showinfo_0] n: 0 pts_time:10.000 duration:1",
+        )
+
+    monkeypatch.setattr(frames_mod.subprocess, "run", fake_run)
+
+    def failing_replace(src, dst, **kwargs):
+        raise OSError("os.replace blocked")
+
+    def failing_move(src, dst, **kwargs):
+        raise OSError("shutil.move blocked")
+
+    monkeypatch.setattr(frames_mod.os, "replace", failing_replace)
+    monkeypatch.setattr(shutil, "move", failing_move)
+
+    with pytest.raises(CacheWriteError):
+        extract_frame_with_provenance(
+            str(FIXTURE_PATH),
+            timestamp_sec=10.0,
+            output_path=str(out_file),
+            width=320,
+            overlay_timestamp=False,
+            cache=cache,
+        )

@@ -1139,15 +1139,21 @@ class AgenticVideoEngine:
         try:
             start = float(start_sec)
             end = meta.duration_sec if end_sec is None else float(end_sec)
+            threshold_value = float(threshold)
         except (TypeError, ValueError) as exc:
             raise ExtractionBoundsError(
-                "Cut-detection timestamps must be numeric",
-                {"start_sec": start_sec, "end_sec": end_sec},
+                "Cut-detection threshold and timestamps must be numeric",
+                {"threshold": threshold, "start_sec": start_sec, "end_sec": end_sec},
             ) from exc
         if not math.isfinite(start) or not math.isfinite(end):
             raise ExtractionBoundsError(
                 "Cut-detection timestamps must be finite",
                 {"start_sec": start, "end_sec": end},
+            )
+        if not math.isfinite(threshold_value) or threshold_value < 0 or threshold_value > 1:
+            raise ExtractionBoundsError(
+                "Cut-detection threshold must satisfy 0 <= threshold <= 1 (default 0.25)",
+                {"threshold": threshold_value},
             )
         if start < 0 or start >= meta.duration_sec or end <= start or end > meta.duration_sec + 0.001:
             raise ExtractionBoundsError(
@@ -1162,14 +1168,14 @@ class AgenticVideoEngine:
         # One decode fills the cache for the three calls below.
         scan_scene_changes(
             self.source_path,
-            thresholds=(threshold, 0.25) if threshold > 0.25 else (threshold,),
+            thresholds=(threshold_value, 0.25) if threshold_value > 0.25 else (threshold_value,),
             start_sec=start,
             duration_sec=duration,
             cache=self._cache,
             defer_echoes=True,
         )
         known_cuts = None
-        if threshold > 0.25:
+        if threshold_value > 0.25:
             known_cuts = detect_scenes(
                 self.source_path,
                 threshold=0.25,
@@ -1179,7 +1185,7 @@ class AgenticVideoEngine:
             )
         cuts = detect_scenes(
             self.source_path,
-            threshold=threshold,
+            threshold=threshold_value,
             start_sec=start,
             duration_sec=duration,
             cache=self._cache,

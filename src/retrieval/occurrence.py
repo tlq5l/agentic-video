@@ -410,7 +410,10 @@ def _direction(points, mark_brief=False):
     """
     if mark_brief and len(points) < 3:
         return "unknown"
-    head, tail = np.mean(points[:2], axis=0), np.mean(points[-2:], axis=0)
+    if len(points) < 3:  # fewer than three centres have no smoothing to average; use them as they are
+        head, tail = np.asarray(points[0], float), np.asarray(points[-1], float)
+    else:
+        head, tail = np.mean(points[:2], axis=0), np.mean(points[-2:], axis=0)
     dx, dy = tail - head
     if max(abs(dx), abs(dy)) < .15:
         return "stationary"
@@ -438,7 +441,7 @@ class SpanBuilder:
                                               abs(y + h / 2 - last[2][1] - last[2][3] / 2))
                                           for x, y, w, h in hit["boxes"]) > TELEPORT_JUMP
         absence = None if last is None else t - last[0] - self.step
-        if last is None or jumped or absence >= self.min_gap - 1e-6:
+        if last is None or jumped or absence >= max(self.min_gap - 1e-6, self.min_gap / 2):
             self.spans.append({"samples": [], "best": -1.0, "tiles": []})
         elif absence >= DEFAULT_MIN_GAP - 1e-6:
             self.bridged.append((last[0] + self.step, t))

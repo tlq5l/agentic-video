@@ -134,14 +134,16 @@ def _serve(model_dir: Path, embedders: list) -> None:
                 return  # parent closed the pipe
             pending += chunk
         line, pending = pending.split(b"\n", 1)
-        request = json.loads(line)
+        request_id = None
         try:
+            request = json.loads(line)
+            request_id = request.get("id") if isinstance(request, dict) else None
             if not embedders:
                 embedders.append(Embedder(model_dir))
             vectors = embedders[0].embed(request["texts"], request["prompt"])
             reply = {"id": request["id"], "vectors": base64.b64encode(vectors.tobytes()).decode("ascii")}
         except Exception as exc:  # reported to the parent; the worker keeps serving
-            reply = {"id": request.get("id"), "error": f"{type(exc).__name__}: {exc}"}
+            reply = {"id": request_id, "error": f"{type(exc).__name__}: {exc}"}
         try:
             replies.write(json.dumps(reply) + "\n")
             replies.flush()

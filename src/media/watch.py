@@ -105,6 +105,8 @@ def find_wakes(
 def _check_args(
     conditions: Sequence[str], interval_sec: float, cut: float, consecutive: int, cooldown_sec: float,
 ) -> List[str]:
+    if isinstance(conditions, str):
+        raise ExtractionBoundsError("conditions must be a list of non-empty yes/no questions about one frame")
     cleaned = [c.strip() for c in conditions if isinstance(c, str) and c.strip()]
     if not cleaned or len(cleaned) != len(conditions):
         raise ExtractionBoundsError("conditions must be a list of non-empty yes/no questions about one frame")
@@ -144,7 +146,7 @@ def watch_for(
     duration = probe_video(str(path), cache=cache).duration_sec
     end = duration if end_sec is None else min(float(end_sec), duration)
     start = float(start_sec)
-    if start < 0 or start >= end:
+    if not (0 <= start < end):
         raise ExtractionBoundsError(f"start_sec must be from 0 up to before end_sec (got {start:g}, end {end:g}, duration {duration:g} s)")
     last_frame_sec = max(0.0, duration - 0.1)
     times = [round(start + k * interval_sec, 3) for k in range(int((end - start) / interval_sec) + 1)]
