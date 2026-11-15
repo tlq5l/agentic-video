@@ -200,3 +200,27 @@ def test_source_descriptions_mention_urls():
         assert "video URL" in spec["inputSchema"]["properties"]["source"]["description"], tool
     probe = CONTRACT["probe_video"]["description"]
     assert "x.com" in probe and "YouTube" in probe
+
+
+def test_a_download_thread_refused_at_start_does_not_block_the_next_call_for_the_url(ytdlp, monkeypatch):
+    # The first start() is refused, so that download never ran. The next call for the same URL must start a real
+    # download and answer ready, not join the job that never ran and keep answering in_progress.
+    real_start = threading.Thread.start
+    refused = []
+
+    def refuse_first_start(self):
+        if not refused:
+            refused.append(self)
+            raise RuntimeError("can't start new thread")
+        real_start(self)
+
+    monkeypatch.setattr(threading.Thread, "start", refuse_first_start)
+    with pytest.raises(RuntimeError):
+        handle_call("probe_video", {"source": X_URL})
+    assert refused and ytdlp.calls == [], "the first call should have failed before any download ran"
+
+    began = time.monotonic()
+    ready = handle_call("probe_video", {"source": X_URL})
+    assert time.monotonic() - began < 10, "the second call waited on a download that never started"
+    assert ready["ok"] and ready["data"]["duration_sec"] == 63.0 and ready["data"]["local_path"], ready
+    assert len(ytdlp.calls) == 1

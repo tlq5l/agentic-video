@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- A URL whose download thread the system refused to start no longer blocks the next call for that URL: the next call starts the download and answers ready, instead of answering in_progress forever.
+
 ## 0.3.8 (2026-11-15)
 
 - Missing ffmpeg: the one-line error names the tool that is missing (ffmpeg or ffprobe) and gives the install command for macOS, Debian or Ubuntu, and Windows. The `agentic-video-check` command exits with code 2 in that case. (#91)

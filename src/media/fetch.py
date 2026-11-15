@@ -142,9 +142,10 @@ def _start_job(url: str, target: Path) -> _Job:
     with _JOBS_LOCK:
         job = _JOBS.get(target)
         if job is None:
-            job = _JOBS[target] = _Job()
+            job = _Job()
             jobs.start(threading.Thread(target=_run_job, args=(url, target, job),
                                         name=f"agentic-video-download-{target.stem[:12]}", daemon=True))
+            _JOBS[target] = job  # registered only once the thread runs: a refused start leaves no job to wait on
     return job
 
 
