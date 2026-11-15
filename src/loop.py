@@ -962,6 +962,9 @@ def _judge_candidates(
         message = scrub_jev(exc)
         for item in candidates:
             item.pop("_judge_question", None)
+            # Keep verdicts already validated above; only the rest fall back.
+            if "judge_verdict" in item:
+                continue
             item["judge_verdict"] = {"verdict": "unavailable", "confidence": None, "error": message, "fallback": "rules"}
             item["confirmed"] = item["rule_verdict"] == "fault"
             item["disagreement"] = False
@@ -985,13 +988,16 @@ def _copy_evidence(
         window_start = max(0.0, start - 1.0)
         window_end = min(duration, max(end + 1.0, window_start + 0.2))
         if has_audio and window_end > window_start:
-            spec = spectrogram_window(
-                str(video), window_start, window_end,
-                marks=item.pop("_marks", []), cache=cache,
-            )
-            spec_target = _fresh_path(evidence_dir / (stem + "-spectrogram.png"))
-            spec_target.write_bytes(Path(spec["file_path"]).read_bytes())
-            evidence["spectrogram"] = str(spec_target.relative_to(evidence_dir.parent))
+            try:
+                spec = spectrogram_window(
+                    str(video), window_start, window_end,
+                    marks=item.pop("_marks", []), cache=cache,
+                )
+                spec_target = _fresh_path(evidence_dir / (stem + "-spectrogram.png"))
+                spec_target.write_bytes(Path(spec["file_path"]).read_bytes())
+                evidence["spectrogram"] = str(spec_target.relative_to(evidence_dir.parent))
+            except Exception as exc:
+                evidence["spectrogram_error"] = scrub_jev(exc)[:300]
         else:
             item.pop("_marks", None)
             evidence["spectrogram_unavailable"] = "video has no audio stream"

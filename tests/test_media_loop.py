@@ -537,3 +537,76 @@ def test_zero_tolerance_is_not_replaced_by_default():
     sync = {"tolerance_ms": 80.0, "cues": [_sync_cue(14.96, "hit near end", "missing")]}
     [defaulted] = _build_candidates(sync, {}, {}, [], intent=intent)
     assert defaulted["rule_verdict"] == "fault"
+
+
+def test_partial_judge_verdict_survives_missing_choice_for_later_candidate():
+    candidates = [
+        {
+            "id": "judged-first", "kind": "cue_late", "start_sec": 2.0, "end_sec": 2.0,
+            "cue_label": "cut whoosh 03",
+            "numbers": {"offset_ms": 250.0, "tolerance_ms": 80.0},
+            "classification": "cue match late", "shape": None,
+            "nearby_cues": [{"time_sec": 2.0, "label": "cut whoosh 03"}],
+            "rule_verdict": "fault",
+        },
+        {
+            "id": "judged-second", "kind": "cue_late", "start_sec": 4.0, "end_sec": 4.0,
+            "cue_label": "cut whoosh 04",
+            "numbers": {"offset_ms": 250.0, "tolerance_ms": 80.0},
+            "classification": "cue match late", "shape": None,
+            "nearby_cues": [{"time_sec": 4.0, "label": "cut whoosh 04"}],
+            "rule_verdict": "fault",
+        },
+    ]
+
+    def client(state, questions):
+        return {"answers": {"candidate_1": {"choice": "intentional per the author's notes", "confidence": 0.9}},
+                "provider": "test", "model": "test"}
+
+    notice = _judge_candidates(candidates, "", judge="jev", client=client)
+    assert notice is not None
+    assert candidates[0]["judge_verdict"] == {
+        "verdict": "intentional per the author's notes",
+        "choice": "intentional per the author's notes", "confidence": 0.9,
+        "provider": "test", "model": "test",
+    }
+    assert candidates[0]["confirmed"] is False
+    assert candidates[0]["disagreement"] is True
+    assert candidates[1]["judge_verdict"]["verdict"] == "unavailable"
+    assert candidates[1]["confirmed"] is True
+    assert candidates[1]["disagreement"] is False
+
+
+def test_spectrogram_error_is_recorded_not_fatal(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    import src.loop as loop_module
+    from src.core.cache import MediaCache
+    from src.loop import _copy_evidence
+
+    def _bad_spectrogram(*args, **kwargs):
+        raise RuntimeError("corrupt window: bad PCM")
+
+    def _ok_sheet(*args, **kwargs):
+        output = kwargs["output_path"]
+        Path(output).write_bytes(b"jpg")
+        return SimpleNamespace(file_path=str(output))
+
+    monkeypatch.setattr(loop_module, "spectrogram_window", _bad_spectrogram)
+    monkeypatch.setattr(loop_module, "build_contact_sheet", _ok_sheet)
+    candidates = [
+        {"id": "cue-missing-1000", "start_sec": 1.0, "end_sec": 1.0, "_marks": []},
+        {"id": "cue-late-2000", "start_sec": 2.0, "end_sec": 2.0, "_marks": []},
+    ]
+    evidence_dir = tmp_path / "evidence"
+    # Must not raise: the spectrogram failure is recorded like a contact-sheet
+    # failure, and every candidate still gets its evidence row.
+    _copy_evidence(candidates, tmp_path / "video.mp4", 5.0, True, evidence_dir, MediaCache(tmp_path / "cache"))
+    assert len(candidates) == 2
+    for item in candidates:
+        evidence = item["evidence"]
+        assert evidence["spectrogram"] is None
+        assert "corrupt window" in evidence["spectrogram_error"]
+        assert evidence["contact_sheet"] is not None
+        assert Path(tmp_path / evidence["contact_sheet"]).is_file()
+        assert "_marks" not in item
