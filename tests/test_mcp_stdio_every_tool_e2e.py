@@ -13,6 +13,7 @@ import subprocess
 import sys
 import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -330,3 +331,67 @@ def test_closing_stdin_while_jobs_run_exits_cleanly(clip, tmp_path):
     partial = [str(d) for d in home.rglob("*") if d.is_dir() and any(d.glob("*.npy")) and not (d / "meta.json").exists()]
     assert not partial, partial
     assert not list(home.rglob("visual-chunk-*")), "a visual chunk folder was left behind"
+
+
+class _SlowVideoHandler(BaseHTTPRequestHandler):
+    """Serves one video a piece at a time, so a download started from it runs for about 20 s."""
+    body = b""
+    pieces = 40
+    pause_sec = 0.5
+
+    def do_HEAD(self):
+        self._headers()
+
+    def do_GET(self):
+        self._headers()
+        step = max(1, len(self.body) // self.pieces)
+        for start in range(0, len(self.body), step):
+            try:
+                self.wfile.write(self.body[start:start + step])
+                self.wfile.flush()
+            except OSError:
+                return
+            time.sleep(self.pause_sec)
+
+    def _headers(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "video/mp4")
+        self.send_header("Content-Length", str(len(self.body)))
+        self.end_headers()
+
+    def log_message(self, *args):
+        pass
+
+
+@pytest.fixture
+def slow_video_url(clip):
+    handler = type("SlowVideoHandler", (_SlowVideoHandler,), {"body": Path(clip).read_bytes()})
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    server.daemon_threads = True
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}/clip.mp4"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_closing_stdin_while_url_download_runs_waits_for_it(slow_video_url, tmp_path):
+    """A URL source downloads on a background thread. Closing stdin while the download runs must not exit 0 before the file is complete."""
+    request = {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+               "params": {"name": "probe_video", "arguments": {"source": slow_video_url}}}
+    server = _Server(tmp_path)
+    try:
+        for message in (INITIALIZE, INITIALIZED, request):
+            server.send(message)
+        reply = server.reply(3)
+        assert "in_progress" in json.dumps(reply["result"]), reply["result"]  # the download is still running when stdin closes
+        returncode, stderr = server.close()
+    finally:
+        server.abort()
+    assert "Traceback" not in stderr, stderr[-2000:]
+    downloads = [p for p in (tmp_path / "home").rglob("*.mp4") if "downloads" in p.parts and "tmp-" not in p.name]
+    if returncode == 0:
+        assert downloads and all(p.stat().st_size > 0 for p in downloads), "exit 0 while the download had not finished"
+    else:
+        assert returncode == 1, (returncode, stderr[-2000:])
