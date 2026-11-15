@@ -261,7 +261,7 @@ def _build_candidates(
         time_sec = float(cue["time_sec"])
         cue_label = str(cue.get("label", "cue")).strip()
 
-        tolerance = float(sync.get("tolerance_ms") or 80.0) / 1000.0
+        tolerance = float(sync.get("tolerance_ms") if sync.get("tolerance_ms") is not None else 80.0) / 1000.0
         matching_intent = _intent_section_at(intent_sections, time_sec, end_margin=tolerance)
         audible_somewhere = cue.get("audible_in_any_band", True)
 

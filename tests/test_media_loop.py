@@ -506,3 +506,18 @@ def test_intent_ranges_are_half_open_at_their_end():
     assert candidates["hit end"]["rule_verdict"] == "fault"
     assert "intent_note" not in candidates["hit end"]
     assert "Muffled" not in _relevant_intent(intent, candidates["hit end"])
+
+
+def test_zero_tolerance_is_not_replaced_by_default():
+    from src.loop import _build_candidates
+
+    intent = "Muffled from 12.5 s through 15.000 s. Then the drop."
+    # With an explicit 0 tolerance a cue 40 ms before the end is inside the
+    # section; the 80 ms default would judge it normally (fault).
+    sync = {"tolerance_ms": 0.0, "cues": [_sync_cue(14.96, "hit near end", "missing")]}
+    [row] = _build_candidates(sync, {}, {}, [], intent=intent)
+    assert row["rule_verdict"] == "informational"
+
+    sync = {"tolerance_ms": 80.0, "cues": [_sync_cue(14.96, "hit near end", "missing")]}
+    [defaulted] = _build_candidates(sync, {}, {}, [], intent=intent)
+    assert defaulted["rule_verdict"] == "fault"
