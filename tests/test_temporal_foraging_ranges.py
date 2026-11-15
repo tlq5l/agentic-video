@@ -242,3 +242,15 @@ def test_contact_sheet_clamps_end_rounded_up_past_duration():
     assert all(ts < duration for ts in sheet.timestamps)
     with pytest.raises(ExtractionBoundsError, match="omit end_sec"):
         generate_video_overview(video, samples=2, cols=2, start_sec=0.0, end_sec=duration + 5)
+
+
+@pytest.mark.parametrize(
+    "threshold",
+    [2.0, -0.1, float("nan"), float("inf")],
+)
+def test_detect_cuts_rejects_out_of_range_threshold(monkeypatch, threshold: float):
+    monkeypatch.setattr("src.retrieval.engine.detect_scenes", lambda path, **kwargs: [])
+    monkeypatch.setattr("src.retrieval.engine.scan_scene_changes", lambda path, **kwargs: None)
+    monkeypatch.setattr("src.retrieval.engine.detect_soft_transitions", lambda path, **kwargs: [])
+    with pytest.raises(ExtractionBoundsError):
+        _engine().detect_cuts(threshold=threshold)

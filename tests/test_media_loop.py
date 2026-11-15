@@ -610,3 +610,16 @@ def test_spectrogram_error_is_recorded_not_fatal(tmp_path, monkeypatch):
         assert evidence["contact_sheet"] is not None
         assert Path(tmp_path / evidence["contact_sheet"]).is_file()
         assert "_marks" not in item
+
+
+def test_load_cues_with_null_time_sec_falls_back_to_t(tmp_path):
+    from src.loop import _cue_time, _load_cues
+
+    path = tmp_path / "cues.json"
+    path.write_text(json.dumps([{"time_sec": None, "t": 1.5, "label": "hit"}]), encoding="utf-8")
+    cues = _load_cues(str(path))
+    assert len(cues) == 1
+    assert _cue_time(cues[0]) == 1.5
+    assert _cue_time({"time_sec": None, "t": 2.5}) == 2.5
+    assert _cue_time({"time_sec": None, "t": None}) == 0.0
+    assert _cue_time({}) == 0.0

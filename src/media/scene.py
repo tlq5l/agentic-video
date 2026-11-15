@@ -69,7 +69,7 @@ def detect_scenes(
         cache = MediaCache()
         
     fingerprint = cache.compute_fingerprint(str(vpath))
-    cache_key = _scenes_key(threshold, _range_key(start_sec, duration_sec))
+    cache_key = _scenes_key(threshold, _range_key(start_sec, duration_sec), min_scene_len_sec)
     
     if use_cache:
         cached = cache.load_json(fingerprint, cache_key)
@@ -212,9 +212,10 @@ def _changes_key(span: str) -> str:
     return f"softtrans_v14_{span}"
 
 
-def _scenes_key(threshold: float, span: str) -> str:
+def _scenes_key(threshold: float, span: str, min_scene_len_sec: float = 0.5) -> str:
     # v2: a cut is timed at the strongest frame of its run, not the first frame over the threshold.
-    return f"scenes_v2_th{float(threshold).hex()}_{span}"
+    # min_scene_len_sec is part of the identity: cached cuts are already debounced with it.
+    return f"scenes_v2_th{float(threshold).hex()}_min{float(min_scene_len_sec).hex()}_{span}"
 
 
 def _frame_gap_sec(raw_cuts: List[SceneCut], video_path: str, cache: Optional[MediaCache]) -> float:

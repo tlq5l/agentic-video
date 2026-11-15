@@ -4,6 +4,7 @@ Checks of the synthetic fixture made by scripts/generate_synthetic_benchmark.py.
 
 from __future__ import annotations
 
+import importlib.util
 import io
 import json
 import subprocess
@@ -109,3 +110,50 @@ def test_visual_coherence_task4_subsecond_state_change():
     assert bg_before[0] < 50 and bg_before[2] > bg_before[0], f"Expected slate background, got {bg_before}"
     bg_after = _frame_at(39.6).getpixel((10, 50))
     assert bg_after[0] > 110 and bg_after[1] < 40, f"Expected crimson alert, got {bg_after}"
+
+
+def test_short_duration_filters_ground_truth_and_subtitles(tmp_path, monkeypatch):
+    script = Path(__file__).resolve().parent.parent / "scripts" / "generate_synthetic_benchmark.py"
+    spec = importlib.util.spec_from_file_location("generate_synthetic_benchmark", script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    class _FakeFrame:
+        def tobytes(self):
+            return b"\x00" * 12
+
+    class _FakeProc:
+        def __init__(self, *args, **kwargs):
+            self.stdin = io.BytesIO()
+            self.returncode = 0
+
+        def communicate(self, *args, **kwargs):
+            return b"", b""
+
+    def _fake_audio(path, duration_s=60.0, **kwargs):
+        Path(path).write_bytes(b"")
+
+    monkeypatch.setattr(module, "generate_audio_wav", _fake_audio)
+    monkeypatch.setattr(
+        module,
+        "render_benchmark_frame",
+        lambda t, frame_idx, width=640, height=360, fps=25, **kwargs: _FakeFrame(),
+    )
+    monkeypatch.setattr(module.subprocess, "Popen", _FakeProc)
+
+    module.generate_benchmark_suite(tmp_path, duration_s=30.0)
+
+    data = json.loads((tmp_path / "synthetic_ground_truth.json").read_text(encoding="utf-8"))
+    assert data["duration_s"] == 30.0
+    for event in data["events"]:
+        assert event["end_s"] <= 30.0
+    assert "task3_transcript_verification" not in data["tasks"]
+    assert "task4_visual_state_change" not in data["tasks"]
+    task5 = data["tasks"]["task5_sparse_recurring_event"]
+    assert task5["ground_truth_count"] == 2
+    assert task5["ground_truth_timestamps_s"] == [7.0, 21.0]
+
+    vtt_text = (tmp_path / "synthetic_bench_60s.vtt").read_text(encoding="utf-8")
+    assert "Project Cygnus activated" not in vtt_text
+    assert "00:00:48" not in vtt_text
+    assert "00:00:55" not in vtt_text

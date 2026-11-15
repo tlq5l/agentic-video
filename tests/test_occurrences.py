@@ -592,3 +592,21 @@ def test_direction_lists_the_spans_it_leaves_out(tmp_path, monkeypatch):
         cached.write_text(json.dumps(stored))
     fresh = count(clip, tmp_path, description="green diamond")  # a fresh engine reads the disk cache
     assert fresh["count"] == 1 and fresh["excluded_spans"] == []
+
+
+def test_tiny_min_gap_does_not_split_consecutive_frames():
+    hit = {"score": 1.0, "box": (.5, .5, .1, .1), "boxes": [(.5, .5, .1, .1)]}
+    frame = Image.new("RGB", (32, 18))
+    builder = occurrence.SpanBuilder(0.2, 0.0000005, keep=5)  # fps 5, min_gap below the 1e-6 tolerance
+    for i in range(5):
+        builder.add(i * 0.2, hit, frame)
+    assert len(builder.finish()) == 1
+
+
+@needs_ffmpeg
+def test_two_sample_span_reports_its_travel_direction(tmp_path):
+    def paint(d, t):
+        if live(t, (1.0, 1.4)):  # sampled at 1.0 s and 1.2 s only: two consecutive samples at fps 5
+            shape(d, "circle", 80 if t < 1.2 else 180, 90, 25, RED)  # moves 0.31 of the frame width
+    result = count(make_clip(tmp_path / "two_samples.mp4", 3, paint), tmp_path, description="red circle")
+    assert result["count"] == 1 and result["spans"][0]["travel"] == "left_to_right"

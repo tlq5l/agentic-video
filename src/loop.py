@@ -75,7 +75,7 @@ def _load_cues(path: Optional[str]) -> List[Dict[str, Any]]:
     folder = Path(path).expanduser().resolve().parent
     deduped: List[Dict[str, Any]] = []
     for item in data:
-        t = float(item.get("time_sec", item.get("t", 0.0)))
+        t = _cue_time(item)
         label = _label_key(item.get("label", "cue"))
         # The same label within 2 ms is one cue listed twice, not two cues.
         if any(_label_key(kept.get("label", "cue")) == label and abs(_cue_time(kept) - t) <= 0.002
@@ -108,7 +108,12 @@ def _read_intent(path: Optional[str]) -> str:
 
 
 def _cue_time(cue: Mapping[str, Any]) -> float:
-    return float(cue.get("time_sec", cue.get("t")))
+    value = cue.get("time_sec")
+    if value is None:
+        value = cue.get("t")
+    if value is None:
+        return 0.0
+    return float(value)
 
 
 def _problem_id(kind: str, start_sec: float, label: str = "") -> str:

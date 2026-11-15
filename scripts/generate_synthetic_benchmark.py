@@ -177,6 +177,11 @@ NEGATIVE_CONTROL_TASKS = [
 ]
 
 
+def _events_within_duration(duration_s: float) -> List[EventInterval]:
+    """Return ground-truth events fully contained in a video of duration_s."""
+    return [ev for ev in GROUND_TRUTH_EVENTS if ev.end_s <= duration_s]
+
+
 def generate_audio_wav(
     output_wav_path: Path,
     duration_s: float = 60.0,
@@ -358,7 +363,7 @@ def render_benchmark_frame(
     return img
 
 
-def generate_subtitles(output_dir: Path) -> None:
+def generate_subtitles(output_dir: Path, duration_s: float = 60.0) -> None:
     """Generate VTT and SRT files aligned with benchmark events."""
     vtt_lines = ["WEBVTT", ""]
     srt_lines = []
@@ -378,6 +383,9 @@ def generate_subtitles(output_dir: Path) -> None:
     ]
 
     for start_s, end_s, text in transcript_events:
+        if start_s >= duration_s:
+            continue
+        end_s = min(end_s, duration_s)
         vtt_start = f"{int(start_s//3600):02d}:{int((start_s%3600)//60):02d}:{start_s%60:06.3f}"
         vtt_end = f"{int(end_s//3600):02d}:{int((end_s%3600)//60):02d}:{end_s%60:06.3f}"
         vtt_lines.append(f"{vtt_start} --> {vtt_end}")
@@ -413,7 +421,7 @@ def generate_benchmark_suite(
     generate_audio_wav(wav_path, duration_s=duration_s)
 
     print("[2/4] Generating subtitles (VTT & SRT)...")
-    generate_subtitles(output_dir)
+    generate_subtitles(output_dir, duration_s=duration_s)
 
     print(f"[3/4] Rendering video frames ({int(duration_s * fps)} frames @ {fps}fps) via FFmpeg pipe...")
     ffmpeg_cmd = [
@@ -471,6 +479,8 @@ def generate_benchmark_suite(
         pass
 
     print(f"[4/4] Writing ground-truth metadata to {json_path}...")
+    visible_events = _events_within_duration(duration_s)
+    recurrence = [ev for ev in visible_events if ev.task_type == "sparse_recurring_event"]
     ground_truth_dict = {
         "benchmark_name": "synthetic_bench_60s",
         "duration_s": duration_s,
@@ -478,7 +488,7 @@ def generate_benchmark_suite(
         "width": width,
         "height": height,
         "total_frames": total_frames,
-        "events": [asdict(ev) for ev in GROUND_TRUTH_EVENTS],
+        "events": [asdict(ev) for ev in visible_events],
         "negative_controls": NEGATIVE_CONTROL_TASKS,
         "tasks": {
             "task1_locate_single_event": {
@@ -527,9 +537,9 @@ def generate_benchmark_suite(
                 "task_type": "sparse_recurring_event",
                 "name": "Count Purple Diamond Badges",
                 "prompt": "How many times does the flashing PURPLE DIAMOND badge appear in the video, and at what timestamps?",
-                "target_event_ids": ["task5_recurrence_1", "task5_recurrence_2", "task5_recurrence_3"],
-                "ground_truth_count": 3,
-                "ground_truth_timestamps_s": [7.0, 21.0, 48.0],
+                "target_event_ids": [ev.event_id for ev in recurrence],
+                "ground_truth_count": len(recurrence),
+                "ground_truth_timestamps_s": [ev.start_s for ev in recurrence],
                 "timestamp_tolerance_s": 1.0,
             },
             "task6_negative_control": {
@@ -541,6 +551,23 @@ def generate_benchmark_suite(
                 "acceptable_answers": ["not found", "does not occur", "never appears", "absent", "none", "no"],
             },
         },
+    }
+
+    visible_ids = {ev.event_id for ev in visible_events}
+    required_events = {
+        "task1_locate_single_event": {"task1_supernova"},
+        "task2_temporal_sequence": {"task2_seq_pre", "task2_seq_target", "task2_seq_post"},
+        "task3_transcript_verification": {"task3_transcript_verification"},
+        "task4_visual_state_change": {"task4_visual_state_change"},
+        "task5_sparse_recurring_event": {ev.event_id for ev in recurrence},
+        "task6_negative_control": set(),
+    }
+    tasks = ground_truth_dict["tasks"]
+    ground_truth_dict["tasks"] = {
+        name: spec
+        for name, spec in tasks.items()
+        if required_events.get(name, set()) <= visible_ids
+        and (name != "task5_sparse_recurring_event" or recurrence)
     }
 
     json_path.write_text(json.dumps(ground_truth_dict, indent=2), encoding="utf-8")

@@ -239,3 +239,28 @@ def test_watch_for_refuses_a_one_second_clip_before_bounds_checks(tmp_path):
         mcp_server.handle_call("watch_for", {"source": str(clip), "conditions": ["Is a red box visible?"]})
     assert not isinstance(caught.value, ExtractionBoundsError)
     assert "Nothing was sent" in str(caught.value)
+
+
+def test_check_args_rejects_a_single_string_instead_of_splitting_it_into_characters():
+    from src.core.errors import ExtractionBoundsError
+    from src.media.watch import _check_args
+
+    with pytest.raises(ExtractionBoundsError, match="conditions must be a list"):
+        _check_args("person", 5.0, 0.5, 2, 30.0)
+
+
+def test_watch_nan_start_or_end_raises_bounds_error(tmp_path, monkeypatch):
+    """NaN start/end must raise ExtractionBoundsError, not ValueError (NaN comparisons are false)."""
+    import src.media.watch as watch
+    from src.core.errors import ExtractionBoundsError
+
+    class _Meta:
+        duration_sec = 40.0
+
+    monkeypatch.setattr(watch, "require_switched_on", lambda *args, **kwargs: None)
+    monkeypatch.setattr(watch, "probe_video", lambda path, cache=None, **kwargs: _Meta())
+
+    with pytest.raises(ExtractionBoundsError, match="start_sec must be from 0 up to before end_sec"):
+        watch.watch_for("v.mp4", ["Is a person visible?"], start_sec=float("nan"))
+    with pytest.raises(ExtractionBoundsError, match="start_sec must be from 0 up to before end_sec"):
+        watch.watch_for("v.mp4", ["Is a person visible?"], end_sec=float("nan"))
