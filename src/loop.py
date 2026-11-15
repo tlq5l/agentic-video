@@ -962,6 +962,9 @@ def _judge_candidates(
         message = scrub_jev(exc)
         for item in candidates:
             item.pop("_judge_question", None)
+            # Keep verdicts already validated above; only the rest fall back.
+            if "judge_verdict" in item:
+                continue
             item["judge_verdict"] = {"verdict": "unavailable", "confidence": None, "error": message, "fallback": "rules"}
             item["confirmed"] = item["rule_verdict"] == "fault"
             item["disagreement"] = False

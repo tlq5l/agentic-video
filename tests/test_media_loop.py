@@ -537,3 +537,41 @@ def test_zero_tolerance_is_not_replaced_by_default():
     sync = {"tolerance_ms": 80.0, "cues": [_sync_cue(14.96, "hit near end", "missing")]}
     [defaulted] = _build_candidates(sync, {}, {}, [], intent=intent)
     assert defaulted["rule_verdict"] == "fault"
+
+
+def test_partial_judge_verdict_survives_missing_choice_for_later_candidate():
+    candidates = [
+        {
+            "id": "judged-first", "kind": "cue_late", "start_sec": 2.0, "end_sec": 2.0,
+            "cue_label": "cut whoosh 03",
+            "numbers": {"offset_ms": 250.0, "tolerance_ms": 80.0},
+            "classification": "cue match late", "shape": None,
+            "nearby_cues": [{"time_sec": 2.0, "label": "cut whoosh 03"}],
+            "rule_verdict": "fault",
+        },
+        {
+            "id": "judged-second", "kind": "cue_late", "start_sec": 4.0, "end_sec": 4.0,
+            "cue_label": "cut whoosh 04",
+            "numbers": {"offset_ms": 250.0, "tolerance_ms": 80.0},
+            "classification": "cue match late", "shape": None,
+            "nearby_cues": [{"time_sec": 4.0, "label": "cut whoosh 04"}],
+            "rule_verdict": "fault",
+        },
+    ]
+
+    def client(state, questions):
+        return {"answers": {"candidate_1": {"choice": "intentional per the author's notes", "confidence": 0.9}},
+                "provider": "test", "model": "test"}
+
+    notice = _judge_candidates(candidates, "", judge="jev", client=client)
+    assert notice is not None
+    assert candidates[0]["judge_verdict"] == {
+        "verdict": "intentional per the author's notes",
+        "choice": "intentional per the author's notes", "confidence": 0.9,
+        "provider": "test", "model": "test",
+    }
+    assert candidates[0]["confirmed"] is False
+    assert candidates[0]["disagreement"] is True
+    assert candidates[1]["judge_verdict"]["verdict"] == "unavailable"
+    assert candidates[1]["confirmed"] is True
+    assert candidates[1]["disagreement"] is False
