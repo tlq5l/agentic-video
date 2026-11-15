@@ -376,8 +376,10 @@ def slow_video_url(clip):
         server.server_close()
 
 
-def test_closing_stdin_while_url_download_runs_waits_for_it(slow_video_url, tmp_path):
+def test_closing_stdin_while_url_download_runs_waits_for_it(slow_video_url, tmp_path, monkeypatch):
     """A URL source downloads on a background thread. Closing stdin while the download runs must not exit 0 before the file is complete."""
+    # yt-dlp is installed beside this interpreter (the venv's bin), which the server finds only through PATH.
+    monkeypatch.setenv("PATH", os.path.dirname(sys.executable) + os.pathsep + os.environ["PATH"])
     request = {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
                "params": {"name": "probe_video", "arguments": {"source": slow_video_url}}}
     server = _Server(tmp_path)
