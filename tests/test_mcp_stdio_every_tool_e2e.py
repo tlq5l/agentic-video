@@ -380,6 +380,10 @@ def test_closing_stdin_while_url_download_runs_waits_for_it(slow_video_url, tmp_
     """A URL source downloads on a background thread. Closing stdin while the download runs must not exit 0 before the file is complete."""
     # yt-dlp is installed beside this interpreter (the venv's bin), which the server finds only through PATH.
     monkeypatch.setenv("PATH", os.path.dirname(sys.executable) + os.pathsep + os.environ["PATH"])
+    # Same search as src/media/fetch.py _find_binary, minus ~/.local/bin: the server here runs with HOME under tmp_path.
+    fallbacks = [Path("/opt/homebrew/bin/yt-dlp"), Path("/usr/local/bin/yt-dlp")]
+    if shutil.which("yt-dlp") is None and not any(f.is_file() and os.access(f, os.X_OK) for f in fallbacks):
+        pytest.skip("yt-dlp is not installed; the README install does not add it, and URL sources need it")
     request = {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
                "params": {"name": "probe_video", "arguments": {"source": slow_video_url}}}
     server = _Server(tmp_path)
