@@ -26,6 +26,7 @@ WAIT_SEC = 15.0
 RETRY_AFTER_SECONDS = 15
 DOWNLOAD_TIMEOUT_SEC = 20 * 60
 # The Executor server's PATH only has /opt/homebrew/bin; yt-dlp often lives in ~/.local/bin.
+# The server's own venv bin comes first: the Linux install hint puts yt-dlp there.
 _FALLBACK_BIN_DIRS = (Path.home() / ".local" / "bin", Path("/opt/homebrew/bin"), Path("/usr/local/bin"))
 _TRACKING_PARAMS = {"si", "feature", "fbclid", "gclid", "igshid", "ref_src"}
 
@@ -76,7 +77,7 @@ def _find_binary(name: str) -> Optional[str]:
     found = shutil.which(name)
     if found:
         return found
-    for folder in _FALLBACK_BIN_DIRS:
+    for folder in (Path(sys.executable).parent, *_FALLBACK_BIN_DIRS):
         candidate = folder / name
         if candidate.is_file() and os.access(candidate, os.X_OK):
             return str(candidate)

@@ -382,8 +382,9 @@ def test_closing_stdin_while_url_download_runs_waits_for_it(slow_video_url, tmp_
     """A URL source downloads on a background thread. Closing stdin while the download runs must not exit 0 before the file is complete."""
     # yt-dlp is installed beside this interpreter (the venv's bin), which the server finds only through PATH.
     monkeypatch.setenv("PATH", os.path.dirname(sys.executable) + os.pathsep + os.environ["PATH"])
-    # Same search as src/media/fetch.py _find_binary, minus ~/.local/bin: the server here runs with HOME under tmp_path.
-    fallbacks = [Path("/opt/homebrew/bin/yt-dlp"), Path("/usr/local/bin/yt-dlp")]
+    # The fallback folders of src/media/fetch.py _find_binary, minus those under the test host's HOME: the server here runs with HOME under tmp_path.
+    from src.media import fetch
+    fallbacks = [d / "yt-dlp" for d in fetch._FALLBACK_BIN_DIRS if not d.is_relative_to(Path.home())]
     if shutil.which("yt-dlp") is None and not any(f.is_file() and os.access(f, os.X_OK) for f in fallbacks):
         pytest.skip("yt-dlp is not installed; the README install does not add it, and URL sources need it")
     request = {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
@@ -450,3 +451,20 @@ def test_missing_yt_dlp_hint_is_a_command_that_runs_as_printed(tmp_path):
     assert syntax.returncode == 0, (line, syntax.stderr)
     argv = shlex.split(line)
     assert os.path.samefile(argv[argv.index("--python") + 1], python), line
+
+
+def test_yt_dlp_beside_the_server_python_is_found(tmp_path):
+    """yt-dlp installed in the server's own venv bin (the folder the hint installs into) is found although PATH does not include it."""
+    python, extra = _space_venv(tmp_path)
+    fake = python.parent / "yt-dlp"
+    fake.write_text("#!/bin/sh\necho 'ERROR: fake yt-dlp ran' >&2\nexit 1\n", encoding="utf-8")
+    fake.chmod(0o755)
+    server = _Server(tmp_path, python=str(python), env_extra={"PATH": "/usr/bin:/bin", **extra})
+    try:
+        server.send(INITIALIZE)
+        server.send(INITIALIZED)
+        raw = _probe_until_settled(server, 3, HINT_URL)
+    finally:
+        server.abort()
+    assert "ERROR: fake yt-dlp ran" in raw, raw[-600:]
+    assert "is not installed" not in raw, raw[-600:]
