@@ -83,8 +83,11 @@ def parse_srt_or_vtt(subtitle_path: Path) -> List[TranscriptSegment]:
 
 def _find_sidecar(video_path: Path, subtitle_override: Optional[str]) -> Optional[Path]:
     """Resolve the subtitle source before consulting the transcript cache."""
-    if subtitle_override and Path(subtitle_override).exists():
-        return Path(subtitle_override).resolve()
+    if subtitle_override:
+        override_path = Path(subtitle_override)
+        if override_path.exists():
+            return override_path.resolve()
+        raise MediaNotFoundError(f"Subtitle override not found: {subtitle_override}")
     for ext in [".vtt", ".srt"]:
         candidate = video_path.with_suffix(ext)
         if candidate.exists():
