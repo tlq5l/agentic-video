@@ -144,6 +144,22 @@ def test_jev_error_and_report_scrub_configured_keys(monkeypatch):
     assert candidates[0]["confirmed"] is True
 
 
+def test_jev_error_truncation_does_not_leak_key_prefix(monkeypatch):
+    secret = "synthetic-typesafe-private-token"
+    monkeypatch.setenv("TYPESAFE_API_KEY", secret)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
+    def failing_urlopen(request, timeout):
+        body = ("a" * 495 + secret).encode()
+        raise urllib.error.HTTPError(request.full_url, 401, "unauthorized", {}, io.BytesIO(body))
+
+    with pytest.raises(RuntimeError) as excinfo:
+        jev.decide({}, {}, urlopen=failing_urlopen)
+    error = str(excinfo.value)
+    assert secret[:5] not in error
+    assert secret not in error
+
+
 def test_ambiguous_items_are_separate_from_confirmed_problems_in_fixer_brief(tmp_path):
     candidates = [
         {
@@ -506,3 +522,18 @@ def test_intent_ranges_are_half_open_at_their_end():
     assert candidates["hit end"]["rule_verdict"] == "fault"
     assert "intent_note" not in candidates["hit end"]
     assert "Muffled" not in _relevant_intent(intent, candidates["hit end"])
+
+
+def test_zero_tolerance_is_not_replaced_by_default():
+    from src.loop import _build_candidates
+
+    intent = "Muffled from 12.5 s through 15.000 s. Then the drop."
+    # With an explicit 0 tolerance a cue 40 ms before the end is inside the
+    # section; the 80 ms default would judge it normally (fault).
+    sync = {"tolerance_ms": 0.0, "cues": [_sync_cue(14.96, "hit near end", "missing")]}
+    [row] = _build_candidates(sync, {}, {}, [], intent=intent)
+    assert row["rule_verdict"] == "informational"
+
+    sync = {"tolerance_ms": 80.0, "cues": [_sync_cue(14.96, "hit near end", "missing")]}
+    [defaulted] = _build_candidates(sync, {}, {}, [], intent=intent)
+    assert defaulted["rule_verdict"] == "fault"
