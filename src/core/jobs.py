@@ -39,6 +39,12 @@ def track(thread: threading.Thread) -> threading.Thread:
     return thread
 
 
+def untrack(thread: threading.Thread) -> None:
+    """Drop a tracked thread whose start() failed: it never ran, so finish() must not wait for it."""
+    with _LOCK:
+        _THREADS[:] = [item for item in _THREADS if item is not thread]
+
+
 def cancelled() -> bool:
     """True once finish() has begun: a job should stop at its next checkpoint and start no new unit of work."""
     return _CANCEL.is_set()

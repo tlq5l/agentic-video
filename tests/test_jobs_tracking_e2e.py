@@ -53,3 +53,24 @@ def test_finish_waits_for_a_tracked_thread_that_starts_after_finish_begins():
     alive = jobs.finish()
     assert not late.is_alive() and done == [True], "finish() returned before a tracked thread that started later had ended"
     assert alive == [], alive
+
+
+def test_a_start_that_fails_does_not_make_finish_wait_for_its_bound(monkeypatch):
+    # The shadow-trial caller tracks its thread, then start() raises; the caller swallows that failure. The thread never ran,
+    # so finish() must not hold the server for its whole bound waiting for it.
+    from src.transcript import shadow_cf_asr
+
+    monkeypatch.setenv(shadow_cf_asr.SWITCH_ENV, "test-host")
+    monkeypatch.setattr(shadow_cf_asr.socket, "gethostname", lambda: "test-host")
+
+    def refuse_to_start(self):
+        raise RuntimeError("can't start new thread")
+
+    monkeypatch.setattr(threading.Thread, "start", refuse_to_start)
+    shadow_cf_asr.start_in_background(source_path="unused.mp4")  # never raises
+    monkeypatch.undo()
+
+    began = time.monotonic()
+    alive = jobs.finish(bound_sec=5)
+    elapsed = time.monotonic() - began
+    assert alive == [] and elapsed < 1.0, (alive, round(elapsed, 2))

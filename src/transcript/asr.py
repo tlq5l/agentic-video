@@ -287,6 +287,7 @@ class _BackgroundTranscriptionSlot:
         try:
             worker.start()
         except Exception:
+            jobs.untrack(worker)
             _release_background_process_lock(process_lock)
             with self._lock:
                 if self._active == key:
