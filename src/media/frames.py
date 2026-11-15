@@ -341,8 +341,9 @@ def extract_single_frame(
         out_file = Path(output_path).resolve()
         out_file.parent.mkdir(parents=True, exist_ok=True)
         
-    # Check if cached already exists
-    if out_file.exists() and out_file.stat().st_size > 0:
+    # Check if cached already exists; only cache-managed paths encode the
+    # fingerprint, timestamp, width and overlay in their location.
+    if output_path is None and out_file.exists() and out_file.stat().st_size > 0:
         for attempt in range(4):
             try:
                 from PIL import Image
