@@ -128,3 +128,15 @@ def test_gate_b_parser_accepts_short_webvtt_and_skips_invalid_cues(tmp_path):
         (2.5, 3.25, "Short form cue"),
         (5.0, 6.0, "Valid after invalid"),
     ]
+
+
+def test_gate_b_parser_keeps_digit_only_caption_text(tmp_path):
+    path = tmp_path / "digits.srt"
+    path.write_text(
+        "1\n00:00:01,000 --> 00:00:02,000\n123\n",
+        encoding="utf-8",
+    )
+    segments = parse_srt_or_vtt(path)
+    assert [(s.start_sec, s.end_sec, s.text) for s in segments] == [
+        (1.0, 2.0, "123"),
+    ]

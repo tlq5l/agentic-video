@@ -67,7 +67,9 @@ def parse_srt_or_vtt(subtitle_path: Path) -> List[TranscriptSegment]:
             
             text_lines = []
             i += 1
-            while i < len(lines) and lines[i].strip() and not lines[i].strip().isdigit():
+            while i < len(lines) and lines[i].strip():
+                if lines[i].strip().isdigit() and i + 1 < len(lines) and parse_timing_line(lines[i + 1].strip()):
+                    break
                 text_lines.append(lines[i].strip())
                 i += 1
             text = " ".join(text_lines)
