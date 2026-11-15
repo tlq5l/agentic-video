@@ -23,6 +23,8 @@ import json
 import os
 import subprocess
 import threading
+
+from src.core import jobs
 import uuid
 from collections import OrderedDict
 from pathlib import Path
@@ -267,14 +269,23 @@ def _write_disk(entry: Path, clip: _Clip) -> None:
     entry.mkdir(parents=True, exist_ok=True)
     tag = f"{os.getpid()}.{uuid.uuid4().hex[:8]}"
     arrays = {"rgb": clip.rgb, **{k: clip.index[k] for k in ARRAYS if k != "rgb"}}
-    for name, arr in arrays.items():
-        tmp = entry / f".{name}.{tag}.npy"
-        np.save(tmp, np.asarray(arr))
-        os.replace(tmp, entry / f"{name}.npy")
+    temps = {name: entry / f".{name}.{tag}.npy" for name in arrays}
+    tmp_meta = entry / f".meta.{tag}.json"  # written last: it marks a complete entry
     meta = dict(clip.meta, version=VERSION, fingerprint=clip.fingerprint, scalars=clip.index["scalars"])
-    tmp = entry / f".meta.{tag}.json"  # meta is written last: it marks a complete entry
-    tmp.write_text(json.dumps(meta))
-    os.replace(tmp, entry / "meta.json")
+    placed = []
+    try:
+        for name, arr in arrays.items():
+            np.save(temps[name], np.asarray(arr))
+        tmp_meta.write_text(json.dumps(meta))
+        for name in arrays:
+            os.replace(temps[name], entry / f"{name}.npy")
+            placed.append(entry / f"{name}.npy")
+        os.replace(tmp_meta, entry / "meta.json")
+    except BaseException:
+        # A failed or interrupted write removes what it placed, so no array is left without its meta.json.
+        for path in [*temps.values(), tmp_meta, *placed]:
+            path.unlink(missing_ok=True)
+        raise
 
 
 def _read_disk(entry: Path, fingerprint: str) -> Optional[_Clip]:
@@ -365,7 +376,7 @@ def _tool_open(args: Dict[str, Any]) -> Dict[str, Any]:
         if thread is None or not thread.is_alive():
             thread = threading.Thread(target=_build_in_background, args=(str(path), fingerprint), daemon=True, name=f"motion-{fingerprint[:8]}")
             _PENDING[fingerprint] = thread
-            thread.start()
+            jobs.start(thread)
     return {"status": "in_progress", "retry_after_seconds": 1, "fingerprint": fingerprint}
 
 

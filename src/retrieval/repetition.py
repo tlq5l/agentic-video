@@ -15,6 +15,8 @@ import shutil
 import subprocess
 import tempfile
 import threading
+
+from src.core import jobs
 import time
 
 import numpy as np
@@ -591,5 +593,5 @@ def submit(engine, **args):
                 _jobs[key] = result
         _worker = threading.Thread(target=work, name="repetition-count", daemon=True)
         _worker_key = key
-        _worker.start()
+        jobs.start(_worker)
         return {"status": "in_progress", "retry_after_seconds": 2}

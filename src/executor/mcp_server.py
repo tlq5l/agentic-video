@@ -15,6 +15,7 @@ from typing import Dict, Any, Iterator, List, Optional, Tuple
 from src.media.cloudflare import require_switched_on
 from src.retrieval import ocr
 from src.retrieval.engine import AgenticVideoEngine
+from src.core import jobs
 from src.core.config import Config
 from src.core.errors import AgenticVideoError, MediaNotFoundError, as_dependency_error
 from src.media import fetch, visual_timing
@@ -1466,6 +1467,20 @@ def run_stdio_server():
             }
             sys.stdout.write(json.dumps(resp) + "\n")
             sys.stdout.flush()
+    return _finish_at_eof()
+
+
+def _finish_at_eof():
+    """The client closed stdin. Background jobs get the chance to finish (a visual index stops after its current chunk);
+    exit 0 only once every job has finished. Past the bound, name the jobs still running and return 1."""
+    sys.stdout.flush()
+    alive = jobs.finish()
+    if not alive:
+        return 0
+    print(f"agentic-video: stdin closed while background jobs were still running after {jobs.SHUTDOWN_BOUND_SEC:g} s "
+          f"({', '.join(alive)}); the server exits with code 1. Chunks already saved are kept.", file=sys.stderr)
+    return 1
+
 
 def _package_version():
     """Installed package version; "dev" when run from a source checkout (how Executor starts it)."""
@@ -1536,11 +1551,11 @@ def main(argv=None):
         )
         return 0 if args in (["-h"], ["--help"]) else 2
     else:
-        run_stdio_server()
+        return run_stdio_server()
     return 0
 
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         sys.exit(_cli(sys.argv[1:]))
-    run_stdio_server()
+    sys.exit(run_stdio_server())

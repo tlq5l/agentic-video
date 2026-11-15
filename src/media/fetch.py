@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Dict, Iterable, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+from src.core import jobs
 from src.core.config import Config
 
 # Executor drops a call at 60 s and frame extraction may use up to 40 s after the
@@ -142,8 +143,8 @@ def _start_job(url: str, target: Path) -> _Job:
         job = _JOBS.get(target)
         if job is None:
             job = _JOBS[target] = _Job()
-            threading.Thread(target=_run_job, args=(url, target, job),
-                             name=f"agentic-video-download-{target.stem[:12]}", daemon=True).start()
+            jobs.start(threading.Thread(target=_run_job, args=(url, target, job),
+                                        name=f"agentic-video-download-{target.stem[:12]}", daemon=True))
     return job
 
 

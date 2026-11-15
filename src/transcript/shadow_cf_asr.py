@@ -37,6 +37,7 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional
 
+from src.core import jobs
 from src.media import cloudflare
 
 try:
@@ -246,8 +247,8 @@ def start_in_background(**fresh_run: Any) -> None:
     try:
         if not _switch_names_this_host():
             return
-        threading.Thread(target=start_after_fresh_run, kwargs=fresh_run, name="agentic-video-shadow-prepare",
-                         daemon=True).start()
+        jobs.start(threading.Thread(target=start_after_fresh_run, kwargs=fresh_run,
+                                    name="agentic-video-shadow-prepare", daemon=True))
     except Exception:
         return
 

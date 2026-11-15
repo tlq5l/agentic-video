@@ -25,6 +25,8 @@ import subprocess
 import tempfile
 import threading
 
+from src.core import jobs
+
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
@@ -872,5 +874,5 @@ def submit(engine, **args):
                 _jobs[key] = result
         _worker = threading.Thread(target=work, name="occurrence-count", daemon=True)
         _worker_key = key
-        _worker.start()
+        jobs.start(_worker)
         return {"status": "in_progress", "retry_after_seconds": 5}
