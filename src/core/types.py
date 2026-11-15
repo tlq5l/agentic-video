@@ -7,6 +7,7 @@ def format_timestamp(seconds: float) -> str:
     """Format seconds into HH:MM:SS.mmm timecode."""
     if seconds < 0:
         seconds = 0.0
+    seconds = round(seconds, 3)
     hours = int(seconds // 3600)
     minutes = int((seconds % 3600) // 60)
     secs = seconds % 60
