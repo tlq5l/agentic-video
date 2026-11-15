@@ -1,7 +1,9 @@
 """A video URL as `source`: normalized, downloaded once in the background, cached, and reported."""
 
 import json
+import shlex
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -149,7 +151,8 @@ def test_missing_yt_dlp_says_how_to_fix(ytdlp, monkeypatch):
     result = handle_call("probe_video", {"source": X_URL})
     message = result["error"]["message"]
     assert "yt-dlp is not installed" in message and "local path" in message
-    assert "brew install yt-dlp" in message and "uv pip install --python" in message  # macOS and Linux installs
+    assert "brew install yt-dlp" in message  # macOS install
+    assert f"Linux: uv pip install --python {shlex.quote(sys.executable)} yt-dlp" in message  # Linux install, runnable as printed
 
 
 # ---- output contract --------------------------------------------------------

@@ -7,6 +7,7 @@ The protocol test checks two stdio rules: a notification (no id) gets no reply, 
 import json
 import os
 import queue
+import re
 import shlex
 import shutil
 import subprocess
@@ -111,13 +112,14 @@ def _status(result):
 class _Server:
     """One stdio server process kept open: requests go in as the test makes them, replies come back by id, and stdin closes only on close()."""
 
-    def __init__(self, tmp_path):
+    def __init__(self, tmp_path, python=None, env_extra=None):
         home = tmp_path / "home"
         home.mkdir(exist_ok=True)
         self.stderr_path = tmp_path / "server-stderr.txt"
         self.stderr = self.stderr_path.open("w")
-        self.proc = subprocess.Popen([sys.executable, "-m", "src.executor.mcp_server"], stdin=subprocess.PIPE,
-                                     stdout=subprocess.PIPE, stderr=self.stderr, text=True, cwd=ROOT, env=_server_env(home))
+        env = {**_server_env(home), **(env_extra or {})}
+        self.proc = subprocess.Popen([python or sys.executable, "-m", "src.executor.mcp_server"], stdin=subprocess.PIPE,
+                                     stdout=subprocess.PIPE, stderr=self.stderr, text=True, cwd=ROOT, env=env)
         self.replies = queue.Queue()
         self.by_id = {}
         threading.Thread(target=self._read_replies, daemon=True).start()
@@ -401,3 +403,50 @@ def test_closing_stdin_while_url_download_runs_waits_for_it(slow_video_url, tmp_
         assert downloads and all(p.stat().st_size > 0 for p in downloads), "exit 0 while the download had not finished"
     else:
         assert returncode == 1, (returncode, stderr[-2000:])
+
+
+# ---- the yt-dlp hint and discovery, over stdio (the server runs from a venv, HOME under tmp_path) ----
+HINT_URL = "https://example.com/clip.mp4"
+
+
+def _space_venv(tmp_path):
+    """A venv under a folder whose name has a space; this test host's packages are put on PYTHONPATH."""
+    venv = tmp_path / "with space" / "venv"
+    subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(venv)], check=True, timeout=300)
+    host_packages = os.pathsep.join(p for p in sys.path if "site-packages" in p)
+    return venv / "bin" / "python", {"PYTHONPATH": host_packages}
+
+
+def _probe_until_settled(server, first_id, url):
+    """Call probe_video as an MCP caller does, repeating while the download is in progress; return the last reply as text."""
+    raw = ""
+    for rid in range(first_id, first_id + 20):
+        server.send({"jsonrpc": "2.0", "id": rid, "method": "tools/call",
+                     "params": {"name": "probe_video", "arguments": {"source": url}}})
+        raw = json.dumps(server.reply(rid)["result"])
+        if "in_progress" not in raw:
+            return raw
+        time.sleep(0.5)
+    raise AssertionError("probe_video still in progress after 20 calls: " + raw[-500:])
+
+
+def test_missing_yt_dlp_hint_is_a_command_that_runs_as_printed(tmp_path):
+    """No yt-dlp where the server looks, and a server python under a folder with a space: the Linux install line in the reply must be valid shell naming that python."""
+    from src.media import fetch
+    if any((d / "yt-dlp").is_file() for d in fetch._FALLBACK_BIN_DIRS):
+        pytest.skip("yt-dlp sits in a fallback folder of this host, so the hint is never printed")
+    python, extra = _space_venv(tmp_path)
+    server = _Server(tmp_path, python=str(python), env_extra={"PATH": "/usr/bin:/bin", **extra})
+    try:
+        server.send(INITIALIZE)
+        server.send(INITIALIZED)
+        raw = _probe_until_settled(server, 3, HINT_URL)
+    finally:
+        server.abort()
+    match = re.search(r"Linux: (uv pip install --python (.+?) yt-dlp)\)", raw)
+    assert match, raw[-600:]
+    line = match.group(1)
+    syntax = subprocess.run(["bash", "-n", "-c", line], capture_output=True, text=True)
+    assert syntax.returncode == 0, (line, syntax.stderr)
+    argv = shlex.split(line)
+    assert os.path.samefile(argv[argv.index("--python") + 1], python), line

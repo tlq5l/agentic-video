@@ -6,8 +6,10 @@ longer than ``WAIT_SEC``; the caller repeats the call until the file is ready.
 import hashlib
 import os
 import re
+import shlex
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -92,7 +94,7 @@ def _download(url: str, target: Path) -> None:
     yt_dlp = _find_binary("yt-dlp")
     if yt_dlp is None:
         raise DownloadError(
-            f"Could not download {url}: yt-dlp is not installed (macOS: brew install yt-dlp; Linux: uv pip install --python <the server's python> yt-dlp). "
+            f"Could not download {url}: yt-dlp is not installed (macOS: brew install yt-dlp; Linux: uv pip install --python {shlex.quote(sys.executable)} yt-dlp). "
             "Download the video yourself and pass its local path as `source`.")
     target.parent.mkdir(parents=True, exist_ok=True)
     temp_stem = f"{target.stem}.tmp-{uuid.uuid4().hex}"
