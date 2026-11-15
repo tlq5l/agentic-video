@@ -309,6 +309,31 @@ def _add_note(data: Dict[str, Any], text: str) -> None:
     data["note"] = f"{data['note']} {text}" if data.get("note") else text
 
 
+PERIOD_PAIR_STEP_SEC = 1 / 15  # one frame at the 15 fps cap
+
+
+def _keep_period_pair_ordered(name: str, args: Dict[str, Any], limited: Dict[str, Any], clamped: Dict[str, Any]) -> None:
+    """Clamping min_period_sec and max_period_sec one at a time can make a valid pair equal: both below the low bound
+    (2/15 s) or both above the high one (180 s). Then the end that sits on the bound moves one frame inward, so min stays
+    below max. Only a pair that was valid as requested is repaired; an inverted or equal pair still reaches the engine."""
+    if name != "count_repetitions":
+        return
+    low, high, _advice = CLAMPED_RANGES[name]["min_period_sec"]
+    requested = (args.get("min_period_sec"), args.get("max_period_sec"))
+    if not all(isinstance(v, (int, float)) and not isinstance(v, bool) and (isinstance(v, int) or math.isfinite(v))
+               for v in requested):
+        return
+    if not requested[0] < requested[1] or limited["min_period_sec"] < limited["max_period_sec"]:
+        return
+    if limited["max_period_sec"] <= low:
+        end = "max_period_sec"
+        limited[end] = low + PERIOD_PAIR_STEP_SEC
+    else:
+        end = "min_period_sec"
+        limited[end] = high - PERIOD_PAIR_STEP_SEC
+    clamped.setdefault(end, args[end])
+
+
 def _clamp_args(name: str, args: Dict[str, Any]) -> tuple:
     """Lower over-cap arguments to their cap and move out-of-range ones into their range. Returns (args, {arg: requested value})."""
     clamped: Dict[str, Any] = {}
@@ -326,6 +351,7 @@ def _clamp_args(name: str, args: Dict[str, Any]) -> tuple:
                 and not low <= value <= high):
             limited[arg] = min(max(value, low), high)
             clamped[arg] = value
+    _keep_period_pair_ordered(name, args, limited, clamped)
     return limited, clamped
 
 
@@ -337,8 +363,8 @@ def _fmt_num(value: Any) -> str:
         return f"an integer of {value.bit_length()} bits"
 
 
-def _report_clamps(name: str, data: Dict[str, Any], clamped: Dict[str, Any]) -> None:
-    """Say which arguments were lowered to their cap, and what to do instead."""
+def _report_clamps(name: str, data: Dict[str, Any], clamped: Dict[str, Any], used: Dict[str, Any]) -> None:
+    """Say which arguments were lowered to their cap or moved into their range, the value used, and what to do instead."""
     for arg, requested in clamped.items():
         if arg in CLAMPED_ARGS.get(name, {}):
             cap, advice = CLAMPED_ARGS[name][arg]
@@ -346,8 +372,10 @@ def _report_clamps(name: str, data: Dict[str, Any], clamped: Dict[str, Any]) -> 
             _add_note(data, f"{arg} capped at {cap} (requested {_fmt_num(requested)}). {advice}")
         else:
             low, high, advice = CLAMPED_RANGES[name][arg]
-            kept = min(max(requested, low), high)
-            _add_note(data, f"{arg} set to {kept:g} (requested {_fmt_num(requested)}; valid range {low:g} to {high:g}). {advice}")
+            note = f"{arg} set to {used[arg]:g} (requested {_fmt_num(requested)}; valid range {low:g} to {high:g})."
+            if used[arg] != min(max(requested, low), high):
+                note += f" Moved one frame ({PERIOD_PAIR_STEP_SEC:.3g} s) so min_period_sec stays below max_period_sec."
+            _add_note(data, f"{note} {advice}")
 
 
 def _bound_list(data: Dict[str, Any], key: str, limit: int, advice: str) -> None:
@@ -875,7 +903,7 @@ def handle_call(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         data = outcome["data"] = dict(outcome["data"])
         if source_url:
             data.update(source_url=source_url, local_path=args["source"])
-        _report_clamps(name, data, clamped)
+        _report_clamps(name, data, clamped, args)
         if name == "transcribe":
             _fit_transcript(data)
         if unknown:

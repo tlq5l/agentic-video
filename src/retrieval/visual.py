@@ -66,12 +66,14 @@ CLIP_WEIGHTS_MISSING_MESSAGE = (
 
 
 def hf_hub_cache():
-    """The Hugging Face hub cache as huggingface_hub/constants.py resolves it: HF_HUB_CACHE, else HF_HOME/hub, else
-    XDG_CACHE_HOME/huggingface/hub. Values may start with ~ or hold $VARS, as they do there."""
+    """The Hugging Face hub cache as huggingface_hub/constants.py resolves it: HF_HUB_CACHE, else HUGGINGFACE_HUB_CACHE,
+    else HF_HOME/hub, else XDG_CACHE_HOME/huggingface/hub. Values may start with ~ or hold $VARS, as they do there.
+    Read at call time, so a changed environment is seen."""
     def resolve(value):
         return os.path.expandvars(os.path.expanduser(value))
-    if os.environ.get("HF_HUB_CACHE"):
-        return Path(resolve(os.environ["HF_HUB_CACHE"]))
+    for name in ("HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE"):
+        if os.environ.get(name):
+            return Path(resolve(os.environ[name]))
     if os.environ.get("HF_HOME"):
         return Path(resolve(os.environ["HF_HOME"])) / "hub"
     return Path(resolve(os.environ.get("XDG_CACHE_HOME") or "~/.cache")) / "huggingface" / "hub"
