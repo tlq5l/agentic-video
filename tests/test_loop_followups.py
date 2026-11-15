@@ -996,3 +996,18 @@ def test_frozen_picture_inside_intent_is_informational_and_judged_clearly():
     assert row["kind"] == "frozen_picture" and row["rule_verdict"] == "informational"
     from src.loop import _judge_question_text
     assert "picture barely changes" in _judge_question_text(row, "")
+
+
+def test_loudness_step_chained_overlaps_merge_into_one_candidate():
+    outliers = [
+        {"start_sec": 0.0, "end_sec": 10.0, "direction": "boost", "fault_level": True,
+         "shape": "step", "delta_db": 9.0, "band": "mid", "classification": "step up"},
+        {"start_sec": 9.0, "end_sec": 11.0, "direction": "boost", "fault_level": True,
+         "shape": "step", "delta_db": 9.5, "band": "mid", "classification": "step up"},
+        {"start_sec": 10.5, "end_sec": 20.0, "direction": "boost", "fault_level": True,
+         "shape": "step", "delta_db": 10.0, "band": "mid", "classification": "step up"},
+    ]
+    rows = _build_candidates({}, {"outliers": outliers}, {}, [])
+    steps = [row for row in rows if row["kind"] == "loudness_step"]
+    assert len(steps) == 1
+    assert steps[0]["start_sec"] == 0.0 and steps[0]["end_sec"] == 20.0

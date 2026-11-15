@@ -378,8 +378,9 @@ def _build_candidates(
         start, end = float(item["start_sec"]), float(item["end_sec"])
         group = next((existing for existing in step_groups if
                       item.get("direction") == existing[0].get("direction")
-                      and min(end, float(existing[0]["end_sec"]))
-                      >= max(start, float(existing[0]["start_sec"]))), None)
+                      and any(min(end, float(member["end_sec"]))
+                              >= max(start, float(member["start_sec"]))
+                              for member in existing)), None)
         if group is None:
             step_groups.append([item])
         else:
