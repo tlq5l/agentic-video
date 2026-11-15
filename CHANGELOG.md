@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (0.3.8)
+## 0.3.8 (2026-11-15)
 
 - Missing ffmpeg: the one-line error names the tool that is missing (ffmpeg or ffprobe) and gives the install command for macOS, Debian or Ubuntu, and Windows. The `agentic-video-check` command exits with code 2 in that case. (#91)
 - The on-screen text and visual search setup message ends with the download command, so pasting it runs as printed. Before, a stray period made Python fail with a SyntaxError. The "Nothing was downloaded" sentence now comes before the command. (#92)
