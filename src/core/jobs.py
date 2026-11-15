@@ -39,6 +39,18 @@ def track(thread: threading.Thread) -> threading.Thread:
     return thread
 
 
+def start(thread: threading.Thread) -> threading.Thread:
+    """Track a job thread, then start it: the one way a launch site runs a job. If start() raises, the thread never ran,
+    so it is untracked (finish() must not wait for it) and the error is re-raised."""
+    track(thread)
+    try:
+        thread.start()
+    except BaseException:
+        untrack(thread)
+        raise
+    return thread
+
+
 def untrack(thread: threading.Thread) -> None:
     """Drop a tracked thread whose start() failed: it never ran, so finish() must not wait for it."""
     with _LOCK:
@@ -71,7 +83,8 @@ def finish(bound_sec: float = SHUTDOWN_BOUND_SEC) -> List[str]:
             else:
                 time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
         with _LOCK:
-            return [thread.name for thread in _THREADS if _alive(thread)]
+            # A thread still not started at the bound is named too: finish() waited on it, so it must not pass as done.
+            return [thread.name for thread in _THREADS if _alive(thread) or not _started(thread)]
     finally:
         # Cleared on return: a stdio run that happens in-process (tests) must not leave later jobs cancelled.
         _CANCEL.clear()

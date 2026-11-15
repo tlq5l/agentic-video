@@ -4,6 +4,8 @@ another job starts as it ends, and track() must keep a thread that another calle
 import threading
 import time
 
+import pytest
+
 from src.core import jobs
 
 
@@ -74,3 +76,37 @@ def test_a_start_that_fails_does_not_make_finish_wait_for_its_bound(monkeypatch)
     alive = jobs.finish(bound_sec=5)
     elapsed = time.monotonic() - began
     assert alive == [] and elapsed < 1.0, (alive, round(elapsed, 2))
+
+
+def test_a_start_that_fails_at_a_launch_site_that_does_not_catch_does_not_hold_finish(monkeypatch, tmp_path):
+    # fetch._start_job tracks its download thread and starts it without catching: the start failure reaches the tool
+    # caller. The thread never ran, so finish() must not hold the server for its whole bound waiting for it.
+    from src.media import fetch
+
+    real_start = threading.Thread.start
+    refused = []
+
+    def refuse_first_start(self):
+        if not refused:
+            refused.append(self)
+            raise RuntimeError("can't start new thread")
+        real_start(self)
+
+    monkeypatch.setattr(threading.Thread, "start", refuse_first_start)
+    with pytest.raises(RuntimeError):
+        fetch._start_job("https://example.invalid/clip.mp4", tmp_path / "clip.mp4")
+    assert refused, "the patched start() never ran: the launch site did not start a thread"
+
+    began = time.monotonic()
+    alive = jobs.finish(bound_sec=5)
+    elapsed = time.monotonic() - began
+    assert alive == [] and elapsed < 1.0, (alive, round(elapsed, 2))
+
+
+def test_a_tracked_thread_not_started_at_the_deadline_is_named_not_omitted():
+    waiting = jobs.track(threading.Thread(target=lambda: None, name="never-started", daemon=True))
+    try:
+        alive = jobs.finish(bound_sec=0.3)
+        assert "never-started" in alive, alive
+    finally:
+        jobs.untrack(waiting)  # a thread that never starts would stay tracked and hold every later finish() to its bound

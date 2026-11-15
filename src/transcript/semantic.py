@@ -293,7 +293,7 @@ def _chunk_vectors(fingerprint: str, chunks: List[dict]) -> np.ndarray:
         job = _JOBS.get(key)
         if job is None:
             job = _JOBS[key] = _Job()
-            jobs.track(threading.Thread(target=_build, args=(fingerprint, key, chunks, job), daemon=True)).start()
+            jobs.start(threading.Thread(target=_build, args=(fingerprint, key, chunks, job), daemon=True))
     if not job.done.wait(INDEX_WAIT_SEC):
         raise SemanticUnavailable(
             f"the semantic index for this video is still building ({time.monotonic() - job.started:.0f} s so far); "

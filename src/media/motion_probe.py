@@ -374,9 +374,9 @@ def _tool_open(args: Dict[str, Any]) -> Dict[str, Any]:
     with _STORE_LOCK:
         thread = _PENDING.get(fingerprint)
         if thread is None or not thread.is_alive():
-            thread = jobs.track(threading.Thread(target=_build_in_background, args=(str(path), fingerprint), daemon=True, name=f"motion-{fingerprint[:8]}"))
+            thread = threading.Thread(target=_build_in_background, args=(str(path), fingerprint), daemon=True, name=f"motion-{fingerprint[:8]}")
             _PENDING[fingerprint] = thread
-            thread.start()
+            jobs.start(thread)
     return {"status": "in_progress", "retry_after_seconds": 1, "fingerprint": fingerprint}
 
 

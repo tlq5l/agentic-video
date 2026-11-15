@@ -279,15 +279,13 @@ class _BackgroundTranscriptionSlot:
                 # The cache is saved and the slot is free; the shadow trial (a detached child) never raises here.
                 shadow_cf_asr.start_after_fresh_run(**fresh_run)
 
-        worker = jobs.track(threading.Thread(
-            target=run,
-            name="agentic-video-asr",
-            daemon=True,
-        ))
         try:
-            worker.start()
+            jobs.start(threading.Thread(
+                target=run,
+                name="agentic-video-asr",
+                daemon=True,
+            ))
         except Exception:
-            jobs.untrack(worker)
             _release_background_process_lock(process_lock)
             with self._lock:
                 if self._active == key:

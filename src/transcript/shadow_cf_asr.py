@@ -247,12 +247,8 @@ def start_in_background(**fresh_run: Any) -> None:
     try:
         if not _switch_names_this_host():
             return
-        worker = jobs.track(threading.Thread(target=start_after_fresh_run, kwargs=fresh_run,
-                                             name="agentic-video-shadow-prepare", daemon=True))
-        try:
-            worker.start()
-        except Exception:
-            jobs.untrack(worker)  # never ran: finish() must not wait for it
+        jobs.start(threading.Thread(target=start_after_fresh_run, kwargs=fresh_run,
+                                    name="agentic-video-shadow-prepare", daemon=True))
     except Exception:
         return
 

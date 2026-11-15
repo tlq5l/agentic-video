@@ -143,8 +143,8 @@ def _start_job(url: str, target: Path) -> _Job:
         job = _JOBS.get(target)
         if job is None:
             job = _JOBS[target] = _Job()
-            jobs.track(threading.Thread(target=_run_job, args=(url, target, job),
-                                        name=f"agentic-video-download-{target.stem[:12]}", daemon=True)).start()
+            jobs.start(threading.Thread(target=_run_job, args=(url, target, job),
+                                        name=f"agentic-video-download-{target.stem[:12]}", daemon=True))
     return job
 
 

@@ -872,7 +872,7 @@ def submit(engine, **args):
                 result = {"status": "error", "message": str(as_dependency_error(exc))}
             with _jobs_lock:
                 _jobs[key] = result
-        _worker = jobs.track(threading.Thread(target=work, name="occurrence-count", daemon=True))
+        _worker = threading.Thread(target=work, name="occurrence-count", daemon=True)
         _worker_key = key
-        _worker.start()
+        jobs.start(_worker)
         return {"status": "in_progress", "retry_after_seconds": 5}

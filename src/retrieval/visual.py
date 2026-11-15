@@ -565,10 +565,10 @@ def submit(engine, operation, **args):
             with _jobs_lock:
                 _jobs[key] = result
 
-        worker = jobs.track(threading.Thread(target=work, name=f"visual-{operation}", daemon=True))
+        worker = threading.Thread(target=work, name=f"visual-{operation}", daemon=True)
         if operation == "build":
             _worker = worker
         else:
             _search_worker = worker
-        worker.start()
+        jobs.start(worker)
         return {"status": "queued", "message": "Repeat the same tool call to poll progress."}
