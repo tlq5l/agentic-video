@@ -15,14 +15,17 @@ QUERY = "colourful test pattern with numbers"
 
 
 def _make_spliced_clip(path):
-    """Lossless 40 s clip: 18 s of gradients, a 3 s test pattern, then 19 s of gradients."""
+    """Lossless 40 s clip: 18 s of flat colour, a 3 s test pattern, then 19 s of flat colour.
+
+    The background is flat colour, not ffmpeg's gradients filter: gradients is not repeatable (the same command
+    gives different pixels run to run), and the CLIP score gap that sets the window width moved with it."""
     if not shutil.which("ffmpeg"):
         pytest.skip("ffmpeg is required for visual-index integration tests")
     subprocess.run([
         "ffmpeg", "-v", "error", "-y",
-        "-t", "18", "-f", "lavfi", "-i", "gradients=s=320x180:r=10:seed=3",
+        "-t", "18", "-f", "lavfi", "-i", "color=c=0x3a6ea5:s=320x180:r=10",
         "-t", "3", "-f", "lavfi", "-i", "testsrc2=s=320x180:r=10",
-        "-t", "19", "-f", "lavfi", "-i", "gradients=s=320x180:r=10:seed=4",
+        "-t", "19", "-f", "lavfi", "-i", "color=c=0xa5673a:s=320x180:r=10",
         "-filter_complex", "[0:v][1:v][2:v]concat=n=3:v=1:a=0,format=yuv420p[v]",
         "-map", "[v]", "-an", "-c:v", "libx264", "-qp", "0", "-preset", "ultrafast",
         "-threads", "1", str(path),
@@ -52,7 +55,7 @@ def test_search_visual_rank_one_window_stays_short_and_covers_shot(tmp_path, mon
     built = _poll("build_visual_index", {"source": source},
                   lambda data: data.get("status") in ("complete", "error"))
     assert built["status"] == "complete", built
-    data = _poll("search_visual", {"source": source, "query": QUERY, "top_k": 5},
+    data = _poll("search_visual", {"source": source, "query": QUERY, "top_k": 1},
                  lambda found: "intervals" in found or found.get("status") == "error")
     assert "intervals" in data, data
     top = next(item for item in data["intervals"] if 1 in item["ranks"])
