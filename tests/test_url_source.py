@@ -147,7 +147,9 @@ def test_failure_names_the_url_and_last_yt_dlp_error_then_retries(ytdlp):
 def test_missing_yt_dlp_says_how_to_fix(ytdlp, monkeypatch):
     monkeypatch.setattr(fetch, "_find_binary", lambda name: None)
     result = handle_call("probe_video", {"source": X_URL})
-    assert "yt-dlp is not installed" in result["error"]["message"] and "local path" in result["error"]["message"]
+    message = result["error"]["message"]
+    assert "yt-dlp is not installed" in message and "local path" in message
+    assert "brew install yt-dlp" in message and "uv pip install --python" in message  # macOS and Linux installs
 
 
 # ---- output contract --------------------------------------------------------

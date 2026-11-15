@@ -92,7 +92,7 @@ def _download(url: str, target: Path) -> None:
     yt_dlp = _find_binary("yt-dlp")
     if yt_dlp is None:
         raise DownloadError(
-            f"Could not download {url}: yt-dlp is not installed (brew install yt-dlp). "
+            f"Could not download {url}: yt-dlp is not installed (macOS: brew install yt-dlp; Linux: uv pip install --python <the server's python> yt-dlp). "
             "Download the video yourself and pass its local path as `source`.")
     target.parent.mkdir(parents=True, exist_ok=True)
     temp_stem = f"{target.stem}.tmp-{uuid.uuid4().hex}"
