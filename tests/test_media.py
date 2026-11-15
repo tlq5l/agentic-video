@@ -13,7 +13,7 @@ from src.media.contact_sheet import compose_contact_sheet
 import shutil
 import subprocess
 
-from src.media.scene import detect_scenes, detect_soft_transitions, partition_into_scene_segments
+from src.media.scene import SceneCut, detect_scenes, detect_soft_transitions, partition_into_scene_segments
 from PIL import Image
 
 FIXTURE_PATH = Path(__file__).resolve().parents[1] / "fixtures" / "synthetic_bench_60s.mp4"
@@ -223,6 +223,21 @@ def test_scene_detection_and_partition(tmp_path):
     assert len(segments) == len(cuts) + 1
     assert segments[0].start_sec == 0.0
     assert segments[-1].end_sec == 60.0
+
+
+def test_partition_into_scene_segments_sorts_unsorted_cuts():
+    cuts = [
+        SceneCut(timestamp_sec=5.0, score=0.9, timecode="00:00:05.000"),
+        SceneCut(timestamp_sec=2.0, score=0.8, timecode="00:00:02.000"),
+    ]
+
+    segments = partition_into_scene_segments(cuts, total_duration_sec=10.0)
+
+    assert [(s.start_sec, s.end_sec, s.duration_sec) for s in segments] == [
+        (0.0, 2.0, 2.0),
+        (2.0, 5.0, 3.0),
+        (5.0, 10.0, 5.0),
+    ]
 
 
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")

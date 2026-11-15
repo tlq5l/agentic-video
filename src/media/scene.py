@@ -857,7 +857,7 @@ def partition_into_scene_segments(
     total_duration_sec: float
 ) -> List[SceneSegment]:
     """Convert discrete scene cut timestamps into contiguous SceneSegments."""
-    boundaries = [0.0] + [c.timestamp_sec for c in cuts]
+    boundaries = [0.0] + sorted(min(max(c.timestamp_sec, 0.0), total_duration_sec) for c in cuts)
     if not boundaries or boundaries[-1] < total_duration_sec:
         boundaries.append(total_duration_sec)
         
