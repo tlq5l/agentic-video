@@ -15,6 +15,7 @@ import functools
 import json
 import os
 import socket
+import string
 import tempfile
 import time
 from collections import Counter
@@ -37,6 +38,9 @@ ENDS_AT_LABEL = "2026-12-01 00:00 +07"
 PIECE_SEC = 600
 PARALLEL_PIECES = 4
 PIECE_TIMEOUT_SEC = 120.0
+REPEAT_MIN_SEGMENTS = 3  # a reply looks hallucinated only with at least this many segments
+REPEAT_MAX_WORDS = 4  # ...and its most common normalized text has at most this many words
+REPEAT_MIN_SHARE = 0.6  # ...and covers at least this share of the segments
 LOCAL_OFF = "Local transcription is off on this machine, so no local model ran."
 NOTICE_SUFFIX = " Transcribed by Cloudflare Workers AI (whisper-large-v3-turbo); the audio was sent to Cloudflare."
 
@@ -100,11 +104,41 @@ def _credentials() -> Tuple[str, str]:
     )
 
 
+def _normal(text_value: str) -> str:
+    """Lowercase, with punctuation and spaces at the ends removed, for comparing segment texts."""
+    return text_value.lower().strip(string.punctuation + string.whitespace)
+
+
+def _repeated_phrase(segments: List[Dict[str, Any]]) -> Optional[str]:
+    """The short phrase a reply keeps repeating ("Thank you." on a quiet piece), or None if it does not look hallucinated."""
+    if len(segments) < REPEAT_MIN_SEGMENTS:
+        return None
+    phrase, count = Counter(_normal(seg["text"]) for seg in segments).most_common(1)[0]
+    if len(phrase.split()) <= REPEAT_MAX_WORDS and count / len(segments) >= REPEAT_MIN_SHARE:
+        return phrase
+    return None
+
+
 def _send_piece(index: int, path: str, *, account: str, token: str) -> Dict[str, Any]:
+    """One piece with the voice filter off. If its reply looks hallucinated, the same piece is sent once more with the
+    filter on, and that reply is used only if it has a line other than the repeated phrase. A failed retry keeps the first reply."""
+    first = _request_piece(index, path, account=account, token=token, vad_filter=False)
+    if "error" in first:
+        return first
+    phrase = _repeated_phrase(first["segments"])
+    if phrase is None:
+        return first
+    filtered = _request_piece(index, path, account=account, token=token, vad_filter=True)
+    if "error" not in filtered and any(_normal(seg["text"]) != phrase for seg in filtered["segments"]):
+        return filtered
+    return first
+
+
+def _request_piece(index: int, path: str, *, account: str, token: str, vad_filter: bool) -> Dict[str, Any]:
     """One piece through Workers AI: its segments with offsets added, or its error (token removed)."""
     try:
         with open(path, "rb") as handle:
-            body = {"audio": base64.b64encode(handle.read()).decode("ascii"), "vad_filter": False}
+            body = {"audio": base64.b64encode(handle.read()).decode("ascii"), "vad_filter": vad_filter}
         raw = cloudflare.run_model(MODEL, account, token, json.dumps(body).encode("utf-8"), PIECE_TIMEOUT_SEC,
                                    allowed=lambda: not ended())
         reply = json.loads(raw)

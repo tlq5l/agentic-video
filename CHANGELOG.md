@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Cloud transcription: a piece whose reply repeats one short phrase (quiet videos made whisper answer "Thank you." and drop the real lines) is sent again with the voice filter on, and the filtered reply is used when it has other lines.
+
 - A URL whose download thread the system refused to start no longer blocks the next call for that URL: the next call starts the download and answers ready, instead of answering in_progress forever.
 
 - `count_occurrences` with `direction` lists the spans the filter leaves out (stationary, or moving another way) in a new `excluded_spans` field, each with start_sec, end_sec and travel; count, spans and every other field are unchanged.
