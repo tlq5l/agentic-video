@@ -454,6 +454,36 @@ def _direction(points, mark_brief=False, wanted=None):
     return "top_to_bottom" if dy > 0 else "bottom_to_top"
 
 
+# With a direction, a span under three samples that starts within this absence of the span before it (or ends within it
+# of the span after it) and continues where that span left off is the same appearance split by detection dropouts, and is
+# joined to it. Fitted on count_dev seed 6102 occ26_q1 (round-7 log: one crossing split into 7.2-8.4, 9.0-9.2 and
+# 9.6-10.2 s by absences of 0.6 and 0.4 s). Two spans of three or more samples are never joined, so a crossing and its
+# way back stay two spans.
+JOIN_GAP_SEC = 0.6
+
+
+def _join_fragments(spans, step):
+    """Join, in start-time order, each span to the one before it when either has under three samples, the absence between
+    them is at most JOIN_GAP_SEC and the centre moved at most TELEPORT_JUMP across it. The span with more samples keeps
+    its representative, tiles and weak flag."""
+    joined = []
+    for span in spans:
+        prev = joined[-1] if joined else None
+        if prev is not None and min(len(prev["samples"]), len(span["samples"])) < 3:
+            absence = span["samples"][0][0] - prev["samples"][-1][0] - step
+            (px, py), (nx, ny) = prev["points"][-1], span["points"][0]
+            if absence <= JOIN_GAP_SEC + 1e-6 and max(abs(nx - px), abs(ny - py)) <= TELEPORT_JUMP:
+                merged = dict(prev if len(prev["samples"]) >= len(span["samples"]) else span)
+                merged["samples"] = prev["samples"] + span["samples"]
+                merged["points"] = prev["points"] + span["points"]
+                merged["start"], merged["end"] = prev["start"], span["end"]
+                merged["score"] = max(prev["score"], span["score"])
+                joined[-1] = merged
+                continue
+        joined.append(span)
+    return joined
+
+
 class SpanBuilder:
     """Groups matching samples into spans; keeps a small tile per sample for the first `keep` spans."""
 
@@ -751,7 +781,8 @@ def count_video(engine, progress=lambda done, total: None, **args):
     fps = round(fps, 3)
     judged = [ALGORITHM_VERSION, meta.fingerprint, description, text, case_sensitive, start, end, requested_fps]
     direction = args.get("direction", "any")
-    direction_key = [] if direction == "any" else [direction, "back-v1"]  # back-v1: results stored before back-and-forth spans counted are not served
+    # back-v1: results stored before back-and-forth spans counted are not served; join-v1: nor those stored before brief fragments were joined
+    direction_key = [] if direction == "any" else [direction, "back-v1", "join-v1"]
     tag = hashlib.sha256(json.dumps(judged + [min_gap, max_spans] + direction_key).encode()).hexdigest()[:20]
     cache_dir = engine._cache.get_entry_dir(meta.fingerprint)
     result_path = cache_dir / f"{tag}.occurrences.json"
@@ -778,6 +809,8 @@ def count_video(engine, progress=lambda done, total: None, **args):
     spans = builder.finish()
     capped = len(spans) >= MAX_SPANS_LIMIT
     filtered = direction != "any"
+    if filtered:
+        spans = _join_fragments(spans, builder.step)
     travels = [_direction(span["points"], mark_brief=filtered, wanted=direction if filtered else None) for span in spans]
     matched = [span for span, way in zip(spans, travels) if not filtered or way in (direction, "unknown")]
     left_out = [(span, way) for span, way in zip(spans, travels) if filtered and way not in (direction, "unknown")]
