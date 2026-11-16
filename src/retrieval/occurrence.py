@@ -35,7 +35,7 @@ from src.core.config import Config
 from src.core.errors import VisualSetupError, as_dependency_error
 from src.retrieval import ocr
 
-ALGORITHM_VERSION = "occurrences-v9"  # v9: a symbol on a background of its own colour is judged by contrast
+ALGORITHM_VERSION = "occurrences-v10"  # v10: a blob counts for a strength colour only when that colour is at least 35% of the strength-colour pixels around it; a motion-blurred triangle is matched by its bottom corners
 MAX_FRAMES = 2400
 MAX_SPANS_LIMIT = 100
 DEFAULT_MIN_GAP = 0.3
@@ -79,6 +79,7 @@ _COLORS = {
     "gray": ("any", None, 0, .25, .75),
 }
 _STRENGTH_COLORS = {"red", "orange", "yellow", "green", "cyan", "blue", "purple", "magenta"}  # pink and brown are pale or dim by nature
+COLOR_SHARE_MIN = .35  # measured band .30-.35 on the count_dev floor (round 11); .25 and .40 each lost a row
 _COLOR_WORDS = {"gold": "yellow", "golden": "yellow", "aqua": "cyan", "teal": "cyan", "violet": "purple",
                 "grey": "gray", **{name: name for name in _COLORS}}
 _GEOMETRIC = {"circle": "circle", "circular": "circle", "disc": "circle", "disk": "circle",
@@ -141,6 +142,16 @@ def foreground_mask(image):
     border = np.concatenate([array[0], array[-1], array[:, 0], array[:, -1]])
     background = np.median(border, axis=0)
     return np.abs(array - background).max(axis=-1) > 48
+
+
+def _own_color_share(image, box, color):
+    """Share of the strength-colour pixels in and just around `box` that are `color`. Motion blur mixes a symbol of another
+    colour with the background into a fringe of the named one (a cyan circle's edge read blue at .23)."""
+    x0, y0, x1, y1 = box
+    crop = image.crop((max(0, x0 - 2), max(0, y0 - 2), min(image.width, x1 + 2), min(image.height, y1 + 2)))
+    counts = {c: int(color_mask(crop, c).sum()) for c in _STRENGTH_COLORS}
+    total = sum(counts.values())
+    return counts[color] / total if total else 1.0
 
 
 def find_blobs(mask, min_area, min_side=0, max_cover=.6, limit=6):
@@ -253,6 +264,16 @@ def shape_features(ink):
     }
 
 
+def _blurred_triangle(f, style):
+    """Motion blur rounds a triangle's corners: fill and roundness rise and the convex test can fail, but both side corners
+    still sit on its bottom edge, which a blurred circle, square or diamond's do not (theirs sit mid-height)."""
+    if not (.60 <= f["fill"] <= .80 and .70 <= f["circularity"] <= .84 and .64 <= f["aspect"] <= .90):
+        return False
+    if min(f["left_y"], f["right_y"]) < .75:
+        return False
+    return style is None or (f["ink"] < .72 if style == "outlined" else f["ink"] >= .75)
+
+
 def shape_score(shape, f):
     """0 when the outline is not the named shape; else 0.5-1.0 (higher = closer to ideal)."""
     if not f["convex"]:
@@ -339,11 +360,15 @@ class FrameJudge:
                 masks.append(masks[0] & foreground_mask(small))
             for mask in masks:  # the contrast mask is tried only when the plain colour mask finds nothing
                 blobs = find_blobs(mask, max(12, int(.0002 * width * height)), min_side=MIN_SYMBOL_WIDTH * width)
+                if spec["color"] in _STRENGTH_COLORS:
+                    blobs = [b for b in blobs if _own_color_share(small, b["box"], spec["color"]) >= COLOR_SHARE_MIN]
                 if spec["shape"]:
                     matches = []
                     for blob in blobs:
                         features = shape_features(blob["mask"])
                         score = shape_score(spec["shape"], features) if style_ok(spec["style"], features) else 0.0
+                        if not score and spec["shape"] == "triangle" and _blurred_triangle(features, spec["style"]):
+                            score = .55
                         if score:
                             matches.append((score, blob["box"]))
                 else:
