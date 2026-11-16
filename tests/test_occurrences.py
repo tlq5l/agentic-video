@@ -350,6 +350,17 @@ def test_symbol_on_a_background_of_its_own_colour_is_found_by_contrast():
     assert occurrence.FrameJudge("green outlined diamond", None, False).judge(_diamond_frame((0, 0, 0))) is not None
 
 
+def test_symbol_inside_a_frame_border_of_its_own_colour_is_still_found():
+    image = Image.new("RGB", (320, 180), (0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0, 0, 319, 179), outline=(40, 200, 40), width=24)  # a green border around dark content
+    draw.ellipse((140, 70, 180, 110), fill=(40, 200, 40))  # the same green as the border
+    hit = occurrence.FrameJudge("green circle", None, False).judge(image)
+    assert hit is not None
+    x, y, w, h = hit["box"]
+    assert abs((x + w / 2) - .5) < .05 and abs((y + h / 2) - .5) < .05
+
+
 def test_exact_phrase_matching_uses_whole_words():
     lines = lambda *texts: [{"text": t, "confidence": .9, "x": 0, "y": i * .1, "w": .2, "h": .05} for i, t in enumerate(texts)]
     pattern = ocr.phrase_pattern("RELEASE")

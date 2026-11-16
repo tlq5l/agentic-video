@@ -35,7 +35,7 @@ from src.core.config import Config
 from src.core.errors import VisualSetupError, as_dependency_error
 from src.retrieval import ocr
 
-ALGORITHM_VERSION = "occurrences-v8"
+ALGORITHM_VERSION = "occurrences-v9"  # v9: a symbol on a background of its own colour is judged by contrast
 MAX_FRAMES = 2400
 MAX_SPANS_LIMIT = 100
 DEFAULT_MIN_GAP = 0.3
@@ -334,19 +334,22 @@ class FrameJudge:
         small = frame.resize(_analysis_size(frame))
         width, height = small.size
         if spec["color"] or spec["shape"]:
-            mask = color_mask(small, spec["color"]) if spec["color"] else foreground_mask(small)
-            if spec["color"] and _border_mostly(mask):  # a symbol on a background of its own colour: keep its contrast
-                mask = mask & foreground_mask(small)
-            blobs = find_blobs(mask, max(12, int(.0002 * width * height)), min_side=MIN_SYMBOL_WIDTH * width)
-            if spec["shape"]:
-                matches = []
-                for blob in blobs:
-                    features = shape_features(blob["mask"])
-                    score = shape_score(spec["shape"], features) if style_ok(spec["style"], features) else 0.0
-                    if score:
-                        matches.append((score, blob["box"]))
-            else:
-                matches = self._clip_blobs(frame, blobs, width, height)
+            masks = [color_mask(small, spec["color"]) if spec["color"] else foreground_mask(small)]
+            if spec["color"] and _border_mostly(masks[0]):  # the named colour is also the background: a symbol of that colour shows by its contrast
+                masks.append(masks[0] & foreground_mask(small))
+            for mask in masks:  # the contrast mask is tried only when the plain colour mask finds nothing
+                blobs = find_blobs(mask, max(12, int(.0002 * width * height)), min_side=MIN_SYMBOL_WIDTH * width)
+                if spec["shape"]:
+                    matches = []
+                    for blob in blobs:
+                        features = shape_features(blob["mask"])
+                        score = shape_score(spec["shape"], features) if style_ok(spec["style"], features) else 0.0
+                        if score:
+                            matches.append((score, blob["box"]))
+                else:
+                    matches = self._clip_blobs(frame, blobs, width, height)
+                if matches:
+                    break
         else:
             matches = self._clip_tiles(frame)
         return self._hit(matches, width, height)
