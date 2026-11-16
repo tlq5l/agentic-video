@@ -31,28 +31,37 @@ REAL_DEFAULT_MODEL_SIZE = asr.default_model_size  # captured before conftest swa
 PAST = datetime(2000, 1, 1, tzinfo=timezone.utc)
 
 
+def _quiet_reply():
+    """Whisper's answer to a quiet piece: "Thank you." every 30 s."""
+    return [{"start": 0.5 + 30 * i, "end": 1.0 + 30 * i, "text": " Thank you. "} for i in range(20)]
+
+
 def _no_local(*args, **kwargs):
     raise AssertionError("local ASR ran")
 
 
 @pytest.fixture
 def stand_in():
-    stand = SimpleNamespace(base=None, seen=[], fail=False)
+    stand = SimpleNamespace(base=None, seen=[], fail=False, segments_for=None, fail_when_filtered=False)
 
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))) or b"{}")
             stand.seen.append({"path": self.path, "body": body})
-            if stand.fail or not self.path.endswith(WHISPER_PATH):
+            filtered = bool(body.get("vad_filter"))
+            if stand.fail or (stand.fail_when_filtered and filtered) or not self.path.endswith(WHISPER_PATH):
                 status = 500  # the error body echoes the Authorization header, to check the token never leaks
                 reply = {"success": False, "errors": [{"message": "boom " + str(self.headers.get("Authorization"))}],
                          "messages": [], "result": None}
             else:
                 status = 200
+                segments = [{"start": 0.5, "end": 1.5, "text": " stand-in piece "}]
+                if stand.segments_for is not None:
+                    segments = stand.segments_for(body)
                 reply = {"success": True, "errors": [], "messages": [], "result": {
                     "text": " stand-in piece ", "word_count": 2,
                     "transcription_info": {"language": "en", "duration": 2.0},
-                    "segments": [{"start": 0.5, "end": 1.5, "text": " stand-in piece "}],
+                    "segments": segments,
                 }}
             data = json.dumps(reply).encode("utf-8")
             self.send_response(status)
@@ -241,3 +250,45 @@ def test_shadow_trial_never_starts_for_cloud_runs_with_workers_ai_on(cloud, monk
                                                fingerprint="f", local_wall_sec=0.0) is False
     assert started == []
     assert cloud.stand.seen == []
+
+
+def test_hallucinated_piece_is_asked_again_with_the_voice_filter_on(cloud, clip, monkeypatch):
+    real = [{"start": 1.0, "end": 2.0, "text": " The copper umbrella is ready. "}]
+    cloud.stand.segments_for = lambda body: real if body["vad_filter"] else _quiet_reply()
+    monkeypatch.setattr(asr, "_run_memory_capped_worker", _no_local)
+    result = asr.transcribe_video(str(clip), model_size="tiny")
+    texts = [s.text for s in result.segments]
+    assert "Thank you." not in texts
+    assert "The copper umbrella is ready." in texts
+    assert sorted(request["body"]["vad_filter"] for request in cloud.stand.seen) == [False, False, True, True]
+
+
+def test_varied_lines_are_not_asked_again(cloud, clip):
+    varied = [{"start": float(i), "end": i + 0.5, "text": f" verse line number {i} "} for i in range(5)]
+    cloud.stand.segments_for = lambda body: varied
+    result = asr.transcribe_video(str(clip), model_size="tiny")
+    assert len(result.segments) == 10  # 5 lines per piece, 2 pieces
+    assert [request["body"]["vad_filter"] for request in cloud.stand.seen].count(False) == 2
+    assert len(cloud.stand.seen) == 2  # one call per piece, no retry
+
+
+@pytest.mark.parametrize("filtered", [
+    [{"start": 0.5, "end": 1.0, "text": " Thank you. "}],
+    [],
+])
+def test_filtered_reply_with_nothing_new_keeps_the_first_reply(cloud, clip, filtered):
+    cloud.stand.segments_for = lambda body: filtered if body["vad_filter"] else _quiet_reply()
+    result = asr.transcribe_video(str(clip), model_size="tiny")
+    texts = [s.text for s in result.segments]
+    assert len(texts) == 40  # the 20 "Thank you." lines of each of the 2 pieces
+    assert set(texts) == {"Thank you."}
+    assert len(cloud.stand.seen) == 4  # each piece asked twice
+
+
+def test_failed_retry_keeps_the_first_reply(cloud, clip):
+    cloud.stand.segments_for = lambda body: _quiet_reply()
+    cloud.stand.fail_when_filtered = True
+    result = asr.transcribe_video(str(clip), model_size="tiny")
+    texts = [s.text for s in result.segments]
+    assert len(texts) == 40
+    assert set(texts) == {"Thank you."}

@@ -26,7 +26,7 @@ src/media/cloudflare.py is still False.
 
 How it runs: the audio is cut into 10-minute MP3 pieces (16 kHz mono, 32 kb/s), four pieces at a time, each with
 vad_filter off and no language (auto-detect). Piece offsets are added, the pieces are stitched, and the result is cached
-under transcript_asr_cloud. Code: src/transcript/cloud_asr.py, and the cloud branch in transcribe_video in src/transcript/asr.py.
+under transcript_asr_cloud. A piece whose reply repeats one short phrase is sent once more with vad_filter on, and that reply is used if it has another line: quiet videos made whisper repeat "Thank you." and drop the real lines, and the filter stays off first because it drops sung lines. Code: src/transcript/cloud_asr.py, and the cloud branch in transcribe_video in src/transcript/asr.py.
 
 Measured 2026-10-23 on a Vietnamese test clip, against local whisper.cpp q5_0: character error rate 8.95 against 15.77,
 closer timestamps. 43 minutes of audio took 44 s, about 2 cents per 44 minutes.
