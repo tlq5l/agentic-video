@@ -4,6 +4,8 @@
 
 - `count_occurrences` with `direction`: a detection fragment under three samples that continues the appearance before it (within 0.6 s, no jump) is joined to it before its travel is read, so a crossing split by detection dropouts counts once (count_dev seed 6102 occ26_q1: the 7.2-10.0 s crossing came back as three spans and was counted three times). Spans under three samples are still counted as too brief to show a direction.
 
+- direction e2e reads a pinned box-rendered clip so the answer does not depend on the machine's ffmpeg and font.
+
 - Cloud transcription: a piece whose reply repeats one short phrase (quiet videos made whisper answer "Thank you." and drop the real lines) is sent again with the voice filter on, and the filtered reply is used when it has other lines.
 
 - A URL whose download thread the system refused to start no longer blocks the next call for that URL: the next call starts the download and answers ready, instead of answering in_progress forever.
