@@ -438,18 +438,22 @@ class FrameJudge:
         return results
 
 
-# A span whose first and last centres match (it crossed and came straight back) still counts for a passed direction when,
-# inside the span, its smoothed centre moved at least this fraction of the frame that way. Picked on count_dev's back rows.
+# A span counts for a passed direction when, inside the span, its smoothed centre moved at least this fraction of the frame
+# that way, whatever its end-to-end travel (it crossed and came back). Picked on count_dev's back rows.
 BACK_RISE = 0.5
 _WAYS = {"left_to_right": (0, 1), "right_to_left": (0, -1), "top_to_bottom": (1, 1), "bottom_to_top": (1, -1)}
 
 
 def _went(points, wanted):
-    """Farthest the centre moved in `wanted` inside the span, earlier to later, on a two-sample moving average."""
+    """Farthest the centre moved in `wanted` inside the span, earlier to later, on a two-sample moving average. The span's
+    first centre also counts as a low point as it is: averaged with the next centre it reads too far along when a detection
+    dropout sits between them (count_dev seed 6103 occ26_q1, round 14: first centre .189, next .503 after a 0.8 s dropout,
+    so the smoothed start read .346 and a .656 rise read .484)."""
     axis, sign = _WAYS[wanted]
     track = np.asarray(points, float)[:, axis] * sign
     smooth = (track[1:] + track[:-1]) / 2
-    return float(np.max(smooth - np.minimum.accumulate(smooth)))
+    low = np.minimum.accumulate(np.minimum(smooth, track[0]))
+    return float(np.max(smooth - low))
 
 
 def _direction(points, mark_brief=False, wanted=None):
@@ -458,8 +462,9 @@ def _direction(points, mark_brief=False, wanted=None):
     Two samples report travel from the first centre to the last. One sample has no travel and reads "stationary".
     With mark_brief (a direction was passed) any span under three samples is "unknown" instead, because it is
     counted under any direction.
-    With `wanted` (the direction passed), a span that reads stationary end to end returns `wanted` when it moved at least
-    BACK_RISE that way inside the span: across the frame and straight back. So a bounce counts once under each direction it
+    With `wanted` (the direction passed), a span returns `wanted` whenever it moved at least BACK_RISE that way inside the
+    span, whatever its end-to-end travel: across the frame and back, even when first seen mid-way so that it reads net the
+    other way. So a bounce counts once under each direction it
     moved at least BACK_RISE along (left_to_right and right_to_left for a left-right bounce), and per-direction counts can
     add up to more than the count with no direction; a one-way crossing counts only for its own direction. Rule from what
     users ask: count_dev questions and docs/recipes/count-one-way-crossings.md ask how many times the target crossed one
@@ -472,8 +477,10 @@ def _direction(points, mark_brief=False, wanted=None):
     else:
         head, tail = np.mean(points[:2], axis=0), np.mean(points[-2:], axis=0)
     dx, dy = tail - head
+    if wanted in _WAYS and len(points) > 2 and _went(points, wanted) >= BACK_RISE:
+        return wanted
     if max(abs(dx), abs(dy)) < .15:
-        return wanted if wanted in _WAYS and len(points) > 2 and _went(points, wanted) >= BACK_RISE else "stationary"
+        return "stationary"
     if abs(dx) >= abs(dy):
         return "left_to_right" if dx > 0 else "right_to_left"
     return "top_to_bottom" if dy > 0 else "bottom_to_top"
@@ -807,7 +814,7 @@ def count_video(engine, progress=lambda done, total: None, **args):
     judged = [ALGORITHM_VERSION, meta.fingerprint, description, text, case_sensitive, start, end, requested_fps]
     direction = args.get("direction", "any")
     # back-v1: results stored before back-and-forth spans counted are not served; join-v1: nor those stored before brief fragments were joined
-    direction_key = [] if direction == "any" else [direction, "back-v1", "join-v1"]
+    direction_key = [] if direction == "any" else [direction, "back-v1", "join-v1", "went-v1"]  # went-v1: round-14 back check
     tag = hashlib.sha256(json.dumps(judged + [min_gap, max_spans] + direction_key).encode()).hexdigest()[:20]
     cache_dir = engine._cache.get_entry_dir(meta.fingerprint)
     result_path = cache_dir / f"{tag}.occurrences.json"
