@@ -205,6 +205,8 @@ def start_after_fresh_run(source_path: str, model_size: str, result: Any, finger
                           local_wall_sec: float) -> bool:
     """Start the shadow job for one fresh local run. Returns True when a child was started. Never raises.
     The cheap checks (switch, Workers AI on, account id, token source, trial) all run before the token command, so a refused run starts no process."""
+    if model_size == "cloud":  # cloud transcription is not a shadow trial
+        return False
     job_path = None
     try:
         if not _switch_names_this_host() or not cloudflare.WORKERS_AI_ON or not _account_id_set() or not _token_source_set():
@@ -244,6 +246,8 @@ def start_in_background(**fresh_run: Any) -> None:
     credentials (a token command can take up to its 30 s timeout) or the trial state lock. The switch is read here,
     so a switch that does not name this host starts no thread. Never raises. A process that exits before the thread
     has started its child skips that one shadow run; the user's transcript is not affected."""
+    if fresh_run.get("model_size") == "cloud":  # cloud transcription is not a shadow trial
+        return
     try:
         if not _switch_names_this_host():
             return

@@ -33,3 +33,5 @@ Hybrid search (`search_transcript`, default):
 - Failures never cost the keyword answer: a missing or unrunnable `AGENTIC_VIDEO_EG2_PYTHON`, a dead worker, a bad reply or a failed index build come back as the keyword hits plus a `note` saying why. A missing interpreter or model is remembered until the server restarts, so fix the setting and restart.
 - Chunk vectors are cached as `transcript_eg2.npz` next to the transcript cache, keyed by a hash of the model id, chunk settings and chunk texts, so a new transcript rebuilds them.
 - The library `search_transcript(...)` and the engine stay keyword-only unless `hybrid=True`, so `model_adapter` and the ASR gate see the old result shape.
+
+Cloud transcription (switched on per host, ends 2026-12-01 00:00 +07, no local fallback there): see [cloud-asr.md](cloud-asr.md).

@@ -20,7 +20,7 @@ from src.core.types import TranscriptSegment, TranscriptResult, VideoMetadata
 from src.core.cache import MediaCache
 from src.media.probe import probe_video
 from src.transcript.repeats import flag_repeated_segments
-from src.transcript import shadow_cf_asr
+from src.transcript import shadow_cf_asr, cloud_asr
 
 def parse_srt_or_vtt(subtitle_path: Path) -> List[TranscriptSegment]:
     """Parse SRT or WebVTT file into TranscriptSegments."""
@@ -201,7 +201,7 @@ def find_cached_transcript(
         )
         return (result, None) if result is not None else None
 
-    model_priority = ["turbo", "small", "base", "tiny"]
+    model_priority = ["cloud", "turbo", "small", "base", "tiny"]
     if model_size in model_priority:
         model_priority.remove(model_size)
     model_priority.insert(0, model_size)
@@ -1059,12 +1059,15 @@ def _installed_whisper_models() -> List[str]:
 
 
 def default_model_size() -> str:
-    """Model used when an agent names none: turbo where whisper.cpp is installed, else tiny."""
+    """Model used when an agent names none: cloud on a host switched on for cloud transcription, else turbo where
+    whisper.cpp is installed, else tiny."""
+    if cloud_asr.selected():
+        return cloud_asr.MODEL_KEY
     return "turbo" if _whisper_installed("turbo") else Config.DEFAULT_WHISPER_MODEL
 
 
 # Rough ASR speed as a share of the audio's length (measured: turbo ~3 min for a 65 min video).
-_ASR_SPEED_VS_AUDIO = {"turbo": 0.05, "tiny": 0.04, "base": 0.08, "small": 0.2}
+_ASR_SPEED_VS_AUDIO = {"cloud": 0.03, "turbo": 0.05, "tiny": 0.04, "base": 0.08, "small": 0.2}
 
 
 def _transcription_progress(duration_sec: float) -> Tuple[Dict[str, Any], Optional[str]]:
@@ -1089,7 +1092,10 @@ def _transcription_progress(duration_sec: float) -> Tuple[Dict[str, Any], Option
 
 def request_transcription(source_path: str, model_size: str) -> Dict[str, Any]:
     """Serve cached MCP transcripts immediately and schedule uncached ASR."""
-    installed = [] if _whisper_installed(model_size) else _installed_whisper_models()
+    cloud = cloud_asr.selected()
+    if cloud:
+        model_size = cloud_asr.MODEL_KEY  # every fresh run goes to Workers AI; no local model is installed-checked
+    installed = [] if cloud or _whisper_installed(model_size) else _installed_whisper_models()
     if installed:
         # Offline machines can't fetch weights; run the best installed model and say so.
         data = request_transcription(source_path, installed[0])
@@ -1102,13 +1108,16 @@ def request_transcription(source_path: str, model_size: str) -> Dict[str, Any]:
     cached = find_cached_transcript(source_path, model_size, media_metadata=meta)
     if cached is not None:
         result, cached_model = cached
-        if cached_model is None or cached_model == model_size:
+        if cloud or cached_model is None or cached_model == model_size:
             # Preserve the established wire shape for model and subtitle hits.
             return result.to_dict()
     else:
         if _find_sidecar(p, None) is not None or not meta.has_audio:
             # Subtitle parsing and no-audio handling are quick and synchronous.
             return transcribe_video(str(p), model_size=model_size).to_dict()
+        if cloud and cloud_asr.ended():
+            # A fresh cloud run would be billed after the end date: refuse before any slot starts.
+            raise ASRModelError(cloud_asr.refusal_message())
         result = None
         cached_model = None
 
@@ -1260,6 +1269,8 @@ def transcribe_video(
     if not p.exists():
         raise MediaNotFoundError(f"Source media not found: {source_path}")
 
+    if cloud_asr.selected():
+        model_size = cloud_asr.MODEL_KEY
     meta = probe_video(str(p), allow_audio_only=True)
     sub_path = _find_sidecar(p, subtitle_override)
     subtitle_fp = _subtitle_fingerprint(sub_path)
@@ -1312,6 +1323,45 @@ def transcribe_video(
         )
         cache.save_json(meta.fingerprint, cache_name, _transcript_cache_payload(empty_res, meta.fingerprint, subtitle_fp, model_size))
         return empty_res
+
+    if model_size == cloud_asr.MODEL_KEY:
+        # Cloud mode: Workers AI only. No local worker is started, not even after a cloud failure (it raises).
+        if not cloud_asr.selected():
+            raise ASRModelError("The cloud model is only available where cloud transcription is switched on.")
+        cloud_segments, language = cloud_asr.transcribe(str(p))
+        segments = [TranscriptSegment(**segment) for segment in cloud_segments]
+        res = TranscriptResult(
+            source_path=str(p),
+            language=language,
+            duration_sec=meta.duration_sec,
+            segment_count=len(segments),
+            segments=segments,
+            has_speech=len(segments) > 0,
+            notice=(
+                "No speech segments returned by Cloudflare; absence is not proof of no speech."
+                if not segments
+                else "Note: Non-speech audio (music, sound effects, alarms) is NOT transcribed."
+            ) + cloud_asr.NOTICE_SUFFIX,
+            confidence=(
+                round(sum(float(s.confidence or 0.0) for s in segments) / len(segments), 3)
+                if segments else None
+            ),
+            uncertainty=(
+                "Whisper confidence is a no_speech_prob proxy; transcript content and alignment remain model-dependent."
+                if segments
+                else "No speech segments returned by Cloudflare; absence is not proof of no speech."
+            ),
+        )
+        cached_path = cache.save_json(
+            meta.fingerprint, cache_name, _transcript_cache_payload(res, meta.fingerprint, subtitle_fp, model_size),
+        )
+        if allow_long_run and cached_path is None:
+            raise ASRModelError(
+                "ASR completed but its transcript could not be cached.",
+                {"source_path": str(p), "model_size": model_size},
+            )
+        # No fresh_run hand-off: the shadow trial is not run for cloud transcripts.
+        return _with_repeat_flags(res)
 
     # Isolate faster-whisper from the host process and its native libraries.
     worker_script = f"""
