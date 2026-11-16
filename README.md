@@ -2,7 +2,7 @@
 
 <!-- mcp-name: io.github.tlq5l/agentic-video -->
 
-agentic-video lets an AI agent that reads text and images, but not video, work with video files on your own machine. It is a Python library plus a stdio MCP server. The agent asks small, targeted questions ("show me 12 frames from 0:40 to 1:10", "when is 'launch' spoken?") and gets back measurements, transcripts and contact sheets: grids of frames, each with its timestamp burned into the pixels. Everything runs locally with FFmpeg, Whisper and optional local models, except two optional cloud tools (`watch_for`, `label_sounds`), which are switched off: they refuse every call and send nothing, because Cloudflare Workers AI is disabled in this release. The opt-in shadow transcription trial is switched off too.
+agentic-video lets an AI agent that reads text and images, but not video, work with video files on your own machine. It is a Python library plus a stdio MCP server. The agent asks small, targeted questions ("show me 12 frames from 0:40 to 1:10", "when is 'launch' spoken?") and gets back measurements, transcripts and contact sheets: grids of frames, each with its timestamp burned into the pixels. Everything runs locally with FFmpeg, Whisper and optional local models, except two optional cloud tools (`watch_for`, `label_sounds`), which are switched off: they refuse every call and send nothing, because Cloudflare Workers AI is disabled in this release. The opt-in shadow transcription trial is switched off too. Cloud transcription is the one other exception: `transcribe` sends its audio to Cloudflare only on a host that `AGENTIC_VIDEO_CLOUD_ASR` names.
 
 **See it work:** https://agentic-video-gallery.infra-1b7.workers.dev (the gallery: real tasks, including the misses).
 
@@ -30,7 +30,7 @@ Then paste this first prompt: "Use agentic-video: make a contact sheet of `/path
 
 *One `contact_sheet` call on a 5-second clip: six frames, each stamped with its time, as a single image the agent can read.*
 
-In 2 minutes (macOS) your agent can answer "what happens in this video?" and "when is X said?" for a local video file. You get the length and size, a contact sheet image with timestamps, the cuts, a loudness summary and searchable speech. Nothing leaves your machine unless you use the optional cloud tools below or set the shadow transcription trial switch (off by default, owner machines only). Setup for Claude Code:
+In 2 minutes (macOS) your agent can answer "what happens in this video?" and "when is X said?" for a local video file. You get the length and size, a contact sheet image with timestamps, the cuts, a loudness summary and searchable speech. Nothing leaves your machine unless you use the optional cloud tools below, the cloud transcription switch `AGENTIC_VIDEO_CLOUD_ASR` (it sends the audio of `transcribe` calls to Cloudflare's hosted speech model when it names this host), or the shadow transcription trial switch (off by default, owner machines only). Setup for Claude Code:
 
 ```sh
 brew install ffmpeg uv
@@ -125,7 +125,7 @@ This installs PyTorch, Transformers and (on macOS) the Apple Vision bindings, an
 
 ### Cloud tools (`watch_for`, `label_sounds`): switched off
 
-`watch_for` and `label_sounds` are switched off (owner 2026-11-14): Cloudflare Workers AI is disabled, so each call refuses before reading credentials or sending anything. Free alternatives: `search_visual` and `inspect_window` for `watch_for`; `audio_onsets`, `loudness_timeline` and `spectrogram_window` for `label_sounds`. Once switched back on, they send video frames or audio to Cloudflare Workers AI (the Clef models), so do not use them on recordings you need to keep private. The other tools never call Cloudflare. With the switch on, set these in the server's environment:
+`watch_for` and `label_sounds` are switched off (owner 2026-11-14): Cloudflare Workers AI is disabled, so each call refuses before reading credentials or sending anything. Free alternatives: `search_visual` and `inspect_window` for `watch_for`; `audio_onsets`, `loudness_timeline` and `spectrogram_window` for `label_sounds`. Once switched back on, they send video frames or audio to Cloudflare Workers AI (the Clef models), so do not use them on recordings you need to keep private. The other tools never call Cloudflare, except `transcribe` on a host that `AGENTIC_VIDEO_CLOUD_ASR` names. With the switch on, set these in the server's environment:
 
 - `CLOUDFLARE_ACCOUNT_ID`: your account id.
 - `CLOUDFLARE_API_TOKEN`: a token with Workers AI access. Or set `AGENTIC_VIDEO_CF_TOKEN_COMMAND` to a command whose last printed line is the token (for example, `wrangler auth token`); the command runs at most once every 50 minutes per process, and each detached shadow child keeps its own token cache.
