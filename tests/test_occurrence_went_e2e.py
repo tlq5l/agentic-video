@@ -111,3 +111,15 @@ def test_results_stored_before_went_v1_are_not_served(tmp_path, monkeypatch):
     result["count"] = 99
     (stored.parent / f"{old_tag}.occurrences.json").write_text(json.dumps(result))
     assert count(video, tmp_path, description="blue circle", direction="left_to_right", fps=10)["count"] == first
+
+
+def test_one_sample_span_with_a_direction_counts_as_too_brief(tmp_path):
+    """A blue circle seen in one sample only (x .50 at 1.0 s, fps 10): its span has one centre, so it shows no direction.
+    With a direction passed it counts as too brief to show one ("unknown"), and the back check never measures a rise
+    from fewer than two centres (round-15 breaker: _went raised IndexError on one point when called directly)."""
+    def paint(draw, t):
+        if .95 <= t < 1.05:
+            _circle(draw, .50)
+    video = make_clip(tmp_path / "one.mp4", 2.0, paint)
+    result = count(video, tmp_path, description="blue circle", direction="left_to_right", fps=10)
+    assert result["count"] == 1 and [span["travel"] for span in result["spans"]] == ["unknown"]
