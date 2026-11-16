@@ -90,6 +90,11 @@ VIDEOS = [
     ("trap2_occ23", "train2", False, 0, [("glyph", "close"), ("glyph", "close"), ("glyph", "close")]),
     ("trap2_occ24", "train2", False, .5, [("glyph", "cap"), ("cross", "passes")]),
     ("trap2_occ25", "train2", True, .5, [("glyph", "cap"), ("glyph", "crowd")]),
+    # direction climb (R-9) check: "back" = the target crosses left to right and comes straight back inside one appearance
+    ("occ26", "train", True, .5, [("cross", "back"), ("cross", "many")]),
+    ("occ27", "train", False, .6, [("cross", "back"), ("glyph", "gaps")]),
+    ("occ28", "test", True, .5, [("cross", "back"), ("cross", "zero")]),
+    ("occ29", "test", False, .5, [("cross", "back"), ("glyph", "long")]),
 ]
 
 # id, split, motion, reps, period sec, tempo drift (fraction), sensor noise, background, camera drift, pose shape
@@ -127,7 +132,7 @@ def _tool_class(shape):
 
 
 def _glyph_filter(ev):
-    """drawtext for one glyph event: a wobbling icon in a slot, or a straight crossing."""
+    """drawtext for one glyph event: a wobbling icon in a slot, a straight crossing, or a crossing that comes straight back."""
     start, dur = ev["start"], max(.1, ev["end"] - ev["start"])
     parts = []
     if _font():
@@ -136,6 +141,8 @@ def _glyph_filter(ev):
         x, y = f"40+560*(t-{start:.6f})/{dur:.6f}", str(ev["y"])
     elif ev["path"] == "cross_rl":
         x, y = f"600-560*(t-{start:.6f})/{dur:.6f}", str(ev["y"])
+    elif ev["path"] == "cross_back":  # left to right, then straight back to the left edge, never leaving the frame
+        x, y = f"40+560*(1-abs(2*(t-{start:.6f})/{dur:.6f}-1))", str(ev["y"])
     else:
         x = f"{ev['x']}+25*sin(t*1.7+{ev['phase']:.3f})"
         y = f"{ev['y']}+17*cos(t*1.19+{ev['phase']:.3f})"
@@ -353,15 +360,16 @@ class _Plan:
                  "layout": layout})
 
     def _cross(self, layout, qid):
-        """Left-to-right traversals are the truth; right-to-left passes and look-alikes are decoys."""
+        """Left-to-right traversals are the truth; right-to-left passes and look-alikes are decoys. Layout "back": each traversal comes straight back right to left inside the same appearance (one left-to-right crossing each)."""
         rng, n = self.rng, self._count(layout)
         shape, color = self.target_glyph()
         label = _label(color, shape)
         row = rng.choice([70, 150, 240])
         t, truth = self.cursor, []
+        back = layout == "back"  # each appearance crosses left to right and comes straight back: one left-to-right crossing
         for _ in range(n):
-            dur = rng.uniform(1.3, 2.4)
-            self.add_glyph(shape, color, t, t + dur, (0, row), path="cross_lr")
+            dur = rng.uniform(1.3, 2.4) * (2 if back else 1)
+            self.add_glyph(shape, color, t, t + dur, (0, row), path="cross_back" if back else "cross_lr")
             truth.append([_quantize(t), _quantize(t + dur)])
             t += dur + rng.uniform(.6, 1.6)
         for _ in range(rng.randint(1, 2) if n else 2):  # right to left, same marker
