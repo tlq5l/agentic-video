@@ -423,7 +423,11 @@ def _direction(points, mark_brief=False, wanted=None):
     With mark_brief (a direction was passed) any span under three samples is "unknown" instead, because it is
     counted under any direction.
     With `wanted` (the direction passed), a span that reads stationary end to end returns `wanted` when it moved at least
-    BACK_RISE that way inside the span: across the frame and straight back.
+    BACK_RISE that way inside the span: across the frame and straight back. So a bounce counts once under each direction it
+    moved at least BACK_RISE along (left_to_right and right_to_left for a left-right bounce), and per-direction counts can
+    add up to more than the count with no direction; a one-way crossing counts only for its own direction. Rule from what
+    users ask: count_dev questions and docs/recipes/count-one-way-crossings.md ask how many times the target crossed one
+    way, and a bounce crosses each way once.
     """
     if mark_brief and len(points) < 3:
         return "unknown"
