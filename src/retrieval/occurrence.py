@@ -35,7 +35,7 @@ from src.core.config import Config
 from src.core.errors import VisualSetupError, as_dependency_error
 from src.retrieval import ocr
 
-ALGORITHM_VERSION = "occurrences-v10"  # v10: a blob counts for a strength colour only when that colour is at least 35% of the strength-colour pixels around it
+ALGORITHM_VERSION = "occurrences-v10"  # v10: a blob counts for a strength colour only when that colour is at least 35% of the strength-colour pixels around it; a motion-blurred triangle is matched by its bottom corners
 MAX_FRAMES = 2400
 MAX_SPANS_LIMIT = 100
 DEFAULT_MIN_GAP = 0.3
@@ -264,6 +264,16 @@ def shape_features(ink):
     }
 
 
+def _blurred_triangle(f, style):
+    """Motion blur rounds a triangle's corners: fill and roundness rise and the convex test can fail, but both side corners
+    still sit on its bottom edge, which a blurred circle, square or diamond's do not (theirs sit mid-height)."""
+    if not (.60 <= f["fill"] <= .80 and .70 <= f["circularity"] <= .84 and .64 <= f["aspect"] <= .90):
+        return False
+    if min(f["left_y"], f["right_y"]) < .75:
+        return False
+    return style is None or (f["ink"] < .72 if style == "outlined" else f["ink"] >= .75)
+
+
 def shape_score(shape, f):
     """0 when the outline is not the named shape; else 0.5-1.0 (higher = closer to ideal)."""
     if not f["convex"]:
@@ -357,6 +367,8 @@ class FrameJudge:
                     for blob in blobs:
                         features = shape_features(blob["mask"])
                         score = shape_score(spec["shape"], features) if style_ok(spec["style"], features) else 0.0
+                        if not score and spec["shape"] == "triangle" and _blurred_triangle(features, spec["style"]):
+                            score = .55
                         if score:
                             matches.append((score, blob["box"]))
                 else:
