@@ -162,7 +162,7 @@ To add it to an MCP client (Claude Code, Claude Desktop, Cursor and others), use
 
 Give tools absolute video paths. Results are cached under `~/.cache/agentic-video` (change it with `AGENTIC_VIDEO_CACHE_DIR`).
 
-When ffmpeg or ffprobe is not on PATH, the server looks for both in these folders: on macOS `/opt/homebrew/bin`, `/usr/local/bin` and `~/.local/bin`; on Windows the WinGet `Gyan.FFmpeg` package folders, `%USERPROFILE%\scoop\shims`, `C:\ProgramData\chocolatey\bin` and `C:\ffmpeg\bin`. Set `AGENTIC_VIDEO_FFMPEG_SEARCH=0` to turn this search off.
+When ffmpeg or ffprobe is not on PATH, the server searches these folders. On macOS it adds the first of `/opt/homebrew/bin`, `/usr/local/bin` and `~/.local/bin` that holds both `ffmpeg` and `ffprobe`. On Windows it adds the first of the WinGet `Gyan.FFmpeg` package folders, `%USERPROFILE%\scoop\shims`, `C:\ProgramData\chocolatey\bin` and `C:\ffmpeg\bin` that holds `ffmpeg.exe`; only `ffmpeg.exe` is checked there, so keep `ffprobe.exe` in the same folder. Set `AGENTIC_VIDEO_FFMPEG_SEARCH=0` to turn this search off.
 
 ### Add it to Claude Code (one command)
 
