@@ -11,7 +11,11 @@ def ensure_ffmpeg_on_path():
     macOS (Claude Desktop does not inherit the shell PATH): prepend the first of Homebrew's
     and ~/.local/bin that holds both binaries. Windows: search the WinGet, Scoop and
     Chocolatey install folders.
+
+    AGENTIC_VIDEO_FFMPEG_SEARCH=0 turns the search off (tests use it to simulate a machine without ffmpeg).
     """
+    if os.environ.get("AGENTIC_VIDEO_FFMPEG_SEARCH") == "0":
+        return
     if shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None:
         return
     if sys.platform == "darwin":

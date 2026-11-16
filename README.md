@@ -162,6 +162,8 @@ To add it to an MCP client (Claude Code, Claude Desktop, Cursor and others), use
 
 Give tools absolute video paths. Results are cached under `~/.cache/agentic-video` (change it with `AGENTIC_VIDEO_CACHE_DIR`).
 
+Set `AGENTIC_VIDEO_FFMPEG_SEARCH=0` to turn off the search for ffmpeg in the Homebrew, WinGet and Scoop folders.
+
 ### Add it to Claude Code (one command)
 
 Run this from the cloned folder (it uses the current folder's path). `-s user` makes the tool available in every project, not only this folder:
