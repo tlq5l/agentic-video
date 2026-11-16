@@ -201,7 +201,9 @@ def find_cached_transcript(
         )
         return (result, None) if result is not None else None
 
-    model_priority = ["cloud", "turbo", "small", "base", "tiny"]
+    model_priority = ["turbo", "small", "base", "tiny"]
+    if cloud_asr.selected() or model_size == cloud_asr.MODEL_KEY:
+        model_priority.insert(0, cloud_asr.MODEL_KEY)
     if model_size in model_priority:
         model_priority.remove(model_size)
     model_priority.insert(0, model_size)

@@ -11,7 +11,7 @@ Cells in the two run columns come from one smoke run per machine on 2026-10-31. 
 | Tool | Apple silicon macOS | Intel macOS (iMac Pro) | Linux (Cloudflare box) | Cloudflare Workers AI credentials | Apple Vision (pyobjc) | torch>=2.6 and CLIP model |
 |---|---|---|---|---|---|---|
 | `probe_video` | not run | ok | ok | no | no | no |
-| `transcribe` | not run | started | started | no | no | no |
+| `transcribe` | not run | started | started | only where `AGENTIC_VIDEO_CLOUD_ASR` names the host | no | no |
 | `search_transcript` | not run | started | started | no | no | no |
 | `build_visual_index` | not run | started | started | no | no | yes |
 | `search_visual` | not run | started | started | no | no | yes |
@@ -47,7 +47,7 @@ Cells in the two run columns come from one smoke run per machine on 2026-10-31. 
 Notes:
 
 - Apple silicon was not run for any tool. The MacBook runs no heavy work, so this column is empty until someone runs the smoke script on an Apple silicon Mac.
-- `transcribe` and `search_transcript` use local speech recognition. `turbo` needs whisper.cpp (`whisper-cli` and its model). `search_transcript` hybrid matches by meaning need EmbeddingGemma 2 on Apple CoreML; that was not run here, and without it the search stays keyword-only.
+- `transcribe` uses Cloudflare credentials (`CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`) when `AGENTIC_VIDEO_CLOUD_ASR` names this host, else local speech recognition. `search_transcript` uses the transcript that `transcribe` made. `turbo` needs whisper.cpp (`whisper-cli` and its model). `search_transcript` hybrid matches by meaning need EmbeddingGemma 2 on Apple CoreML; that was not run here, and without it the search stays keyword-only.
 - The "started" cells are not failures. Their results are not checked here: each one still needs a repeat call or a poll of its job.
 - `watch_for` and `label_sounds` are switched off (owner 2026-11-14): they refuse every call and send nothing, with or without Cloudflare credentials. The credentials column is what they would need once switched back on.
 - The smoke run also covered argument shapes agents guess (see `docs/features/contact-sheets.md` and the README). Those calls are not in this table.

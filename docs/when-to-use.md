@@ -52,7 +52,7 @@ The repo has two kinds of self-run results: a smoke run on the author's machines
 
 ## Keeping cloud tools off
 
-`watch_for` and `label_sounds` are switched off (owner 2026-11-14): Cloudflare Workers AI is disabled, so each call refuses and sends nothing. Once switched back on, `watch_for` sends sampled video frames to Cloudflare Workers AI and `label_sounds` sends audio windows there, each only when you call it and the credentials are set. No other tool calls Cloudflare, except the maintainer's shadow trial, which is also switched off and is described below ([README](../README.md?ref=agentic-video-when-to-use-docs), Install).
+`watch_for` and `label_sounds` are switched off (owner 2026-11-14): Cloudflare Workers AI is disabled, so each call refuses and sends nothing. Once switched back on, `watch_for` sends sampled video frames to Cloudflare Workers AI and `label_sounds` sends audio windows there, each only when you call it and the credentials are set. No other tool calls Cloudflare, except `transcribe` on a host that `AGENTIC_VIDEO_CLOUD_ASR` names (it sends audio to Cloudflare), and the maintainer's shadow trial, which is also switched off and is described below ([README](../README.md?ref=agentic-video-when-to-use-docs), Install).
 
 To keep them off:
 
