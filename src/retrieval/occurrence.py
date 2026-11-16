@@ -3,7 +3,8 @@
 Frames are decoded densely and judged one at a time; a frame "has" the target when
   - `text` is present: Apple Vision OCR finds the phrase as whole words (RELEASE, not RELEASED);
   - `description` names a colour: only pixels of that colour form candidate regions, so
-    same-shaped look-alikes in other colours never match (CLIP alone is weak at colour);
+    same-shaped look-alikes in other colours never match (CLIP alone is weak at colour); a symbol on a background of its
+    own colour is found by its contrast with that background;
   - `description` names a plain geometric shape (circle, square, diamond, ...): the candidate's
     outline geometry decides, because CLIP confuses diamonds with squares;
   - any other description: CLIP scores the candidate crops against contrast prompts.
@@ -127,6 +128,11 @@ def color_mask(image, color):
         sat_ok = sat >= smin
     strong = sat * val >= MIN_COLOR_STRENGTH if color in _STRENGTH_COLORS else True
     return in_hue & sat_ok & (val >= vmin) & (val <= vmax) & strong
+
+
+def _border_mostly(mask):
+    """True when most edge pixels are in the mask, so the named colour is the frame's background."""
+    return np.concatenate([mask[0], mask[-1], mask[:, 0], mask[:, -1]]).mean() >= .5
 
 
 def foreground_mask(image):
@@ -329,6 +335,8 @@ class FrameJudge:
         width, height = small.size
         if spec["color"] or spec["shape"]:
             mask = color_mask(small, spec["color"]) if spec["color"] else foreground_mask(small)
+            if spec["color"] and _border_mostly(mask):  # a symbol on a background of its own colour: keep its contrast
+                mask = mask & foreground_mask(small)
             blobs = find_blobs(mask, max(12, int(.0002 * width * height)), min_side=MIN_SYMBOL_WIDTH * width)
             if spec["shape"]:
                 matches = []
