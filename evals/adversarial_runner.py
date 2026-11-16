@@ -299,13 +299,14 @@ class AdversarialFailureHarness:
                 assert e.details.get("dependency") == "ffmpeg"
 
             # 3. Test MCP stdio server handles missing binary cleanly without crash.
-            #    The child gets a stripped PATH and an empty fake USERPROFILE so that
-            #    config.ensure_ffmpeg_on_path() cannot rediscover the winget/scoop builds.
+            #    The child gets a stripped PATH and an empty fake USERPROFILE. The search is
+            #    turned off too, so ensure_ffmpeg_on_path() cannot rediscover Homebrew, WinGet or Scoop builds.
             fakehome = self.sandbox / "fakehome_noffmpeg"
             fakehome.mkdir(exist_ok=True)
             child_env = dict(os.environ)
             child_env["PATH"] = r"C:\Windows\System32"
             child_env["USERPROFILE"] = str(fakehome)
+            child_env["AGENTIC_VIDEO_FFMPEG_SEARCH"] = "0"
             child_env["AGENTIC_VIDEO_CACHE_DIR"] = str(self.sandbox / "cache_noffmpeg")
             client = McpProcessClient(env=child_env)
             try:
