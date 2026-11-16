@@ -405,8 +405,9 @@ class FrameJudge:
 def _direction(points, mark_brief=False):
     """Travel of the matched region across a span, from its first and last centres (normalized).
 
-    Under three samples the first and last centres are the same point, so the span cannot show travel and reads as
-    "stationary". With mark_brief (a direction was passed) it is "unknown" instead, because it is counted under any direction.
+    Two samples report travel from the first centre to the last. One sample has no travel and reads "stationary".
+    With mark_brief (a direction was passed) any span under three samples is "unknown" instead, because it is
+    counted under any direction.
     """
     if mark_brief and len(points) < 3:
         return "unknown"
