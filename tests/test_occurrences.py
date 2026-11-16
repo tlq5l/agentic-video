@@ -555,6 +555,42 @@ def test_direction_narrows_the_count_through_the_mcp_tool(tmp_path, monkeypatch)
         mcp_server.handle_call("count_occurrences", {"source": str(clip), "description": "green diamond", "direction": "up"})
 
 
+def test_direction_counts_a_bounce_both_ways_and_a_one_way_crossing_once(tmp_path, monkeypatch):
+    """The direction rule users ask for (count_dev questions, docs/recipes/count-one-way-crossings.md): a one-way
+    crossing counts only for its own direction; a bounce, across and straight back, counts once under each direction
+    it crossed. One green diamond crosses left to right over 0.5-2.5 s; another bounces over 5.0-9.0 s (left to right
+    until 7.0 s, then straight back)."""
+    from src.core.config import Config
+    from src.executor import mcp_server
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+
+    def paint(d, t):
+        if 0.5 <= t < 2.5:
+            shape(d, "diamond", 40 + (W * 0.8 - 40) * (t - 0.5) / 2.0, 60, 14, GREEN)
+        if 5.0 <= t < 9.0:
+            phase = (t - 5.0) / 2.0 if t < 7.0 else (9.0 - t) / 2.0
+            shape(d, "diamond", 40 + (W * 0.8 - 40) * phase, 120, 14, GREEN)
+
+    clip = make_clip(tmp_path / "one_way_and_bounce.mp4", 10, paint, crf="0")
+
+    def call(**args):
+        for _ in range(600):
+            data = mcp_server.handle_call("count_occurrences", {"source": str(clip), "description": "green diamond", **args})["data"]
+            if data["status"] != "in_progress":
+                return data
+            time.sleep(0.5)
+        raise AssertionError("count_occurrences did not finish")
+
+    ltr = call(direction="left_to_right")
+    assert ltr["count"] == 2 and [span["travel"] for span in ltr["spans"]] == ["left_to_right", "left_to_right"]
+    rtl = call(direction="right_to_left")
+    assert rtl["count"] == 1 and [span["travel"] for span in rtl["spans"]] == ["right_to_left"]
+    assert rtl["spans"][0]["start_sec"] == pytest.approx(5.0, abs=0.25)
+    (one_way,) = rtl["excluded_spans"]
+    assert one_way["travel"] == "left_to_right" and one_way["start_sec"] == pytest.approx(0.5, abs=0.25)
+    assert call()["count"] == 2
+
+
 def test_direction_lists_the_spans_it_leaves_out(tmp_path, monkeypatch):
     """Guards excluded_spans and the back-and-forth case through handle_call: one green diamond crosses left to right,
     turns and comes straight back, so its first and last positions match. direction=left_to_right still counts it (it
