@@ -153,17 +153,23 @@ def _glyph_filter(ev):
 
 
 def _render(path: Path, duration, events, texts, cuts, seed, motion_blur, life_color, noise, tint):
-    """Life-texture background, colour-tint scene cuts, then the events (compare bench_v1 _render_video)."""
+    """Life-texture background, colour-tint scene cuts, then the events (compare bench_v1 _render_video); crescents go on after the motion blur."""
     ffmpeg = _require("ffmpeg")
     filters = [f"noise=alls={noise}:allf=t+u:all_seed={seed}"]
     if seed % 2:
         filters.append("drawgrid=width=60:height=52:thickness=1:color=white@0.12")
     for start, end, color in cuts:
         filters.append(f"drawbox=x=0:y=0:w=iw:h=ih:color={color}@{tint}:t=fill:enable='gte(t,{start:.6f})*lt(t,{end:.6f})'")
-    filters += [_glyph_filter(ev) for ev in events]
+    # The blur smears a crescent's thin moving stroke out of its colour (round-8 box probe, seed 6102 occ28: 0 of 90 frames
+    # kept pink with blur, 87 without), so with motion_blur crescents go on after it, sharp and 1.5x larger (round-9 box
+    # printout: after the blur at 1x, 98 of 108 frames on 6102 occ28 and 30 of 31 on 6103 occ28 kept 20+ analysis pixels of
+    # their colour, the misses darkened by the black border; at 1.5x, 108 of 108 and 31 of 31).
+    late = motion_blur and [ev for ev in events if ev["shape"] == "crescent"] or []
+    filters += [_glyph_filter(ev) for ev in events if not any(ev is other for other in late)]
     filters += [_draw_text_filter(t["text"], "white", t["start"], t["end"], size=t["size"], y=t["y"]) for t in texts]
     if motion_blur:
         filters.append("tmix=frames=3:weights='1 2 1'")
+    filters += [_glyph_filter(dict(ev, size=round(ev["size"] * 1.5))) for ev in late]
     filters += ["crop=640:360:x='40+12*sin(t*0.16)':y='20+9*cos(t*0.11)'", "format=yuv420p"]
     dark = "0x" + "".join(f"{int(int(life_color[i:i + 2], 16) * .2):02x}" for i in (2, 4, 6))
     _run([ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
