@@ -446,13 +446,18 @@ _WAYS = {"left_to_right": (0, 1), "right_to_left": (0, -1), "top_to_bottom": (1,
 
 def _went(points, wanted):
     """Farthest the centre moved in `wanted` inside the span, earlier to later, on a two-sample moving average. The span's
-    first centre also counts as a low point as it is: averaged with the next centre it reads too far along when a detection
-    dropout sits between them (count_dev seed 6103 occ26_q1, round 14: first centre .189, next .503 after a 0.8 s dropout,
-    so the smoothed start read .346 and a .656 rise read .484)."""
+    first centre also counts as a low point as it is when it sits within one step of the next centre (at most
+    TELEPORT_JUMP away, the most a match moves between two samples): averaged with the next centre it reads too far along
+    when a detection dropout sits between them (count_dev seed 6103 occ26_q1, round 14: first centre .189, next .503 after
+    a 0.8 s dropout, so the smoothed start read .346 and a .656 rise read .484). A first centre farther away is a stray
+    look-alike that the nearest-match rule kept in the span, not a start (round-14 breaker: x .0, then .9 down to .1, read
+    left_to_right)."""
     axis, sign = _WAYS[wanted]
-    track = np.asarray(points, float)[:, axis] * sign
+    centres = np.asarray(points, float)
+    track = centres[:, axis] * sign
     smooth = (track[1:] + track[:-1]) / 2
-    low = np.minimum.accumulate(np.minimum(smooth, track[0]))
+    start = track[0] if np.max(np.abs(centres[1] - centres[0])) <= TELEPORT_JUMP else smooth[0]
+    low = np.minimum.accumulate(np.minimum(smooth, start))
     return float(np.max(smooth - low))
 
 
