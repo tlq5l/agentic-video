@@ -1293,6 +1293,11 @@ def transcribe_video(
         )
         if cached is not None:
             return cached
+    if cloud_asr.selected() and sub_path is None:
+        # Cloud mode serves any cached ASR transcript, as request_transcription does: no new paid run.
+        found = find_cached_transcript(str(p), model_size, media_metadata=meta)
+        if found is not None:
+            return found[0]
 
     if sub_path:
         segments = parse_srt_or_vtt(sub_path)

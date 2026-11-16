@@ -14,7 +14,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.core.cache import MediaCache
 from src.core.config import Config
+from src.core.types import TranscriptResult, TranscriptSegment
+from src.media.probe import probe_video
 from src.core.errors import ASRModelError
 from src.executor.mcp_server import handle_call
 from src.media import cloudflare
@@ -193,4 +196,48 @@ def test_shadow_trial_never_starts_for_cloud_runs(cloud, monkeypatch):
     monkeypatch.setenv(shadow_cf_asr.SWITCH_ENV, HOST)
     assert shadow_cf_asr.start_after_fresh_run(source_path="x.mp4", model_size="cloud", result=None,
                                                fingerprint="f", local_wall_sec=0.0) is False
+    assert cloud.stand.seen == []
+
+
+def _seed_local(clip, model):
+    """Write an old local ASR transcript for the clip, as a pre-cloud run would have left it."""
+    meta = probe_video(str(clip), allow_audio_only=True)
+    seg = TranscriptSegment(id=1, start_sec=0.0, end_sec=1.0, text="old local line", confidence=None)
+    res = TranscriptResult(
+        source_path=str(clip), language="en", duration_sec=meta.duration_sec, segment_count=1,
+        segments=[seg], has_speech=True,
+        notice="Note: Non-speech audio (music, sound effects, alarms) is NOT transcribed.",
+        confidence=None, uncertainty="",
+    )
+    MediaCache().save_json(meta.fingerprint, f"transcript_asr_{model}",
+                           asr._transcript_cache_payload(res, meta.fingerprint, None, model))
+
+
+def test_cloud_mode_transcribe_serves_old_local_transcript_after_the_end(cloud, clip, monkeypatch):
+    _seed_local(clip, "turbo")
+    monkeypatch.setattr(cloud_asr, "ENDS_AT", PAST)
+    res = asr.transcribe_video(str(clip))
+    assert res.segments[0].text == "old local line"
+    assert cloud.stand.seen == []
+
+
+def test_cloud_mode_request_serves_old_local_transcript_without_a_run(cloud, clip, monkeypatch):
+    _seed_local(clip, "tiny")
+    monkeypatch.setattr(asr._BACKGROUND_TRANSCRIPTION_SLOT, "start",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("a slot started")))
+    data = asr.request_transcription(str(clip), "tiny")
+    assert data["segments"][0]["text"] == "old local line"
+    assert cloud.stand.seen == []
+
+
+def test_shadow_trial_never_starts_for_cloud_runs_with_workers_ai_on(cloud, monkeypatch):
+    monkeypatch.setenv(shadow_cf_asr.SWITCH_ENV, HOST)
+    monkeypatch.setattr(cloudflare, "WORKERS_AI_ON", True)
+    monkeypatch.setattr(shadow_cf_asr, "_trial_open", lambda *a, **k: True)
+    started = []
+    monkeypatch.setattr(shadow_cf_asr.subprocess, "Popen", lambda *a, **k: started.append(a))
+    fresh = SimpleNamespace(duration_sec=3.0, language="en", has_speech=True, segments=[])
+    assert shadow_cf_asr.start_after_fresh_run(source_path="x.mp4", model_size="cloud", result=fresh,
+                                               fingerprint="f", local_wall_sec=0.0) is False
+    assert started == []
     assert cloud.stand.seen == []
