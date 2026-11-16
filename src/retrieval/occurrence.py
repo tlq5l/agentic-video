@@ -452,8 +452,6 @@ def _went(points, wanted):
     a 0.8 s dropout, so the smoothed start read .346 and a .656 rise read .484). A first centre farther away is a stray
     look-alike that the nearest-match rule kept in the span, not a start (round-14 breaker: x .0, then .9 down to .1, read
     left_to_right)."""
-    if len(points) < 2:  # fewer than two centres moved nowhere (round-15 breaker: one point raised IndexError)
-        return 0.0
     axis, sign = _WAYS[wanted]
     centres = np.asarray(points, float)
     track = centres[:, axis] * sign
