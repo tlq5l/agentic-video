@@ -277,6 +277,8 @@ def _write_disk(entry: Path, clip: _Clip) -> None:
         for name, arr in arrays.items():
             np.save(temps[name], np.asarray(arr))
         tmp_meta.write_text(json.dumps(meta))
+        # Drop the old meta.json before any array is replaced: a failed rebuild then leaves the entry absent, not broken.
+        (entry / "meta.json").unlink(missing_ok=True)
         for name in arrays:
             os.replace(temps[name], entry / f"{name}.npy")
             placed.append(entry / f"{name}.npy")
