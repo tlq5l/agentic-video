@@ -8,9 +8,9 @@ from pathlib import Path
 def ensure_ffmpeg_on_path():
     """Make ffmpeg and ffprobe discoverable when the host starts the server with a minimal PATH.
 
-    macOS (Claude Desktop does not inherit the shell PATH): prepend the first of Homebrew's
-    and ~/.local/bin that holds both binaries. Windows: search the WinGet, Scoop and
-    Chocolatey install folders.
+    macOS (Claude Desktop does not inherit the shell PATH): prepend the first of /opt/homebrew/bin,
+    /usr/local/bin and ~/.local/bin that holds both binaries. Windows: search the WinGet Gyan.FFmpeg
+    packages, ~/scoop/shims, C:/ProgramData/chocolatey/bin and C:/ffmpeg/bin.
 
     AGENTIC_VIDEO_FFMPEG_SEARCH=0 turns the search off (tests use it to simulate a machine without ffmpeg).
     """
