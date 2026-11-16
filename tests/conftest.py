@@ -19,3 +19,10 @@ def _no_semantic_worker_left_behind():
     yield
     semantic._WORKER.close()  # stays closed until the next test, so a still-running index build cannot start a worker
     semantic._MEMO.clear()
+
+
+@pytest.fixture(autouse=True)
+def _no_cloud_asr_settings(monkeypatch, tmp_path):
+    # A cloud-asr.json on the owner's Mac, or a cloud switch in the environment, must never put the suite in cloud mode.
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
+    monkeypatch.delenv("AGENTIC_VIDEO_CLOUD_ASR", raising=False)

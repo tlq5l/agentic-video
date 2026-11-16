@@ -1,4 +1,4 @@
-"""Cloudflare Workers AI calls and credentials shared by watch_for and label_sounds.
+"""Cloudflare Workers AI calls and credentials shared by watch_for, label_sounds and cloud transcription.
 
 One token cache per server process, so the token command (it runs wrangler, which is slow, and two
 wrangler refreshes at once can log the user out) runs once per refresh, not once per tool.
@@ -61,7 +61,8 @@ def require_switched_on(feature: str, sends: str) -> None:
         )
 
 
-def credentials(feature: str, sends: str) -> Tuple[str, str]:
+def credentials(feature: str, sends: str, *, require_switch: bool = True, account_fallback: Optional[str] = None,
+                command_fallback: Optional[str] = None) -> Tuple[str, str]:
     """(account id, token). The token comes from CLOUDFLARE_API_TOKEN or the last line the
     AGENTIC_VIDEO_CF_TOKEN_COMMAND prints (plain `wrangler auth token` prints a banner first).
 
@@ -69,10 +70,11 @@ def credentials(feature: str, sends: str) -> Tuple[str, str]:
     Cloudflare drops it sooner. A token that is not one run of visible ASCII is refused without being shown.
     """
     global _command_token, _command_token_at
-    require_switched_on(feature, sends)
-    account = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip()
+    if require_switch:
+        require_switched_on(feature, sends)
+    account = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip() or (account_fallback or "").strip()
     token = os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
-    command = os.environ.get("AGENTIC_VIDEO_CF_TOKEN_COMMAND", "").strip()
+    command = os.environ.get("AGENTIC_VIDEO_CF_TOKEN_COMMAND", "").strip() or (command_fallback or "").strip()
     if not token and command:
         with _lock:
             if not (_command_token and time.monotonic() - _command_token_at < COMMAND_TOKEN_MAX_AGE_SEC):
