@@ -6,6 +6,8 @@
 
 - `count_occurrences` with `direction` lists the spans the filter leaves out (stationary, or moving another way) in a new `excluded_spans` field, each with start_sec, end_sec and travel; count, spans and every other field are unchanged.
 
+- `count_occurrences` with `direction`: an appearance that crosses and comes straight back inside one span (its first and last positions match) now counts for a direction it moved at least 0.5 of the frame along. Before, it read stationary and was left out. count_dev back row occ27_q1: 0 to 4 (truth 4).
+
 ## 0.3.8 (2026-11-15)
 
 - Missing ffmpeg: the one-line error names the tool that is missing (ffmpeg or ffprobe) and gives the install command for macOS, Debian or Ubuntu, and Windows. The `agentic-video-check` command exits with code 2 in that case. (#91)

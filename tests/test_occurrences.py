@@ -556,8 +556,9 @@ def test_direction_narrows_the_count_through_the_mcp_tool(tmp_path, monkeypatch)
 
 
 def test_direction_lists_the_spans_it_leaves_out(tmp_path, monkeypatch):
-    """Guards excluded_spans through handle_call: one green diamond crosses left to right, turns and comes back, so it is one
-    span that reads stationary. With direction=left_to_right the filter leaves that span out of count and spans, and
+    """Guards excluded_spans and the back-and-forth case through handle_call: one green diamond crosses left to right,
+    turns and comes straight back, so its first and last positions match. direction=left_to_right still counts it (it
+    moved most of the frame that way inside the span); direction=top_to_bottom leaves it out as stationary and
     excluded_spans lists it; with direction=any nothing is left out and excluded_spans is empty."""
     from src.core.config import Config
     from src.executor import mcp_server
@@ -579,8 +580,11 @@ def test_direction_lists_the_spans_it_leaves_out(tmp_path, monkeypatch):
         raise AssertionError("count_occurrences did not finish")
 
     passes = call(direction="left_to_right")
-    assert passes["count"] == 0 and passes["spans"] == []
-    (left_out,) = passes["excluded_spans"]
+    assert passes["count"] == 1 and [span["travel"] for span in passes["spans"]] == ["left_to_right"]
+    assert passes["excluded_spans"] == []
+    down = call(direction="top_to_bottom")
+    assert down["count"] == 0 and down["spans"] == []
+    (left_out,) = down["excluded_spans"]
     assert left_out["start_sec"] == pytest.approx(0.0, abs=0.25) and left_out["end_sec"] == pytest.approx(4.0, abs=0.25)
     assert left_out["travel"] == "stationary"
     everything = call()

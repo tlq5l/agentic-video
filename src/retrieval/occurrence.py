@@ -402,12 +402,28 @@ class FrameJudge:
         return results
 
 
-def _direction(points, mark_brief=False):
+# A span whose first and last centres match (it crossed and came straight back) still counts for a passed direction when,
+# inside the span, its smoothed centre moved at least this fraction of the frame that way. Picked on count_dev's back rows.
+BACK_RISE = 0.5
+_WAYS = {"left_to_right": (0, 1), "right_to_left": (0, -1), "top_to_bottom": (1, 1), "bottom_to_top": (1, -1)}
+
+
+def _went(points, wanted):
+    """Farthest the centre moved in `wanted` inside the span, earlier to later, on a two-sample moving average."""
+    axis, sign = _WAYS[wanted]
+    track = np.asarray(points, float)[:, axis] * sign
+    smooth = (track[1:] + track[:-1]) / 2
+    return float(np.max(smooth - np.minimum.accumulate(smooth)))
+
+
+def _direction(points, mark_brief=False, wanted=None):
     """Travel of the matched region across a span, from its first and last centres (normalized).
 
     Two samples report travel from the first centre to the last. One sample has no travel and reads "stationary".
     With mark_brief (a direction was passed) any span under three samples is "unknown" instead, because it is
     counted under any direction.
+    With `wanted` (the direction passed), a span that reads stationary end to end returns `wanted` when it moved at least
+    BACK_RISE that way inside the span: across the frame and straight back.
     """
     if mark_brief and len(points) < 3:
         return "unknown"
@@ -417,7 +433,7 @@ def _direction(points, mark_brief=False):
         head, tail = np.mean(points[:2], axis=0), np.mean(points[-2:], axis=0)
     dx, dy = tail - head
     if max(abs(dx), abs(dy)) < .15:
-        return "stationary"
+        return wanted if wanted in _WAYS and len(points) > 2 and _went(points, wanted) >= BACK_RISE else "stationary"
     if abs(dx) >= abs(dy):
         return "left_to_right" if dx > 0 else "right_to_left"
     return "top_to_bottom" if dy > 0 else "bottom_to_top"
@@ -720,7 +736,7 @@ def count_video(engine, progress=lambda done, total: None, **args):
     fps = round(fps, 3)
     judged = [ALGORITHM_VERSION, meta.fingerprint, description, text, case_sensitive, start, end, requested_fps]
     direction = args.get("direction", "any")
-    direction_key = [] if direction == "any" else [direction]
+    direction_key = [] if direction == "any" else [direction, "back-v1"]  # back-v1: results stored before back-and-forth spans counted are not served
     tag = hashlib.sha256(json.dumps(judged + [min_gap, max_spans] + direction_key).encode()).hexdigest()[:20]
     cache_dir = engine._cache.get_entry_dir(meta.fingerprint)
     result_path = cache_dir / f"{tag}.occurrences.json"
@@ -747,7 +763,7 @@ def count_video(engine, progress=lambda done, total: None, **args):
     spans = builder.finish()
     capped = len(spans) >= MAX_SPANS_LIMIT
     filtered = direction != "any"
-    travels = [_direction(span["points"], mark_brief=filtered) for span in spans]
+    travels = [_direction(span["points"], mark_brief=filtered, wanted=direction if filtered else None) for span in spans]
     matched = [span for span, way in zip(spans, travels) if not filtered or way in (direction, "unknown")]
     left_out = [(span, way) for span, way in zip(spans, travels) if filtered and way not in (direction, "unknown")]
     excluded_spans = [{"start_sec": round(span["start"], 3), "end_sec": round(min(span["end"], end), 3), "travel": way}
@@ -764,7 +780,7 @@ def count_video(engine, progress=lambda done, total: None, **args):
                         "duration_sec": round(span_end - span["start"], 3), "score": round(span["score"], 3),
                         "representative_sec": round(span["rep"][0], 3), "frame_badge": f"#{i + 1}", "weak": span["weak"],
                         "region": {"x": round(x, 3), "y": round(y, 3), "w": round(w, 3), "h": round(h, 3)},
-                        "travel": _direction(span["points"], mark_brief=filtered)})
+                        "travel": _direction(span["points"], mark_brief=filtered, wanted=direction if filtered else None)})
     omitted = len(matched) - len(shown)
     spec = judge.spec
     result = {"status": "complete", "count": None if capped else len(matched), "spans": entries, "spans_returned": len(shown),
