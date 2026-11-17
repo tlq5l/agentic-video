@@ -45,3 +45,24 @@ def test_inspect_window_max_width_default_768_full_on_request_cached_apart(tmp_p
     # Same window after the full-width call: the cache must still hand back 768 px frames.
     again = mcp_server.handle_call("inspect_window", args)
     assert {frame["width"] for frame in again["data"]["frames"]} == {768}
+
+
+@needs_repro
+def test_inspect_window_small_max_width_keeps_earlier_sheet_size(tmp_path, monkeypatch):
+    # Breaker round 2: a max_width 64 call on the same window rewrote the sheet that an earlier default call had returned.
+    monkeypatch.setattr(Config, "BASE_CACHE_DIR", tmp_path / "cache")
+    args = {"source": str(REPRO), "start_sec": 2.0, "end_sec": 3.0, "fps": 2}
+
+    default = mcp_server.handle_call("inspect_window", args)
+    assert default["ok"] is True
+    default_sheet = default["data"]["contact_sheet_path"]
+    with Image.open(default_sheet) as im:
+        default_width = im.width
+    assert default_width > 64
+
+    small = mcp_server.handle_call("inspect_window", {**args, "max_width": 64})
+    assert small["ok"] is True
+
+    # The path the default call returned must still hold the default-size sheet.
+    with Image.open(default_sheet) as im:
+        assert im.width == default_width

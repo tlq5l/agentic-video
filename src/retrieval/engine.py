@@ -1093,12 +1093,13 @@ class AgenticVideoEngine:
         """
         if read_text:
             ocr.ensure_available(ocr.READ_TEXT_UNAVAILABLE)
+        frame_width = _frame_width(max_width)
         frames = extract_window_frames(
             self.source_path,
             start_sec=start_sec,
             end_sec=end_sec,
             fps=fps,
-            width=_frame_width(max_width),
+            width=frame_width,
             burn_timestamps=True,
             cache=self._cache,
         )
@@ -1114,7 +1115,7 @@ class AgenticVideoEngine:
             title = f"Inspection: [{format_timestamp(start_sec)} - {format_timestamp(end_sec)}] @ {fps} FPS"
             sheet = compose_contact_sheet(
                 frames,
-                default_sheet_path(self._cache, self.source_path, timestamps, cols),
+                default_sheet_path(self._cache, self.source_path, timestamps, cols, frame_width=frame_width),
                 title=title,
                 cols=cols,
                 tile_width=Config.DEFAULT_FRAME_WIDTH,
