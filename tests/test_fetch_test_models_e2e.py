@@ -220,13 +220,14 @@ def test_a_429_while_a_broken_copy_is_cached_is_waited_out(tmp_path, hub):
 
 def test_a_good_seed_passes_setup_with_no_call_to_the_hub(tmp_path, hub):
     """No cache, the Hub answering 429 on every call, and a seed folder holding the four good files: setup copies the seed
-    into the cache and passes, with no request to the Hub."""
+    into the cache and passes, with no request to the Hub. Short waits, so a setup that ignores the seed fails in seconds, not after
+    the default 225 s (round-19 breaker: the seed-install-no-refs mutant was caught only after the default waits)."""
     served = hub(too_many=-1)
     seed = tmp_path / "seed"
     seed.mkdir()
     for name in ("config.json", "model.bin", "tokenizer.json", "vocabulary.txt"):
         (seed / name).write_bytes(served.files[name])
-    run = _setup(tmp_path / "hf", served.url, HF_HUB_DISABLE_XET="1", WHISPER_TINY_SEED=str(seed))
+    run = _setup(tmp_path / "hf", served.url, HF_HUB_DISABLE_XET="1", WHISPER_TINY_SEED=str(seed), WHISPER_TINY_RETRY_WAITS="0,0,0,0")
     assert run.returncode == 0, run.stdout + run.stderr + repr(served.requests)
     assert "WHISPER_TINY seed 78203619 bytes" in run.stdout
     assert served.requests == [], served.requests
@@ -255,6 +256,45 @@ def test_an_empty_retry_wait_setting_is_the_default(tmp_path):
     run = _setup(tmp_path / "hf", WHISPER_TINY_RETRY_WAITS="")
     assert run.returncode != 0
     assert "WHISPER_TINY fetching: not cached" in run.stdout, run.stdout + run.stderr
+
+
+def _waits(**extra):
+    """The WAITS list the script computes when it is imported, read in a child process, and the warning it printed."""
+    env = {k: v for k, v in os.environ.items() if k not in ("WHISPER_TINY_SEED", "WHISPER_TINY_RETRY_WAITS")}
+    env.update(extra)
+    code = "import importlib.util as u, sys; s = u.spec_from_file_location('fetch', sys.argv[1]); m = u.module_from_spec(s); s.loader.exec_module(m); print(m.WAITS)"
+    run = subprocess.run([sys.executable, "-c", code, str(SCRIPT)], env=env, capture_output=True, text=True, timeout=60)
+    assert run.returncode == 0, run.stderr
+    return run.stdout.strip(), run.stderr
+
+
+@pytest.mark.parametrize("waits, expected", [("15,", "[15.0]"), (",15", "[15.0]"), ("15,,30", "[15.0, 30.0]")])
+def test_retry_waits_with_empty_items_start_and_use_the_given_waits(tmp_path, waits, expected):
+    """WHISPER_TINY_RETRY_WAITS with an empty item (a stray comma) crashed the app at startup: float of an empty string
+    (round-19 breaker). The empty items are skipped: setup starts on the cached copy, with no warning, and uses the given waits."""
+    home, _ = _copy_cache(tmp_path)
+    run = _setup(home, WHISPER_TINY_RETRY_WAITS=waits)
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert run.stdout.startswith("WHISPER_TINY cached 78203619 bytes")
+    assert "RETRY_WAITS" not in run.stderr, run.stderr
+    seen, stderr = _waits(WHISPER_TINY_RETRY_WAITS=waits)
+    assert seen == expected, seen
+    assert "RETRY_WAITS" not in stderr, stderr
+
+
+@pytest.mark.parametrize("waits", ["abc", "-5", ","])
+def test_bad_retry_waits_print_one_warning_and_use_the_default_waits(tmp_path, waits):
+    """A value that is not seconds 0 or more ("abc", "-5", or only commas) crashed the app at startup or failed later at the
+    first sleep (round-19 breaker). Now setup starts on the cached copy, prints one warning line on stderr and waits the
+    default 15, 30, 60, 120 s."""
+    home, _ = _copy_cache(tmp_path)
+    run = _setup(home, WHISPER_TINY_RETRY_WAITS=waits)
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert run.stdout.startswith("WHISPER_TINY cached 78203619 bytes")
+    assert len(run.stderr.splitlines()) == 1 and "RETRY_WAITS" in run.stderr, run.stderr
+    seen, stderr = _waits(WHISPER_TINY_RETRY_WAITS=waits)
+    assert seen == "[15.0, 30.0, 60.0, 120.0]", seen
+    assert len(stderr.splitlines()) == 1, stderr
 
 
 def test_setup_fails_at_once_on_errors_other_than_429(tmp_path):
