@@ -21,12 +21,15 @@ SHEET_EXTRACT_WORKERS = 8
 
 
 def default_sheet_path(
-    cache: MediaCache, video_path: Union[str, Path], timestamps: Sequence[float], cols: int
+    cache: MediaCache, video_path: Union[str, Path], timestamps: Sequence[float], cols: int,
+    frame_width: int = Config.DEFAULT_FRAME_WIDTH,
 ) -> Path:
-    """Cache path for a sheet of these timestamps; same name however the frames were made."""
+    """Cache path for a sheet of these timestamps and frame width; same name however the frames were made."""
     fingerprint = cache.compute_fingerprint(str(Path(video_path).resolve()))
     t_hash = hash(tuple(round(t, 2) for t in timestamps)) & 0xFFFFFF
-    return cache.get_sheets_dir(fingerprint) / f"sheet_{len(timestamps)}samples_{cols}cols_{t_hash:x}.jpg"
+    # A sheet of another frame width gets its own name, so it never rewrites an earlier sheet's path.
+    width_tag = "" if frame_width == Config.DEFAULT_FRAME_WIDTH else f"_w{frame_width}"
+    return cache.get_sheets_dir(fingerprint) / f"sheet_{len(timestamps)}samples_{cols}cols_{t_hash:x}{width_tag}.jpg"
 
 
 def _load_font(size: int):
@@ -45,7 +48,8 @@ def compose_contact_sheet(
     header_height: int = 36,
     bg_color: tuple = (20, 22, 28),
     header_text_color: tuple = (220, 225, 235),
-    border_color: tuple = (45, 48, 58)
+    border_color: tuple = (45, 48, 58),
+    tile_width: int | None = None,
 ) -> ContactSheetResult:
     """Compose an annotated contact sheet grid from individual frames using Pillow.
     
@@ -68,6 +72,10 @@ def compose_contact_sheet(
     sample_im = Image.open(frames[0].file_path)
     tile_w, tile_h = sample_im.size
     sample_im.close()
+    if tile_width and tile_w > tile_width:
+        # Full-width frames would make a sheet thousands of pixels wide; shrink the tiles (frames are resized to them below).
+        tile_h = round(tile_h * tile_width / tile_w)
+        tile_w = tile_width
     
     canvas_w = cols * tile_w + (cols + 1) * pad
 
@@ -193,7 +201,7 @@ def build_contact_sheets(
             f.index = idx + 1
         cols = job["cols"]
         if job.get("output_path") is None:
-            out_path = default_sheet_path(cache, vpath, job["timestamps"], cols)
+            out_path = default_sheet_path(cache, vpath, job["timestamps"], cols, width)
         else:
             out_path = Path(job["output_path"]).resolve()
         sheets.append(compose_contact_sheet(

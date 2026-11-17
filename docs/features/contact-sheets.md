@@ -10,6 +10,7 @@ Gotchas:
 - `build_contact_sheet` seeks each frame with its own ffmpeg run (4 at a time). The MCP `contact_sheet` stops after 40 s with an error that says the frames so far are cached and a repeat call continues.
 - `inspect_window` composes its sheet from the dense frames it already extracted; it must not seek each frame again (that took over a minute for 4 windows).
 - `inspect_window` with `read_text: true` runs Apple Vision on each dense frame's saved image, the same pixels the frame list points to; each frame gets `text_lines` as in `frame_at`. The burned-in timestamp is part of that image, so its digits can appear as a text line too.
+- `inspect_window` and `inspect_windows` take an optional `max_width` (at least 64). Frames are 768 px wide unless it is set; a value at or above the source width returns full-resolution frames, so small on-screen text can be read. Contact-sheet tiles stay at most 768 px wide; with max_width below 768 they match the frame width. The frames are the full-size files.
 
 ## count_occurrences direction
 

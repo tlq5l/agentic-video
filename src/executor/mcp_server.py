@@ -860,6 +860,11 @@ READ_TEXT_TOOLS = ("frame_at", "inspect_window")
 CLOUD_TOOLS = {"watch_for": ("watch_for", "video frames"), "label_sounds": ("label_sounds", "audio")}
 
 
+def _optional_int(value: Any) -> Optional[int]:
+    """None stays None (the default width); anything else is passed on as an int."""
+    return None if value is None else int(value)
+
+
 def handle_call(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
     """Validate the call, download URL sources, clamp over-cap arguments, and dispatch to AgenticVideoEngine."""
     if name not in _TOOL_SCHEMAS:
@@ -1216,6 +1221,7 @@ def _dispatch(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
             merge_overlaps=merge_overlaps,
             max_windows=max_windows,
             max_total_frames=max_total_frames,
+            max_width=_optional_int(args.get("max_width")),
         )
         for item in data["windows"]:
             sheet_path = item.get("contact_sheet_path")
@@ -1228,7 +1234,8 @@ def _dispatch(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         end_sec = float(args.get("end_sec", 0.0))
         fps = float(args.get("fps", 4.0))
         res = engine.inspect_window(start_sec=start_sec, end_sec=end_sec, fps=fps,
-                                    read_text=bool(args.get("read_text", False)))
+                                    read_text=bool(args.get("read_text", False)),
+                                    max_width=_optional_int(args.get("max_width")))
         d = res.to_dict()
         if res.contact_sheet_path:
             d["tool_file"] = make_tool_file(res.contact_sheet_path)

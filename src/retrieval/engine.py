@@ -63,6 +63,21 @@ def _timestamp_provenance(frame: Any) -> Dict[str, Optional[float]]:
     }
 
 
+def _frame_width(max_width: Optional[int]) -> int:
+    """Widest frame for inspect_window: 768 px (today's default) unless the caller asks for more."""
+    if max_width is None:
+        return Config.DEFAULT_FRAME_WIDTH
+    try:
+        width = int(max_width)
+    except (TypeError, ValueError) as exc:
+        raise ExtractionBoundsError(f"max_width must be a whole number of pixels (got {max_width!r})", {"max_width": max_width}) from exc
+    if width < 64:
+        raise ExtractionBoundsError(
+            f"max_width must be at least 64 pixels (got {width}); omit it for 768 px frames", {"max_width": width},
+        )
+    return width
+
+
 class AgenticVideoEngine:
     """Core local-first programmatic engine for agentic video understanding."""
     
@@ -964,6 +979,7 @@ class AgenticVideoEngine:
         merge_overlaps: bool = True,
         max_windows: int = 16,
         max_total_frames: int = 150,
+        max_width: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Inspect multiple absolute half-open windows under one bounded budget."""
         meta = self.metadata
@@ -1037,7 +1053,7 @@ class AgenticVideoEngine:
         # Windows are independent ffmpeg runs; a few at once (capped, the machine is shared), results in order.
         with ThreadPoolExecutor(max_workers=min(WINDOW_WORKERS, len(selected))) as pool:
             results = list(pool.map(
-                lambda item: self.inspect_window(start_sec=item["start_sec"], end_sec=item["end_sec"], fps=fps_value),
+                lambda item: self.inspect_window(start_sec=item["start_sec"], end_sec=item["end_sec"], fps=fps_value, max_width=max_width),
                 selected,
             ))
         for index, (item, result) in enumerate(zip(selected, results), start=1):
@@ -1069,15 +1085,21 @@ class AgenticVideoEngine:
         fps: float = Config.DEFAULT_DENSE_FPS,
         create_sheet: bool = True,
         read_text: bool = False,
+        max_width: Optional[int] = None,
     ) -> InspectionWindowResult:
-        """Densify inspection over a target time window [start_sec, end_sec]."""
+        """Densify inspection over a target time window [start_sec, end_sec].
+
+        Frames are 768 px wide unless max_width is given; a larger max_width gives the source's native width.
+        """
         if read_text:
             ocr.ensure_available(ocr.READ_TEXT_UNAVAILABLE)
+        frame_width = _frame_width(max_width)
         frames = extract_window_frames(
             self.source_path,
             start_sec=start_sec,
             end_sec=end_sec,
             fps=fps,
+            width=frame_width,
             burn_timestamps=True,
             cache=self._cache,
         )
@@ -1093,9 +1115,10 @@ class AgenticVideoEngine:
             title = f"Inspection: [{format_timestamp(start_sec)} - {format_timestamp(end_sec)}] @ {fps} FPS"
             sheet = compose_contact_sheet(
                 frames,
-                default_sheet_path(self._cache, self.source_path, timestamps, cols),
+                default_sheet_path(self._cache, self.source_path, timestamps, cols, frame_width=frame_width),
                 title=title,
                 cols=cols,
+                tile_width=Config.DEFAULT_FRAME_WIDTH,
             )
             sheet_path = sheet.file_path
             

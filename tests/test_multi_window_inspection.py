@@ -32,7 +32,7 @@ def _engine() -> AgenticVideoEngine:
 def _stub_inspection(monkeypatch, engine: AgenticVideoEngine):
     seen = []
 
-    def fake_inspect_window(start_sec, end_sec, fps=4.0, create_sheet=True):
+    def fake_inspect_window(start_sec, end_sec, fps=4.0, create_sheet=True, max_width=None):
         seen.append((start_sec, end_sec, fps))
         frame_count = math.ceil((end_sec - start_sec) * fps)
         frames = [
