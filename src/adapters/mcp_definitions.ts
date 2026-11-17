@@ -214,7 +214,7 @@ export const InspectWindowsInputSchema = {
   merge_overlaps: z.boolean().describe("Merge overlapping windows into one (default true).").optional(),
   max_windows: z.number().int().min(1).max(16).describe("Most windows accepted (default and maximum 16; larger values are clamped).").optional(),
   max_total_frames: z.number().int().min(1).max(500).describe("Frame budget for all windows together (default 150, maximum 500; larger values are clamped). Lower fps or shorten the windows to fit.").optional(),
-  max_width: z.number().int().min(64).describe("Widest frame in pixels (default 768). Frames are scaled down to it, never up; a value at or above the source width gives full-resolution frames, so small on-screen text can be read (probe_video gives the source width). The contact sheet keeps 768 px tiles either way. Minimum 64.").optional(),
+  max_width: z.number().int().min(64).describe("Widest frame in pixels (default 768). Frames are scaled down to it, never up; a value at or above the source width gives full-resolution frames, so small on-screen text can be read (probe_video gives the source width). Contact-sheet tiles stay at most 768 px wide; with max_width below 768 they match the frame width. Minimum 64.").optional(),
 };
 
 export const InspectWindowInputSchema = {
@@ -223,7 +223,7 @@ export const InspectWindowInputSchema = {
   end_sec: seconds(z.number().min(0)).describe("End of the window in seconds; must be within the video. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250."),
   fps: z.number().min(0.01).max(30).describe("Sampling rate (default 4, maximum 30; larger values are clamped). Frames = fps x duration and must stay within about 150.").optional(),
   read_text: z.boolean().describe("Also read the on-screen text in each returned frame with Apple Vision OCR (macOS only). Each frame then lists text_lines: the text, confidence and box (x, y, width, height; 0 to 1, top-left origin) of each line, top to bottom then left to right. Default false: no text is read. When true and Apple Vision is unavailable, the call fails before extracting any frame.").optional(),
-  max_width: z.number().int().min(64).describe("Widest frame in pixels (default 768). Frames are scaled down to it, never up; a value at or above the source width gives full-resolution frames, so small on-screen text can be read (probe_video gives the source width). The contact sheet keeps 768 px tiles either way. Minimum 64.").optional(),
+  max_width: z.number().int().min(64).describe("Widest frame in pixels (default 768). Frames are scaled down to it, never up; a value at or above the source width gives full-resolution frames, so small on-screen text can be read (probe_video gives the source width). Contact-sheet tiles stay at most 768 px wide; with max_width below 768 they match the frame width. Minimum 64.").optional(),
 };
 
 export const FrameAtInputSchema = {

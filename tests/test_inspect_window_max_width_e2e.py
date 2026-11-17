@@ -46,6 +46,11 @@ def test_inspect_window_max_width_default_768_full_on_request_cached_apart(tmp_p
     again = mcp_server.handle_call("inspect_window", args)
     assert {frame["width"] for frame in again["data"]["frames"]} == {768}
 
+    # Documented rule: with max_width below 768 the contact-sheet tiles match the frame width.
+    small = mcp_server.handle_call("inspect_window", {**args, "max_width": 200})
+    assert small["ok"] is True
+    assert {frame["width"] for frame in small["data"]["frames"]} == {200}
+
 
 @needs_repro
 def test_inspect_window_small_max_width_keeps_earlier_sheet_size(tmp_path, monkeypatch):

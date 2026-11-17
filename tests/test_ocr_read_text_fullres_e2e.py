@@ -1,4 +1,4 @@
-"""End to end: inspect_window(read_text=True) on the full-resolution screen recording (3,024 px wide).
+"""End to end: inspect_window(read_text=True) on the full-resolution screen recording (3244 px wide).
 
 Calls the real engine path (AgenticVideoEngine.inspect_window -> ocr.frame_text -> Apple Vision) on a
 1-second window of the repro file. Skips when the file is not on this machine or Apple Vision is not installed.
