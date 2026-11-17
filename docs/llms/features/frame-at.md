@@ -14,7 +14,7 @@ The rule: the frame on screen at `time_sec` is the last frame whose start time i
 - A time 1 tick before a frame's start returns the frame before it.
 
 Gotchas:
-- The PNG has no timestamp overlay and is at native resolution; `inspect_window` burns timestamps and downscales its frames.
+- The PNG has no timestamp overlay and is at native resolution; `inspect_window` burns timestamps and downscales its frames to 768 px wide unless `max_width` is set.
 - `frame_time_sec` is the chosen frame's start on the container clock (the same clock `inspect_window` counts from), read from the decoder's showinfo output for the same ffmpeg run that wrote the PNG. The run must report the chosen pts or the call fails.
 - On variable-frame-rate video the frame on screen can be much earlier than the request (a 0.2 s request after a gap can return the frame at 0.16 s), so read `frame_time_sec`.
 - Some containers store times in whole milliseconds (Matroska by default). Above 1000 fps two frames can share one stored start; the later frame is returned. At 29.97 fps the stored starts are rounded to the millisecond, so an `n / fps` request can return the frame before `n` when the rounding went up. The stored start is what the rule compares.

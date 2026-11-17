@@ -549,6 +549,8 @@ export interface InspectWindowInput {
   fps?: number;
   /** Also read the on-screen text in each returned frame with Apple Vision OCR (macOS only). Each frame then lists text_lines: the text, confidence and box (x, y, width, height; 0 to 1, top-left origin) of each line, top to bottom then left to right. Default false: no text is read. When true and Apple Vision is unavailable, the call fails before extracting any frame. */
   read_text?: boolean;
+  /** Widest frame in pixels (default 768; scaled down, never up; at or above the source width gives full-resolution frames). Minimum 64. The contact sheet keeps 768 px tiles. */
+  max_width?: number;
 }
 
 export interface DenseWindowFrame {
@@ -851,6 +853,8 @@ export interface InspectWindowsInput {
   max_windows?: number;
   /** Frame budget for all windows together (default 150, maximum 500; larger values are clamped). */
   max_total_frames?: number;
+  /** Widest frame in pixels (default 768; scaled down, never up; at or above the source width gives full-resolution frames). Minimum 64. The contact sheet keeps 768 px tiles. */
+  max_width?: number;
 }
 
 export interface InspectWindowsItem {

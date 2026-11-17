@@ -1768,7 +1768,8 @@
           "context_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "default": 0.0, "description": "Seconds of padding added to each side of every window (default 0). Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
           "merge_overlaps": { "type": "boolean", "default": true, "description": "Merge overlapping windows into one (default true)." },
           "max_windows": { "type": "integer", "minimum": 1, "maximum": 16, "default": 16, "description": "Most windows accepted (default and maximum 16; larger values are clamped)." },
-          "max_total_frames": { "type": "integer", "minimum": 1, "maximum": 500, "default": 150, "description": "Frame budget for all windows together (default 150, maximum 500; larger values are clamped). Lower fps or shorten the windows to fit." }
+          "max_total_frames": { "type": "integer", "minimum": 1, "maximum": 500, "default": 150, "description": "Frame budget for all windows together (default 150, maximum 500; larger values are clamped). Lower fps or shorten the windows to fit." },
+          "max_width": { "type": "integer", "minimum": 64, "description": "Widest frame in pixels (default 768). Frames are scaled down to it, never up; a value at or above the source width gives full-resolution frames, so small on-screen text can be read (probe_video gives the source width). The contact sheet keeps 768 px tiles either way. Minimum 64." }
         },
         "required": ["source", "windows"],
         "additionalProperties": false
@@ -1839,7 +1840,8 @@
           "start_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "Start of the window in seconds. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
           "end_sec": { "type": ["number", "string"], "pattern": "^(?:(?:[0-9]+:0*[0-5]?[0-9]|[0-9]+):0*[0-5]?[0-9](?:\\.[0-9]+)?|[0-9]+(?:\\.[0-9]+)?)$", "maxLength": 32, "minimum": 0, "description": "End of the window in seconds; must be within the video. Also accepts a timecode string in MM:SS.mmm form, e.g. 00:14.250." },
           "fps": { "type": "number", "minimum": 0.01, "maximum": 30, "default": 4.0, "description": "Sampling rate (default 4, maximum 30; larger values are clamped). Frames = fps x duration and must stay within about 150." },
-          "read_text": { "type": "boolean", "default": false, "description": "Also read the on-screen text in each returned frame with Apple Vision OCR (macOS only). Each frame then lists text_lines: the text, confidence and box (x, y, width, height; 0 to 1, top-left origin) of each line, top to bottom then left to right. Default false: no text is read. When true and Apple Vision is unavailable, the call fails before extracting any frame." }
+          "read_text": { "type": "boolean", "default": false, "description": "Also read the on-screen text in each returned frame with Apple Vision OCR (macOS only). Each frame then lists text_lines: the text, confidence and box (x, y, width, height; 0 to 1, top-left origin) of each line, top to bottom then left to right. Default false: no text is read. When true and Apple Vision is unavailable, the call fails before extracting any frame." },
+          "max_width": { "type": "integer", "minimum": 64, "description": "Widest frame in pixels (default 768). Frames are scaled down to it, never up; a value at or above the source width gives full-resolution frames, so small on-screen text can be read (probe_video gives the source width). The contact sheet keeps 768 px tiles either way. Minimum 64." }
         },
         "required": ["source", "start_sec", "end_sec"],
         "additionalProperties": false

@@ -45,7 +45,8 @@ def compose_contact_sheet(
     header_height: int = 36,
     bg_color: tuple = (20, 22, 28),
     header_text_color: tuple = (220, 225, 235),
-    border_color: tuple = (45, 48, 58)
+    border_color: tuple = (45, 48, 58),
+    tile_width: int | None = None,
 ) -> ContactSheetResult:
     """Compose an annotated contact sheet grid from individual frames using Pillow.
     
@@ -68,6 +69,10 @@ def compose_contact_sheet(
     sample_im = Image.open(frames[0].file_path)
     tile_w, tile_h = sample_im.size
     sample_im.close()
+    if tile_width and tile_w > tile_width:
+        # Full-width frames would make a sheet thousands of pixels wide; shrink the tiles (frames are resized to them below).
+        tile_h = round(tile_h * tile_width / tile_w)
+        tile_w = tile_width
     
     canvas_w = cols * tile_w + (cols + 1) * pad
 
