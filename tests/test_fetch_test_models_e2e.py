@@ -45,7 +45,7 @@ class _Hub:
     tests set HF_HUB_DISABLE_XET=1, so the hub client asks for no Xet token). Its first `too_many` model-info calls get 429
     with Retry-After 0 (-1: every call). `requests` lists (method, path, status) as they arrive."""
 
-    def __init__(self, too_many=0):
+    def __init__(self, too_many=0, download_too_many=0):
         from faster_whisper.utils import download_model
 
         try:
@@ -58,6 +58,7 @@ class _Hub:
         self.etags = {f.name: Path(os.readlink(f)).name if f.is_symlink() else hashlib.sha256(self.files[f.name]).hexdigest()
                       for f in snapshot.iterdir() if f.is_file()}
         self.too_many, self.requests, self.times = too_many, [], []
+        self.download_too_many = download_too_many  # GET model.bin answers 429 this many times (-1: every call)
         hub = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -78,6 +79,9 @@ class _Hub:
                     tree = [{"type": "file", "path": name, "size": len(data), "oid": hashlib.sha1(data).hexdigest()}
                             for name, data in sorted(hub.files.items())]
                     return self._send(path, 200, json.dumps(tree).encode(), {"Content-Type": "application/json"}, body)
+                if file and file.group(1) == "model.bin" and body and hub.download_too_many != 0:
+                    hub.download_too_many -= 1
+                    return self._send(path, 429, b'{"error": "too many requests"}', {"Retry-After": "0"}, body)
                 if file and file.group(1) in hub.files:
                     data = hub.files[file.group(1)]
                     headers = {"X-Repo-Commit": hub.commit, "ETag": '"' + hub.etags[file.group(1)] + '"'}
@@ -114,8 +118,8 @@ class _Hub:
 def hub():
     made = []
 
-    def start(too_many=0):
-        made.append(_Hub(too_many))
+    def start(too_many=0, download_too_many=0):
+        made.append(_Hub(too_many, download_too_many))
         return made[-1]
 
     yield start
@@ -282,9 +286,9 @@ def test_retry_waits_with_empty_items_start_and_use_the_given_waits(tmp_path, wa
     assert "RETRY_WAITS" not in stderr, stderr
 
 
-@pytest.mark.parametrize("waits", ["abc", "-5", ","])
+@pytest.mark.parametrize("waits", ["abc", "-5", ",", "nan", "inf", "-inf", "1e999"])
 def test_bad_retry_waits_print_one_warning_and_use_the_default_waits(tmp_path, waits):
-    """A value that is not seconds 0 or more ("abc", "-5", or only commas) crashed the app at startup or failed later at the
+    """A value that is not seconds 0 or more ("abc", "-5", only commas, nan, inf, 1e999) crashed the app at startup or failed later at the
     first sleep (round-19 breaker). Now setup starts on the cached copy, prints one warning line on stderr and waits the
     default 15, 30, 60, 120 s."""
     home, _ = _copy_cache(tmp_path)
@@ -303,3 +307,79 @@ def test_setup_fails_at_once_on_errors_other_than_429(tmp_path):
     assert run.returncode != 0
     assert "WHISPER_TINY fetching: not cached" in run.stdout
     assert "429" not in run.stdout, run.stdout
+
+
+def _model_statuses(served):
+    """The status of each GET of model.bin the Hub got, in order."""
+    return [status for method, path, status in served.requests if method == "GET" and path.endswith("/model.bin")]
+
+
+def _model_get_stamps(served):
+    """The time of each GET of model.bin the Hub got, in order (the same order as _model_statuses)."""
+    return [stamp for (method, path, status), stamp in zip(served.requests, served.times) if method == "GET" and path.endswith("/model.bin")]
+
+
+def test_download_429_after_info_success_is_retried(tmp_path, hub):
+    """The model-info call answers and the first model.bin download answers 429 (too many requests). The Hub client retries
+    that 429 itself, so setup needs no retry of its own: it downloads, exits 0 and prints no retry line."""
+    served = hub(download_too_many=1)
+    run = _setup(tmp_path / "hf", served.url, HF_HUB_DISABLE_XET="1", WHISPER_TINY_RETRY_WAITS="0,0")
+    assert run.returncode == 0, run.stdout + run.stderr + repr(served.requests)
+    assert "hub answered 429" not in run.stdout, run.stdout
+    assert "WHISPER_TINY downloaded 78203619 bytes" in run.stdout, run.stdout
+    assert _model_statuses(served) == [429, 200], served.requests
+    assert Path(run.stdout.split()[-1], "model.bin").stat().st_size == 75538270
+    assert "Traceback" not in run.stderr, run.stderr
+
+
+def test_download_429_exhausting_waits_fails_cleanly(tmp_path, hub):
+    """The Hub answers every model.bin GET 429. Each download try is six GETs (the Hub client's own five retries, then
+    the first 429 of the try). Setup makes 4 tries (three waits): 24 GETs in all, then stops with one line and no traceback."""
+    served = hub(download_too_many=-1)
+    run = _setup(tmp_path / "hf", served.url, HF_HUB_DISABLE_XET="1", WHISPER_TINY_RETRY_WAITS="0,0,0")
+    output = run.stdout + run.stderr
+    assert "WHISPER_TINY hub still answered 429 after 4 tries" in run.stdout, output
+    assert "Traceback" not in output, output
+    assert run.returncode == 1, output + repr(served.requests)
+    assert _model_statuses(served) == [429] * 24, served.requests
+
+
+def test_download_429_exhausted_hub_retries_then_recovers(tmp_path, hub):
+    """The Hub answers the first six model.bin GETs 429, which uses up the Hub client's retries. Setup waits 0.4 s, downloads
+    the whole model again and gets 200: one retry line, a verified model, at least 0.4 s between the sixth 429 and the 200,
+    no traceback."""
+    served = hub(download_too_many=6)
+    run = _setup(tmp_path / "hf", served.url, HF_HUB_DISABLE_XET="1", WHISPER_TINY_RETRY_WAITS="0.4,0")
+    output = run.stdout + run.stderr
+    assert run.returncode == 0, output + repr(served.requests)
+    assert run.stdout.count("WHISPER_TINY hub answered 429 (too many requests), next try in 0.4 s") == 1, run.stdout
+    assert "WHISPER_TINY downloaded 78203619 bytes" in run.stdout, run.stdout
+    assert _model_statuses(served) == [429] * 6 + [200], served.requests
+    stamps = _model_get_stamps(served)
+    assert stamps[6] - stamps[5] >= 0.4, stamps
+    assert Path(run.stdout.split()[-1], "model.bin").stat().st_size == 75538270
+    assert "Traceback" not in output, output
+
+
+def test_huge_wait_1e308_gives_clean_setup_error_without_traceback(tmp_path, hub):
+    """A retry wait too long for time.sleep (1e308 s) used to end setup with a raw OverflowError traceback. The Hub answers
+    429 once so the wait is used: setup stops at once, names the wait setting and its value, and prints no traceback."""
+    served = hub(too_many=1)
+    run = _setup(tmp_path / "hf", served.url, HF_HUB_DISABLE_XET="1", WHISPER_TINY_RETRY_WAITS="1e308")
+    output = run.stdout + run.stderr
+    assert run.returncode != 0, output
+    assert "WHISPER_TINY_RETRY_WAITS" in run.stderr and "1e308" in run.stderr, run.stderr
+    assert "Traceback" not in output and "OverflowError" not in output, output
+
+
+def test_zero_wait_is_accepted_and_retry_succeeds(tmp_path, hub):
+    """WHISPER_TINY_RETRY_WAITS=0 is a valid wait: the Hub answers 429 once, setup retries at once (0 s), downloads the
+    model and prints no warning."""
+    served = hub(too_many=1)
+    run = _setup(tmp_path / "hf", served.url, HF_HUB_DISABLE_XET="1", WHISPER_TINY_RETRY_WAITS="0")
+    assert run.returncode == 0, run.stdout + run.stderr + repr(served.requests)
+    assert "next try in 0 s" in run.stdout, run.stdout
+    assert "WHISPER_TINY downloaded 78203619 bytes" in run.stdout, run.stdout
+    assert "RETRY_WAITS" not in run.stderr, run.stderr
+    seen, _ = _waits(WHISPER_TINY_RETRY_WAITS="0")
+    assert seen == "[0.0]", seen
