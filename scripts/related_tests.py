@@ -5,6 +5,8 @@ Usage:
   python scripts/related_tests.py --base main     # changes vs another ref
   python scripts/related_tests.py --files src/retrieval/visual.py   # pick the files by hand
   python scripts/related_tests.py --list          # print the chosen tests, run nothing
+  python scripts/related_tests.py --files src/x.py --lint   # ruff on the changed .py files first; a failure stops before pytest
+  Without a .git folder (a box copy), --files is the only way to name the changed files.
   python scripts/related_tests.py --jobs 1        # one pytest process instead of the default 4
 
 A test is chosen when it imports a changed module directly, or imports a src module that
@@ -193,8 +195,15 @@ def changed_files(base):
     return sorted(set(tracked + git_lines("ls-files", "--others", "--exclude-standard")))
 
 
+def git_available():
+    """True when this folder is inside a Git checkout (a copy with no .git is not)."""
+    return subprocess.run(["git", "rev-parse", "--git-dir"], cwd=ROOT, capture_output=True).returncode == 0
+
+
 def known_to_git(relative):
-    """True for a path git tracks in the index or in HEAD, so a deleted file still counts as a change."""
+    """True for a path git tracks in the index or in HEAD, so a deleted file still counts as a change. Without git: False."""
+    if not git_available():
+        return False
     return bool(git_lines("ls-files", "--", relative) or git_lines("ls-tree", "--name-only", "HEAD", "--", relative))
 
 
@@ -215,6 +224,18 @@ def normalize_files(parser, names):
             parser.error(f"--files: {name} does not exist and git has no record of it (check the spelling)")
         normalized.add(relative)
     return sorted(normalized)
+
+
+def lint(changed):
+    """ruff check on the changed Python files that still exist (a deleted file is left out). Returns ruff's exit code."""
+    paths = [name for name in changed if name.endswith(".py") and (ROOT / name).is_file()]
+    if not paths:
+        return 0
+    try:
+        return subprocess.run(["uvx", "ruff", "check", *paths], cwd=ROOT).returncode
+    except OSError as error:
+        print(f"related_tests: cannot run uvx ruff ({error})")
+        return 1
 
 
 def module_of(relative_path):
@@ -266,18 +287,31 @@ def main(argv=None):
     parser.add_argument("--base", default="HEAD", help="git ref to diff against (default HEAD)")
     parser.add_argument("--files", nargs="+", help="use these changed files instead of git's (relative to the current folder, or absolute)")
     parser.add_argument("--list", action="store_true", help="print the chosen tests and do not run them")
+    parser.add_argument("--lint", action="store_true", help="run ruff check on the changed .py files first; a failure stops before pytest")
     parser.add_argument("--jobs", type=int, default=DEFAULT_JOBS, help=f"pytest processes that share the tests (default {DEFAULT_JOBS}; 1 runs them in one)")
     args = parser.parse_args(argv)
     if args.jobs < 1:
         parser.error("--jobs must be at least 1")
 
-    changed = normalize_files(parser, args.files) if args.files else changed_files(args.base)
+    if args.files:
+        changed = normalize_files(parser, args.files)
+    elif not git_available():
+        parser.error("no git metadata here (a copy with no .git): name the changed files with --files")
+    else:
+        try:
+            changed = changed_files(args.base)
+        except subprocess.CalledProcessError as error:
+            parser.error(f"--base {args.base}: git could not diff against it ({(error.stderr or '').strip() or 'no output'})")
     chosen = [p.relative_to(ROOT).as_posix() for p in select_tests(changed)]
     print(f"changed: {len(changed)} file(s); related tests: {len(chosen)}")
     for name in chosen:
         print("  " + name)
     if args.list:
         return 0
+    if args.lint:
+        code = lint(changed)
+        if code:
+            return code
     if not chosen:
         print("no test imports the changed files; nothing to run")
         return 0

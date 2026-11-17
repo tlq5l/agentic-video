@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Setup's `WHISPER_TINY_RETRY_WAITS` is bounded: one wait above a day, or waits that add up to more than a day, prints one warning and uses the default 15,30,60,120 s (before, `1e9` made setup wait for years and `1e308` ended it with an OverflowError).
+
+- `scripts/verify.sh --files <paths>` checks the named files in a copy with no `.git` (a box copy): it runs ruff, then only the tests that import them. Before, a copy with no `.git` exited with a git error and the full suite was the fallback.
+
 - `inspect_window` and `inspect_windows` take an optional `max_width` (at least 64). Frames stay 768 px wide by default; a value at or above the source width returns full-resolution frames, so small on-screen text can be read. Contact-sheet tiles stay at most 768 px wide; with max_width below 768 they match the frame width.
 
 - `count_occurrences` with `direction`: a detection fragment under three samples that continues the appearance before it (within 0.6 s, no jump) is joined to it before its travel is read, so a crossing split by detection dropouts counts once (count_dev seed 6102 occ26_q1: the 7.2-10.0 s crossing came back as three spans and was counted three times). Spans under three samples are still counted as too brief to show a direction.
