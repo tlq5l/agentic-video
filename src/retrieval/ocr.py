@@ -38,6 +38,7 @@ def recognize(image):
     Language correction is off so a near-miss such as RELEASED is never "fixed" into RELEASE.
     """
     ensure_available()
+    import Foundation
     import objc
     import Vision
     buffer = io.BytesIO()
@@ -46,7 +47,9 @@ def recognize(image):
         request = Vision.VNRecognizeTextRequest.alloc().init()
         request.setRecognitionLevel_(Vision.VNRequestTextRecognitionLevelAccurate)
         request.setUsesLanguageCorrection_(False)
-        handler = Vision.VNImageRequestHandler.alloc().initWithData_options_(buffer.getvalue(), {})
+        # An empty Python dict here raises "NSInvalidArgumentException - key does not exist" on this macOS (pyobjc 12.2.2);
+        # an empty NSDictionary is the same request and reads the text.
+        handler = Vision.VNImageRequestHandler.alloc().initWithData_options_(buffer.getvalue(), Foundation.NSDictionary.dictionary())
         ok, error = handler.performRequests_error_([request], None)
         if not ok:
             raise RuntimeError(f"Apple Vision text recognition failed: {error}")
