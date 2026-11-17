@@ -2,28 +2,43 @@
 Face cache, so those tests pass with HF_HUB_OFFLINE=1 too. The repo's setup step (.away-ship.json) runs it. Safe to rerun:
 a cached copy whose files all match their expected size and sha256 is used as it is, with no network call; a cached copy
 with a file missing, short or changed (a download cut off half way) is fetched again. Prints how it got the model, its
-size and its folder; exits 1 when the files still do not match after a fresh download. When the Hub answers 429 (too
-many requests), the download is tried again after 15, 30, 60 and 120 s (WHISPER_TINY_RETRY_WAITS, comma-separated
-seconds, replaces them), and setup exits 1 when the Hub still answers 429 after the last wait. Other download errors
-fail at once. Not covered: a 429 while a broken copy is cached, where the Hub hands back the cached copy without an
-error and setup exits 1 at once (round-18 box probe); it needs a cut-off download and a 429 together."""
+size and its folder; exits 1 when the files still do not match after a fresh download.
+
+Seed (WHISPER_TINY_SEED, a folder holding the four files): when the cache has no good copy and the seed matches, the seed
+is copied into the cache with no network call. When the cache and the seed are both missing or bad, the Hub is used, and
+a good result is copied into the seed folder so the next box starts from it.
+
+When the Hub answers 429 (too many requests), it is asked again after 15, 30, 60 and 120 s (WHISPER_TINY_RETRY_WAITS,
+comma-separated seconds, replaces them; empty means the default). setup exits 1 when the Hub still answers 429 after the
+last wait. The 429 is seen on the model-info call, which a cached copy cannot hide. Other download errors fail at once.
+Not covered: a 429 on a file download after the model-info call succeeded."""
 import hashlib
 import os
+import shutil
 import sys
 import time
 from pathlib import Path
 
 REPO = "Systran/faster-whisper-tiny"
-# The files faster_whisper loads for "tiny": size and sha256 at revision d90ca5fe260221311c53c58e660288d3deb8d356 (read
-# from a box download, 2026-11-17).
+# The revision the expected files below were read from (a box download, 2026-11-17).
+REVISION = "d90ca5fe260221311c53c58e660288d3deb8d356"
+# The files faster_whisper loads for "tiny": size and sha256 at that revision.
 EXPECTED = {
     "config.json": (2249, "a73a28cdfe1c43ccc7202fa333d1f89c202477271407ae9a7f19afa52039cac8"),
     "model.bin": (75538270, "dcb76c6586fc06cbdac6dd21f14cfd129cc4cdd9dce19bf4ffa62e59cbe6e6d1"),
     "tokenizer.json": (2203239, "fb7b63191e9bb045082c79fd742a3106a12c99513ab30df4a0d47fa6cb6fd0ab"),
     "vocabulary.txt": (459861, "34ce3fe1c5041027b3f8d42912270993f986dbc4bb34cf27f951e34a1e453913"),
 }
+DEFAULT_WAITS = "15,30,60,120"
 
-WAITS = [float(wait) for wait in os.environ.get("WHISPER_TINY_RETRY_WAITS", "15,30,60,120").split(",")]
+
+def retry_waits():
+    """Seconds to wait after each 429: WHISPER_TINY_RETRY_WAITS, or the default when it is unset or empty."""
+    raw = os.environ.get("WHISPER_TINY_RETRY_WAITS", "").strip() or DEFAULT_WAITS
+    return [float(wait) for wait in raw.split(",")]
+
+
+WAITS = retry_waits()
 
 
 def rate_limited(error):
@@ -38,21 +53,10 @@ def rate_limited(error):
     return False
 
 
-def fetch():
-    """snapshot_download of the 4 files with force_download, tried again after each wait in WAITS while the Hub answers
-    429; returns the snapshot folder, or None when the Hub still answers 429 after the last wait."""
-    from huggingface_hub import snapshot_download
-
-    for wait in [*WAITS, None]:
-        try:
-            return Path(snapshot_download(REPO, allow_patterns=list(EXPECTED), force_download=True))
-        except Exception as error:
-            if not rate_limited(error):
-                raise
-            if wait is None:
-                return None
-            print(f"WHISPER_TINY hub answered 429 (too many requests), next try in {wait:g} s", flush=True)
-            time.sleep(wait)
+def seed_folder():
+    """The seed folder named by WHISPER_TINY_SEED, or None when it is unset."""
+    raw = os.environ.get("WHISPER_TINY_SEED", "").strip()
+    return Path(raw) if raw else None
 
 
 def bad_files(path):
@@ -69,16 +73,80 @@ def bad_files(path):
     return bad
 
 
-def main():
-    os.environ["HF_HUB_OFFLINE"] = "0"  # before huggingface_hub is imported: setup is the one step allowed to fetch
+def install_seed(seed):
+    """Copy the seed's four files into the Hugging Face cache as the snapshot of REVISION, and point main at it."""
+    from huggingface_hub.constants import HF_HUB_CACHE
+
+    root = Path(HF_HUB_CACHE) / f"models--{REPO.replace('/', '--')}"
+    snapshot = root / "snapshots" / REVISION
+    snapshot.mkdir(parents=True, exist_ok=True)
+    for name in EXPECTED:
+        target = snapshot / name
+        if target.is_symlink() or target.exists():
+            target.unlink()  # a link into the blobs folder is replaced, never written through
+        shutil.copyfile(seed / name, target)
+    (root / "refs").mkdir(exist_ok=True)
+    (root / "refs" / "main").write_text(REVISION)
+
+
+def fill_seed(seed, path):
+    """Copy the four verified files from `path` into the seed folder, each through a .part file that is then renamed."""
+    seed.mkdir(parents=True, exist_ok=True)
+    for name in EXPECTED:
+        part = seed / (name + ".part")
+        shutil.copyfile(path / name, part)
+        os.replace(part, seed / name)
+
+
+def cached_model():
+    """(snapshot folder, what is wrong with it) for the copy in the Hugging Face cache. The folder is None when nothing is
+    cached."""
     from faster_whisper.utils import download_model
 
     try:
         path = Path(download_model("tiny", local_files_only=True))
-        bad = bad_files(path)
-    except Exception as error:  # not cached, or cached with a file missing
-        bad = [f"not cached ({type(error).__name__})"]
+        return path, bad_files(path)
+    except Exception as error:  # not cached
+        return None, [f"not cached ({type(error).__name__})"]
+
+
+def hub_answers():
+    """True once the Hub answers the model-info call. After each 429 it waits the next of WAITS and asks again. The call
+    itself raises the 429, where snapshot_download would hand back a cached copy with no error. False when the Hub still
+    answers 429 after the last wait."""
+    from huggingface_hub import model_info
+
+    for wait in [*WAITS, None]:
+        try:
+            model_info(REPO, revision="main")
+            return True
+        except Exception as error:
+            if not rate_limited(error):
+                raise
+            if wait is None:
+                return False
+            print(f"WHISPER_TINY hub answered 429 (too many requests), next try in {wait:g} s", flush=True)
+            time.sleep(wait)
+
+
+def fetch():
+    """Download the 4 files afresh once the Hub answers. Returns the snapshot folder, or None while the Hub answers 429."""
+    from huggingface_hub import snapshot_download
+
+    if not hub_answers():
+        return None
+    return Path(snapshot_download(REPO, allow_patterns=list(EXPECTED), force_download=True))
+
+
+def main():
+    os.environ["HF_HUB_OFFLINE"] = "0"  # before huggingface_hub is imported: setup is the one step allowed to fetch
+    seed = seed_folder()
+    path, bad = cached_model()
     how = "cached"
+    if bad and seed is not None and not bad_files(seed):
+        install_seed(seed)
+        path, bad = cached_model()
+        how = "seed"
     if bad:
         print("WHISPER_TINY fetching: " + "; ".join(bad), flush=True)
         path = fetch()
@@ -89,6 +157,9 @@ def main():
     if bad:
         print("WHISPER_TINY still wrong after a fresh download: " + "; ".join(bad), flush=True)
         return 1
+    if seed is not None and bad_files(seed):
+        fill_seed(seed, path)
+        print(f"WHISPER_TINY seed filled at {seed}", flush=True)
     size = sum(f.stat().st_size for f in path.iterdir() if f.is_file())
     print(f"WHISPER_TINY {how} {size} bytes {path}")
     return 0

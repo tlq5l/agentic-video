@@ -19,6 +19,6 @@
   "setup": [
     "bash",
     "-c",
-    "export PATH=\"$HOME/.local/bin:/opt/homebrew/bin:$PATH\" && uv venv -q --clear --python 3.12 .venv && uv pip install -q --python .venv/bin/python -r requirements.txt pytest jsonschema && .venv/bin/python scripts/fetch_test_models.py"
+    "export PATH=\"$HOME/.local/bin:/opt/homebrew/bin:$PATH\" && uv venv -q --clear --python 3.12 .venv && uv pip install -q --python .venv/bin/python -r requirements.txt pytest jsonschema && export WHISPER_TINY_SEED=\"${WHISPER_TINY_SEED:-$HOME/.cache/agentic-video-seed/whisper-tiny}\" && .venv/bin/python scripts/fetch_test_models.py"
   ]
 }
