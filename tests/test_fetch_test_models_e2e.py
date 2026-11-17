@@ -16,6 +16,41 @@ from pathlib import Path
 import pytest
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "fetch_test_models.py"
+# Synthetic stand-ins for the four tiny Whisper files: the sizes the recipe expects (so its messages read the same) and
+# plain bytes that need no cache. The manifest is computed here from those bytes, never read from the recipe.
+SYNTHETIC_SIZES = {"config.json": 2249, "model.bin": 75538270, "tokenizer.json": 2203239, "vocabulary.txt": 459861}
+SYNTHETIC_COMMIT = hashlib.sha1(b"r24 synthetic Hub commit").hexdigest()
+
+
+def _synthetic_bytes(name, size):
+    block = hashlib.sha256(name.encode()).digest()
+    return (block * (size // len(block) + 1))[:size]
+
+
+SYNTHETIC_FILES = {name: _synthetic_bytes(name, size) for name, size in SYNTHETIC_SIZES.items()}
+SYNTHETIC_MANIFEST = {name: [len(data), hashlib.sha256(data).hexdigest()] for name, data in SYNTHETIC_FILES.items()}
+# The recipe run as a child: its real module, with EXPECTED replaced by the synthetic manifest, then its real main().
+_PATCHED_MAIN = """import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("fetch", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+module.EXPECTED = {name: tuple(value) for name, value in json.loads(sys.argv[2]).items()}
+sys.exit(module.main())
+"""
+
+
+def _synthetic_cache(tmp_path):
+    """A Hugging Face cache under its own HF_HOME holding the synthetic files at SYNTHETIC_COMMIT, in the layout the real
+    cache has: a complete model with no network and no real weights."""
+    home = tmp_path / "hf"
+    root = home / "hub" / "models--Systran--faster-whisper-tiny"
+    snapshot = root / "snapshots" / SYNTHETIC_COMMIT
+    snapshot.mkdir(parents=True)
+    for name, data in SYNTHETIC_FILES.items():
+        (snapshot / name).write_bytes(data)
+    (root / "refs").mkdir()
+    (root / "refs" / "main").write_text(SYNTHETIC_COMMIT)
+    return home
 
 
 def _copy_cache(tmp_path):
@@ -33,13 +68,14 @@ def _copy_cache(tmp_path):
     return home, model_dir / "snapshots" / snapshot.name / "model.bin"
 
 
-def _setup(home, endpoint="http://127.0.0.1:9", *, timeout=300, **extra):
+def _setup(home, endpoint="http://127.0.0.1:9", *, timeout=300, manifest=None, **extra):
     """Run the script the way setup runs it. A child still running after `timeout` s is killed (subprocess.run waits for
     it) and the test fails with the output printed so far."""
     env = {k: v for k, v in os.environ.items() if k not in ("HF_HUB_OFFLINE", "HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE", "WHISPER_TINY_SEED", "WHISPER_TINY_RETRY_WAITS")}
     env.update(HF_HOME=str(home), HF_ENDPOINT=endpoint, **extra)
     try:
-        return subprocess.run([sys.executable, str(SCRIPT)], env=env, capture_output=True, text=True, timeout=timeout)
+        argv = [sys.executable, str(SCRIPT)] if manifest is None else [sys.executable, "-c", _PATCHED_MAIN, str(SCRIPT), json.dumps(manifest)]
+        return subprocess.run(argv, env=env, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired as error:
         printed = [(part.decode(errors="replace") if isinstance(part, bytes) else part or "") for part in (error.stdout, error.stderr)]
         pytest.fail(f"setup still running after {timeout} s, so it was killed: stdout {printed[0]!r}, stderr {printed[1]!r}", pytrace=False)
@@ -51,18 +87,22 @@ class _Hub:
     tests set HF_HUB_DISABLE_XET=1, so the hub client asks for no Xet token). Its first `too_many` model-info calls get 429
     with Retry-After 0 (-1: every call). `requests` lists (method, path, status) as they arrive."""
 
-    def __init__(self, too_many=0, download_too_many=0):
-        from faster_whisper.utils import download_model
+    def __init__(self, too_many=0, download_too_many=0, files=None, commit=None):
+        if files is not None:  # synthetic: the bytes and the commit are given, nothing is read from a cache
+            self.commit, self.files = commit, dict(files)
+            self.etags = {name: hashlib.sha256(data).hexdigest() for name, data in self.files.items()}
+        else:
+            from faster_whisper.utils import download_model
 
-        try:
-            snapshot = Path(download_model("tiny", local_files_only=True))
-        except Exception:
-            pytest.skip("tiny Whisper model not cached here; the recipe's setup step fetches it")
-        self.commit = snapshot.name
-        self.files = {f.name: f.read_bytes() for f in snapshot.iterdir() if f.is_file()}
-        # the ETag the real Hub gave each file: the name of the blob its snapshot link points to
-        self.etags = {f.name: Path(os.readlink(f)).name if f.is_symlink() else hashlib.sha256(self.files[f.name]).hexdigest()
-                      for f in snapshot.iterdir() if f.is_file()}
+            try:
+                snapshot = Path(download_model("tiny", local_files_only=True))
+            except Exception:
+                pytest.skip("tiny Whisper model not cached here; the recipe's setup step fetches it")
+            self.commit = snapshot.name
+            self.files = {f.name: f.read_bytes() for f in snapshot.iterdir() if f.is_file()}
+            # the ETag the real Hub gave each file: the name of the blob its snapshot link points to
+            self.etags = {f.name: Path(os.readlink(f)).name if f.is_symlink() else hashlib.sha256(self.files[f.name]).hexdigest()
+                          for f in snapshot.iterdir() if f.is_file()}
         self.too_many, self.requests, self.times = too_many, [], []
         self.download_too_many = download_too_many  # GET model.bin answers 429 this many times (-1: every call)
         hub = self
@@ -124,8 +164,11 @@ class _Hub:
 def hub():
     made = []
 
-    def start(too_many=0, download_too_many=0):
-        made.append(_Hub(too_many, download_too_many))
+    def start(too_many=0, download_too_many=0, synthetic=False, files=None):
+        if synthetic or files is not None:
+            made.append(_Hub(too_many, download_too_many, files=files or SYNTHETIC_FILES, commit=SYNTHETIC_COMMIT))
+        else:
+            made.append(_Hub(too_many, download_too_many))
         return made[-1]
 
     yield start
@@ -373,8 +416,8 @@ def test_retry_wait_budget_exceeded_uses_defaults(tmp_path, hub, waits):
     suspend setup for years (1e9 s) or end it with an OverflowError (1e308). Now setup prints one warning naming the
     setting, its value and the default, replaces the whole schedule with 15,30,60,120, and waits the first 15 s after the
     Hub's 429 before a verified download."""
-    served = hub(too_many=1)
-    run = _setup(tmp_path / "hf", served.url, timeout=60, HF_HUB_DISABLE_XET="1", WHISPER_TINY_RETRY_WAITS=waits)
+    served = hub(too_many=1, synthetic=True)
+    run = _setup(tmp_path / "hf", served.url, timeout=60, manifest=SYNTHETIC_MANIFEST, HF_HUB_DISABLE_XET="1", WHISPER_TINY_RETRY_WAITS=waits)
     output = run.stdout + run.stderr + repr(served.requests)
     assert run.returncode == 0, output
     assert "WHISPER_TINY downloaded 78203619 bytes" in run.stdout, output
@@ -393,8 +436,8 @@ def test_retry_wait_budget_exceeded_uses_defaults(tmp_path, hub, waits):
 def test_retry_wait_budget_limits_are_accepted_with_no_warning(tmp_path, waits, expected):
     """The budget limits themselves (one wait of a day, two halves of a day, a day in the middle) are valid: an intact cached
     model passes setup at once, with no warning and no wait."""
-    home, _ = _copy_cache(tmp_path)
-    run = _setup(home, timeout=60, WHISPER_TINY_RETRY_WAITS=waits)
+    home = _synthetic_cache(tmp_path)
+    run = _setup(home, timeout=60, manifest=SYNTHETIC_MANIFEST, WHISPER_TINY_RETRY_WAITS=waits)
     assert run.returncode == 0, run.stdout + run.stderr
     assert run.stdout.startswith("WHISPER_TINY cached 78203619 bytes"), run.stdout
     assert "RETRY_WAITS" not in run.stderr, run.stderr
@@ -406,11 +449,25 @@ def test_retry_wait_budget_limits_are_accepted_with_no_warning(tmp_path, waits, 
 def test_zero_wait_is_accepted_and_retry_succeeds(tmp_path, hub):
     """WHISPER_TINY_RETRY_WAITS=0 is a valid wait: the Hub answers 429 once, setup retries at once (0 s), downloads the
     model and prints no warning."""
-    served = hub(too_many=1)
-    run = _setup(tmp_path / "hf", served.url, HF_HUB_DISABLE_XET="1", WHISPER_TINY_RETRY_WAITS="0")
+    served = hub(too_many=1, synthetic=True)
+    run = _setup(tmp_path / "hf", served.url, HF_HUB_DISABLE_XET="1", WHISPER_TINY_RETRY_WAITS="0", manifest=SYNTHETIC_MANIFEST)
     assert run.returncode == 0, run.stdout + run.stderr + repr(served.requests)
     assert "next try in 0 s" in run.stdout, run.stdout
     assert "WHISPER_TINY downloaded 78203619 bytes" in run.stdout, run.stdout
     assert "RETRY_WAITS" not in run.stderr, run.stderr
     seen, _ = _waits(WHISPER_TINY_RETRY_WAITS="0")
     assert seen == "[0.0]", seen
+
+
+def test_synthetic_same_size_corruption_fails_the_sha256_check(tmp_path, hub):
+    """The Hub serves model.bin with one byte changed and the same size: the recipe's real sha256 check rejects the
+    download after the fresh fetch, exits 1 and says so, with no traceback."""
+    corrupt = dict(SYNTHETIC_FILES)
+    corrupt["model.bin"] = bytes([corrupt["model.bin"][0] ^ 1]) + corrupt["model.bin"][1:]
+    served = hub(files=corrupt)
+    run = _setup(tmp_path / "hf", served.url, HF_HUB_DISABLE_XET="1", WHISPER_TINY_RETRY_WAITS="0", manifest=SYNTHETIC_MANIFEST)
+    output = run.stdout + run.stderr + repr(served.requests)
+    assert run.returncode == 1, output
+    assert "WHISPER_TINY still wrong after a fresh download: model.bin sha256 differs" in run.stdout, output
+    assert "WHISPER_TINY downloaded" not in run.stdout, output
+    assert "Traceback" not in output, output

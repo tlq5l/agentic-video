@@ -6,7 +6,8 @@ Usage:
   python scripts/related_tests.py --files src/retrieval/visual.py   # pick the files by hand
   python scripts/related_tests.py --list          # print the chosen tests, run nothing
   python scripts/related_tests.py --files src/x.py --lint   # ruff on the changed .py files first; a failure stops before pytest
-  Without a .git folder (a box copy), --files is the only way to name the changed files.
+  Without a .git folder (a box copy), --files is the only way to name the changed files, and a deleted file cannot be
+  named there: git's record of the deletion is missing, so --files refuses the path.
   python scripts/related_tests.py --jobs 1        # one pytest process instead of the default 4
 
 A test is chosen when it imports a changed module directly, or imports a src module that
