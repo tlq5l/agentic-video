@@ -8,10 +8,12 @@ Seed (WHISPER_TINY_SEED, a folder holding the four files): when the cache has no
 is copied into the cache with no network call. When the cache and the seed are both missing or bad, the Hub is used, and
 a good result is copied into the seed folder so the next box starts from it.
 
-When the Hub answers 429 (too many requests), it is asked again after 15, 30, 60 and 120 s (WHISPER_TINY_RETRY_WAITS,
-comma-separated seconds, replaces them; empty means the default). setup exits 1 when the Hub still answers 429 after the
-last wait. The 429 is seen on the model-info call, which a cached copy cannot hide. Other download errors fail at once.
-Not covered: a 429 on a file download after the model-info call succeeded."""
+When the Hub answers 429 (too many requests), the model-info call or a file download is tried again after 15, 30, 60 and
+120 s (WHISPER_TINY_RETRY_WAITS, comma-separated seconds, replaces them; empty means the default). Each try is the whole
+fetch, model-info then the four files; the Hub client makes its own quick retries inside a download first. setup exits 1
+when the Hub still answers 429 after the last wait. The 429 is seen on the model-info call, which a cached copy cannot
+hide. A wait too long to sleep stops setup with one line naming WHISPER_TINY_RETRY_WAITS. Other download errors fail at
+once."""
 import hashlib
 import math
 import os
@@ -33,10 +35,13 @@ EXPECTED = {
 DEFAULT_WAITS = "15,30,60,120"
 
 
+RAW_WAITS = os.environ.get("WHISPER_TINY_RETRY_WAITS", "").strip() or DEFAULT_WAITS
+
+
 def retry_waits():
     """Seconds to wait after each 429: WHISPER_TINY_RETRY_WAITS, or the default when it is unset or empty. Empty items
     (a stray comma) are skipped. A value that is not seconds 0 or more prints one warning line on stderr and the default."""
-    raw = os.environ.get("WHISPER_TINY_RETRY_WAITS", "").strip() or DEFAULT_WAITS
+    raw = RAW_WAITS
     try:
         waits = [float(item) for item in raw.split(",") if item.strip()]
         if not waits or any(not math.isfinite(wait) or wait < 0 for wait in waits):
@@ -119,32 +124,35 @@ def cached_model():
         return None, [f"not cached ({type(error).__name__})"]
 
 
-def hub_answers():
-    """True once the Hub answers the model-info call. After each 429 it waits the next of WAITS and asks again. The call
-    itself raises the 429, where snapshot_download would hand back a cached copy with no error. False when the Hub still
-    answers 429 after the last wait."""
-    from huggingface_hub import model_info
+class SetupError(Exception):
+    """Setup cannot go on. The message is the one line it prints."""
+
+
+def sleep_for(wait):
+    """Sleep `wait` seconds. A wait too long for time.sleep (1e308) raises SetupError naming the setting."""
+    try:
+        time.sleep(wait)
+    except OverflowError:
+        raise SetupError(f"WHISPER_TINY_RETRY_WAITS={RAW_WAITS!r}: a wait of {wait:g} s is too long to sleep; use shorter waits") from None
+
+
+def fetch():
+    """Download the 4 files afresh once the Hub answers. One loop of tries covers the model-info call and the download, and
+    they share the WAITS: a 429 on either waits the next of WAITS and runs the whole fetch again. Returns the snapshot
+    folder, or None when the Hub still answers 429 after the last wait. Other errors are raised at once."""
+    from huggingface_hub import model_info, snapshot_download
 
     for wait in [*WAITS, None]:
         try:
             model_info(REPO, revision="main")
-            return True
+            return Path(snapshot_download(REPO, allow_patterns=list(EXPECTED), force_download=True))
         except Exception as error:
             if not rate_limited(error):
                 raise
             if wait is None:
-                return False
+                return None
             print(f"WHISPER_TINY hub answered 429 (too many requests), next try in {wait:g} s", flush=True)
-            time.sleep(wait)
-
-
-def fetch():
-    """Download the 4 files afresh once the Hub answers. Returns the snapshot folder, or None while the Hub answers 429."""
-    from huggingface_hub import snapshot_download
-
-    if not hub_answers():
-        return None
-    return Path(snapshot_download(REPO, allow_patterns=list(EXPECTED), force_download=True))
+            sleep_for(wait)
 
 
 def main():
@@ -158,7 +166,11 @@ def main():
         how = "seed"
     if bad:
         print("WHISPER_TINY fetching: " + "; ".join(bad), flush=True)
-        path = fetch()
+        try:
+            path = fetch()
+        except SetupError as error:
+            print(error, file=sys.stderr, flush=True)
+            return 1
         if path is None:
             print(f"WHISPER_TINY hub still answered 429 after {len(WAITS) + 1} tries", flush=True)
             return 1
