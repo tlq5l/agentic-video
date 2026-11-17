@@ -13,6 +13,7 @@ comma-separated seconds, replaces them; empty means the default). setup exits 1 
 last wait. The 429 is seen on the model-info call, which a cached copy cannot hide. Other download errors fail at once.
 Not covered: a 429 on a file download after the model-info call succeeded."""
 import hashlib
+import math
 import os
 import shutil
 import sys
@@ -33,9 +34,17 @@ DEFAULT_WAITS = "15,30,60,120"
 
 
 def retry_waits():
-    """Seconds to wait after each 429: WHISPER_TINY_RETRY_WAITS, or the default when it is unset or empty."""
+    """Seconds to wait after each 429: WHISPER_TINY_RETRY_WAITS, or the default when it is unset or empty. Empty items
+    (a stray comma) are skipped. A value that is not seconds 0 or more prints one warning line on stderr and the default."""
     raw = os.environ.get("WHISPER_TINY_RETRY_WAITS", "").strip() or DEFAULT_WAITS
-    return [float(wait) for wait in raw.split(",")]
+    try:
+        waits = [float(item) for item in raw.split(",") if item.strip()]
+        if not waits or any(not math.isfinite(wait) or wait < 0 for wait in waits):
+            raise ValueError(raw)
+    except ValueError:
+        print(f"WHISPER_TINY_RETRY_WAITS={raw!r} is not comma-separated seconds 0 or more; using {DEFAULT_WAITS}", file=sys.stderr, flush=True)
+        waits = [float(wait) for wait in DEFAULT_WAITS.split(",")]
+    return waits
 
 
 WAITS = retry_waits()
