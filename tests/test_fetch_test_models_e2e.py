@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -33,7 +34,7 @@ def _copy_cache(tmp_path):
 
 
 def _setup(home, endpoint="http://127.0.0.1:9", **extra):
-    env = {k: v for k, v in os.environ.items() if k not in ("HF_HUB_OFFLINE", "HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE")}
+    env = {k: v for k, v in os.environ.items() if k not in ("HF_HUB_OFFLINE", "HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE", "WHISPER_TINY_SEED", "WHISPER_TINY_RETRY_WAITS")}
     env.update(HF_HOME=str(home), HF_ENDPOINT=endpoint, **extra)
     return subprocess.run([sys.executable, str(SCRIPT)], env=env, capture_output=True, text=True, timeout=300)
 
@@ -56,7 +57,7 @@ class _Hub:
         # the ETag the real Hub gave each file: the name of the blob its snapshot link points to
         self.etags = {f.name: Path(os.readlink(f)).name if f.is_symlink() else hashlib.sha256(self.files[f.name]).hexdigest()
                       for f in snapshot.iterdir() if f.is_file()}
-        self.too_many, self.requests = too_many, []
+        self.too_many, self.requests, self.times = too_many, [], []
         hub = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -85,6 +86,7 @@ class _Hub:
 
             def _send(self, path, status, data, headers, body):
                 hub.requests.append((self.command, path, status))
+                hub.times.append(time.monotonic())
                 self.send_response(status)
                 for key, value in headers.items():
                     self.send_header(key, value)
@@ -164,25 +166,95 @@ def test_a_half_downloaded_model_is_fetched_again(tmp_path, hub):
     assert ("GET", f"/Systran/faster-whisper-tiny/resolve/{served.commit}/model.bin", 200) in served.requests
 
 
+def _cut_model_off(tmp_path, served):
+    """The cache copy with model.bin cut to half, the way a cut-off download leaves it (a link into the blobs folder, the
+    blob half written); returns the HF_HOME to set up with."""
+    home, model = _copy_cache(tmp_path)
+    blob = model.parents[2] / "blobs" / served.etags["model.bin"]
+    model.unlink()
+    model.symlink_to(Path("..", "..", "blobs", blob.name))
+    os.chmod(blob, 0o644)
+    with open(blob, "r+b") as handle:
+        handle.truncate(75538270 // 2)
+    return home
+
+
+def _revision_statuses(served):
+    return [status for method, path, status in served.requests if "/revision/" in path]
+
+
 def test_setup_tries_again_when_the_hub_answers_429(tmp_path, hub):
-    """Nothing cached, the Hub answers its first two model-info calls with 429 (too many requests): setup waits and tries
-    again, then downloads the model. Round-17 breaker box log (r17/break-m2.log): setup exited 1 on the first 429."""
+    """Nothing cached, the Hub answers its first two info calls with 429 (too many requests): setup waits 0.4 s each time,
+    a real wait so a removed sleep shows, then tries again and downloads the model. Round-17 breaker box log
+    (r17/break-m2.log): setup exited 1 on the first 429."""
     served = hub(too_many=2)
-    run = _setup(tmp_path / "hf", served.url, HF_HUB_DISABLE_XET="1", WHISPER_TINY_RETRY_WAITS="0,0,0,0")
+    run = _setup(tmp_path / "hf", served.url, HF_HUB_DISABLE_XET="1", WHISPER_TINY_RETRY_WAITS="0.4,0.4,0.4,0.4")
     assert run.returncode == 0, run.stdout + run.stderr + repr(served.requests)
-    assert run.stdout.count("WHISPER_TINY hub answered 429 (too many requests), next try in 0 s") == 2
+    assert run.stdout.count("WHISPER_TINY hub answered 429 (too many requests), next try in 0.4 s") == 2
     assert "WHISPER_TINY downloaded 78203619 bytes" in run.stdout
-    assert [status for method, path, status in served.requests if "/revision/" in path] == [429, 429, 200]
+    assert _revision_statuses(served)[:3] == [429, 429, 200]
+    waited = [stamp for (method, path, status), stamp in zip(served.requests, served.times) if status == 429]
+    assert waited[1] - waited[0] >= 0.4, waited
 
 
 def test_setup_stops_after_the_last_wait_when_the_hub_keeps_answering_429(tmp_path, hub):
-    """Every model-info call answered 429: setup tries 5 times (4 waits), then exits 1 with no download."""
+    """Every info call answered 429: setup tries 5 times (4 waits), then exits 1 with no download."""
     served = hub(too_many=-1)
     run = _setup(tmp_path / "hf", served.url, HF_HUB_DISABLE_XET="1", WHISPER_TINY_RETRY_WAITS="0,0,0,0")
     assert run.returncode == 1, run.stdout + run.stderr + repr(served.requests)
     assert "WHISPER_TINY hub still answered 429 after 5 tries" in run.stdout
-    assert [status for method, path, status in served.requests if "/revision/" in path] == [429] * 5
+    assert _revision_statuses(served) == [429] * 5
     assert not [path for method, path, status in served.requests if "/resolve/" in path], served.requests
+
+
+def test_a_429_while_a_broken_copy_is_cached_is_waited_out(tmp_path, hub):
+    """model.bin cut to half in the cache and the Hub answering 429 on every info call. The cached copy used to come back
+    with no error, so setup exited 1 at once with no 429 line (round-18 box probe). Now it waits the 4 waits, then says 429."""
+    served = hub(too_many=-1)
+    home = _cut_model_off(tmp_path, served)
+    run = _setup(home, served.url, HF_HUB_DISABLE_XET="1", WHISPER_TINY_RETRY_WAITS="0,0,0,0")
+    assert run.returncode == 1, run.stdout + run.stderr + repr(served.requests)
+    assert "WHISPER_TINY hub still answered 429 after 5 tries" in run.stdout
+    assert _revision_statuses(served) == [429] * 5
+
+
+def test_a_good_seed_passes_setup_with_no_call_to_the_hub(tmp_path, hub):
+    """No cache, the Hub answering 429 on every call, and a seed folder holding the four good files: setup copies the seed
+    into the cache and passes, with no request to the Hub."""
+    served = hub(too_many=-1)
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    for name in ("config.json", "model.bin", "tokenizer.json", "vocabulary.txt"):
+        (seed / name).write_bytes(served.files[name])
+    run = _setup(tmp_path / "hf", served.url, HF_HUB_DISABLE_XET="1", WHISPER_TINY_SEED=str(seed))
+    assert run.returncode == 0, run.stdout + run.stderr + repr(served.requests)
+    assert "WHISPER_TINY seed 78203619 bytes" in run.stdout
+    assert served.requests == [], served.requests
+
+
+def test_a_bad_seed_is_not_used_and_a_fresh_download_refills_it(tmp_path, hub):
+    """No cache, a seed whose model.bin is cut short, the Hub reachable: setup skips the seed, downloads the model, and
+    copies the four good files over the seed."""
+    served = hub()
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    for name in ("config.json", "model.bin", "tokenizer.json", "vocabulary.txt"):
+        (seed / name).write_bytes(served.files[name])
+    (seed / "model.bin").write_bytes(served.files["model.bin"][:1000])
+    run = _setup(tmp_path / "hf", served.url, HF_HUB_DISABLE_XET="1", WHISPER_TINY_SEED=str(seed))
+    assert run.returncode == 0, run.stdout + run.stderr + repr(served.requests)
+    assert "WHISPER_TINY downloaded 78203619 bytes" in run.stdout
+    assert "WHISPER_TINY seed filled at " in run.stdout
+    for name in ("config.json", "model.bin", "tokenizer.json", "vocabulary.txt"):
+        assert (seed / name).read_bytes() == served.files[name], name
+
+
+def test_an_empty_retry_wait_setting_is_the_default(tmp_path):
+    """WHISPER_TINY_RETRY_WAITS="" used to crash at import (float of an empty string). Empty now means the default waits:
+    with nothing cached and the Hub unreachable, setup gets as far as the download and fails there."""
+    run = _setup(tmp_path / "hf", WHISPER_TINY_RETRY_WAITS="")
+    assert run.returncode != 0
+    assert "WHISPER_TINY fetching: not cached" in run.stdout, run.stdout + run.stderr
 
 
 def test_setup_fails_at_once_on_errors_other_than_429(tmp_path):
