@@ -33,10 +33,16 @@ def _copy_cache(tmp_path):
     return home, model_dir / "snapshots" / snapshot.name / "model.bin"
 
 
-def _setup(home, endpoint="http://127.0.0.1:9", **extra):
+def _setup(home, endpoint="http://127.0.0.1:9", *, timeout=300, **extra):
+    """Run the script the way setup runs it. A child still running after `timeout` s is killed (subprocess.run waits for
+    it) and the test fails with the output printed so far."""
     env = {k: v for k, v in os.environ.items() if k not in ("HF_HUB_OFFLINE", "HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE", "WHISPER_TINY_SEED", "WHISPER_TINY_RETRY_WAITS")}
     env.update(HF_HOME=str(home), HF_ENDPOINT=endpoint, **extra)
-    return subprocess.run([sys.executable, str(SCRIPT)], env=env, capture_output=True, text=True, timeout=300)
+    try:
+        return subprocess.run([sys.executable, str(SCRIPT)], env=env, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired as error:
+        printed = [(part.decode(errors="replace") if isinstance(part, bytes) else part or "") for part in (error.stdout, error.stderr)]
+        pytest.fail(f"setup still running after {timeout} s, so it was killed: stdout {printed[0]!r}, stderr {printed[1]!r}", pytrace=False)
 
 
 class _Hub:
@@ -361,15 +367,40 @@ def test_download_429_exhausted_hub_retries_then_recovers(tmp_path, hub):
     assert "Traceback" not in output, output
 
 
-def test_huge_wait_1e308_gives_clean_setup_error_without_traceback(tmp_path, hub):
-    """A retry wait too long for time.sleep (1e308 s) used to end setup with a raw OverflowError traceback. The Hub answers
-    429 once so the wait is used: setup stops at once, names the wait setting and its value, and prints no traceback."""
+@pytest.mark.parametrize("waits", ["1e9", "86401", "43200,43200,1", "1e308"])
+def test_retry_wait_budget_exceeded_uses_defaults(tmp_path, hub, waits):
+    """WHISPER_TINY_RETRY_WAITS over the budget (one wait above a day, or the waits adding up to more than a day) used to
+    suspend setup for years (1e9 s) or end it with an OverflowError (1e308). Now setup prints one warning naming the
+    setting, its value and the default, replaces the whole schedule with 15,30,60,120, and waits the first 15 s after the
+    Hub's 429 before a verified download."""
     served = hub(too_many=1)
-    run = _setup(tmp_path / "hf", served.url, HF_HUB_DISABLE_XET="1", WHISPER_TINY_RETRY_WAITS="1e308")
-    output = run.stdout + run.stderr
-    assert run.returncode != 0, output
-    assert "WHISPER_TINY_RETRY_WAITS" in run.stderr and "1e308" in run.stderr, run.stderr
-    assert "Traceback" not in output and "OverflowError" not in output, output
+    run = _setup(tmp_path / "hf", served.url, timeout=60, HF_HUB_DISABLE_XET="1", WHISPER_TINY_RETRY_WAITS=waits)
+    output = run.stdout + run.stderr + repr(served.requests)
+    assert run.returncode == 0, output
+    assert "WHISPER_TINY downloaded 78203619 bytes" in run.stdout, output
+    warnings = [line for line in run.stderr.splitlines() if "RETRY_WAITS" in line]
+    assert len(warnings) == 1, run.stderr
+    assert repr(waits) in warnings[0] and "15,30,60,120" in warnings[0], warnings[0]
+    assert "Traceback" not in output, output
+    assert "next try in 15 s" in run.stdout, run.stdout
+    statuses = [status for method, path, status in served.requests if "/revision/" in path]
+    stamps = [stamp for (method, path, status), stamp in zip(served.requests, served.times) if "/revision/" in path]
+    assert statuses[:2] == [429, 200], served.requests
+    assert stamps[1] - stamps[0] >= 15, stamps
+
+
+@pytest.mark.parametrize("waits, expected", [("86400", "[86400.0]"), ("43200,43200", "[43200.0, 43200.0]"), ("0,86400,0", "[0.0, 86400.0, 0.0]")])
+def test_retry_wait_budget_limits_are_accepted_with_no_warning(tmp_path, waits, expected):
+    """The budget limits themselves (one wait of a day, two halves of a day, a day in the middle) are valid: an intact cached
+    model passes setup at once, with no warning and no wait."""
+    home, _ = _copy_cache(tmp_path)
+    run = _setup(home, timeout=60, WHISPER_TINY_RETRY_WAITS=waits)
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert run.stdout.startswith("WHISPER_TINY cached 78203619 bytes"), run.stdout
+    assert "RETRY_WAITS" not in run.stderr, run.stderr
+    seen, stderr = _waits(WHISPER_TINY_RETRY_WAITS=waits)
+    assert seen == expected, seen
+    assert "RETRY_WAITS" not in stderr, stderr
 
 
 def test_zero_wait_is_accepted_and_retry_succeeds(tmp_path, hub):

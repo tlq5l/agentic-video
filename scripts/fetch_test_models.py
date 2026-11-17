@@ -12,7 +12,7 @@ When the Hub answers 429 (too many requests), the model-info call or a file down
 120 s (WHISPER_TINY_RETRY_WAITS, comma-separated seconds, replaces them; empty means the default). Each try is the whole
 fetch, model-info then the four files; the Hub client makes its own quick retries inside a download first. setup exits 1
 when the Hub still answers 429 after the last wait. The 429 is seen on the model-info call, which a cached copy cannot
-hide. A wait too long to sleep stops setup with one line naming WHISPER_TINY_RETRY_WAITS. Other download errors fail at
+hide. A schedule over the budget (one wait above 86400 s, or waits adding up to more than 86400 s) prints one warning and the default waits. Other download errors fail at
 once."""
 import hashlib
 import math
@@ -33,6 +33,9 @@ EXPECTED = {
     "vocabulary.txt": (459861, "34ce3fe1c5041027b3f8d42912270993f986dbc4bb34cf27f951e34a1e453913"),
 }
 DEFAULT_WAITS = "15,30,60,120"
+# The budget for WHISPER_TINY_RETRY_WAITS: one wait at most a day, and all the waits together at most a day.
+MAX_WAIT = 86400
+MAX_TOTAL_WAIT = 86400
 
 
 RAW_WAITS = os.environ.get("WHISPER_TINY_RETRY_WAITS", "").strip() or DEFAULT_WAITS
@@ -40,16 +43,25 @@ RAW_WAITS = os.environ.get("WHISPER_TINY_RETRY_WAITS", "").strip() or DEFAULT_WA
 
 def retry_waits():
     """Seconds to wait after each 429: WHISPER_TINY_RETRY_WAITS, or the default when it is unset or empty. Empty items
-    (a stray comma) are skipped. A value that is not seconds 0 or more prints one warning line on stderr and the default."""
+    (a stray comma) are skipped. A value that is not seconds 0 or more prints one warning line on stderr and the default.
+    A schedule over the budget (one wait above MAX_WAIT, or the waits adding up to more than MAX_TOTAL_WAIT) also prints
+    one warning and the default: the whole schedule is replaced, none of it is cut short."""
     raw = RAW_WAITS
     try:
         waits = [float(item) for item in raw.split(",") if item.strip()]
         if not waits or any(not math.isfinite(wait) or wait < 0 for wait in waits):
             raise ValueError(raw)
     except ValueError:
-        print(f"WHISPER_TINY_RETRY_WAITS={raw!r} is not comma-separated seconds 0 or more; using {DEFAULT_WAITS}", file=sys.stderr, flush=True)
-        waits = [float(wait) for wait in DEFAULT_WAITS.split(",")]
+        return default_waits(f"WHISPER_TINY_RETRY_WAITS={raw!r} is not comma-separated seconds 0 or more")
+    if any(wait > MAX_WAIT for wait in waits) or sum(waits) > MAX_TOTAL_WAIT:
+        return default_waits(f"WHISPER_TINY_RETRY_WAITS={raw!r} is over the budget (one wait at most {MAX_WAIT} s, all waits together at most {MAX_TOTAL_WAIT} s)")
     return waits
+
+
+def default_waits(reason):
+    """Print the reason and the default waits on one stderr line; returns the default waits."""
+    print(f"{reason}; using {DEFAULT_WAITS}", file=sys.stderr, flush=True)
+    return [float(wait) for wait in DEFAULT_WAITS.split(",")]
 
 
 WAITS = retry_waits()
@@ -124,18 +136,6 @@ def cached_model():
         return None, [f"not cached ({type(error).__name__})"]
 
 
-class SetupError(Exception):
-    """Setup cannot go on. The message is the one line it prints."""
-
-
-def sleep_for(wait):
-    """Sleep `wait` seconds. A wait too long for time.sleep (1e308) raises SetupError naming the setting."""
-    try:
-        time.sleep(wait)
-    except OverflowError:
-        raise SetupError(f"WHISPER_TINY_RETRY_WAITS={RAW_WAITS!r}: a wait of {wait:g} s is too long to sleep; use shorter waits") from None
-
-
 def fetch():
     """Download the 4 files afresh once the Hub answers. One loop of tries covers the model-info call and the download, and
     they share the WAITS: a 429 on either waits the next of WAITS and runs the whole fetch again. Returns the snapshot
@@ -152,7 +152,7 @@ def fetch():
             if wait is None:
                 return None
             print(f"WHISPER_TINY hub answered 429 (too many requests), next try in {wait:g} s", flush=True)
-            sleep_for(wait)
+            time.sleep(wait)
 
 
 def main():
@@ -166,11 +166,7 @@ def main():
         how = "seed"
     if bad:
         print("WHISPER_TINY fetching: " + "; ".join(bad), flush=True)
-        try:
-            path = fetch()
-        except SetupError as error:
-            print(error, file=sys.stderr, flush=True)
-            return 1
+        path = fetch()
         if path is None:
             print(f"WHISPER_TINY hub still answered 429 after {len(WAITS) + 1} tries", flush=True)
             return 1
