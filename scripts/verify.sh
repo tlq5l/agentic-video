@@ -1,7 +1,8 @@
 #!/bin/sh
 # Inner check for agents: ruff on the changed Python files, then the tests that import them (model and slow tests left out).
 # Usage: scripts/verify.sh [base-ref]           changed files vs base-ref (default HEAD, untracked files count) in a Git checkout
-#        scripts/verify.sh --files <paths...>   the changed files are the ones named: the way to run it in a copy with no .git
+#        scripts/verify.sh --files <paths...>   the changed files are the ones named: the way to run it in a copy with no .git.
+#                                               A copy with no .git cannot name a deleted file: git's record of the deletion is missing there.
 # Both go through scripts/related_tests.py --lint.
 set -eu
 cd "$(dirname "$0")/.."
