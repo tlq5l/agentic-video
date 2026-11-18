@@ -24,7 +24,7 @@ def parse_fps(fps_str: str) -> float:
         return 0.0
 
 
-METADATA_CACHE_NAME = "metadata_display_size"
+METADATA_CACHE_NAME = "metadata_display_size_no_cover_art"
 
 
 def _is_quarter_turn(video_stream: Dict[str, Any]) -> bool:
@@ -85,8 +85,8 @@ def probe_video(
     """Probe a media file using ffprobe and return structured VideoMetadata.
 
     width and height are the displayed size: FFmpeg applies the rotation when it
-    decodes, so frames come out in that size. A file with audio but no video raises
-    MediaCorruptError unless allow_audio_only is set.
+    decodes, so frames come out in that size. Attached cover art is ignored.
+    A file with audio but no video raises MediaCorruptError unless allow_audio_only is set.
     Reads from local MediaCache if available.
     """
     path = Path(file_path).resolve()
@@ -163,7 +163,7 @@ def probe_video(
 
     for s in streams:
         c_type = s.get("codec_type")
-        if c_type == "video" and video_stream is None:
+        if c_type == "video" and video_stream is None and not (s.get("disposition") or {}).get("attached_pic"):
             video_stream = s
         elif c_type == "audio" and audio_stream is None:
             audio_stream = s

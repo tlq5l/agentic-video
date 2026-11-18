@@ -16,6 +16,8 @@
 
 - A URL whose download thread the system refused to start no longer blocks the next call for that URL: the next call starts the download and answers ready, instead of answering in_progress forever.
 
+- `probe_video` treats audio tracks with embedded cover art as audio-only. Visual tools ask for a video file, and audio tools continue to work.
+
 - `count_occurrences` with `direction` lists the spans the filter leaves out (stationary, or moving another way) in a new `excluded_spans` field, each with start_sec, end_sec and travel; count, spans and every other field are unchanged.
 
 - `count_occurrences` with `direction`: an appearance that crosses and comes straight back inside one span (its first and last positions match) now counts for a direction it moved at least 0.5 of the frame along. Before, it read stationary and was left out. count_dev back row occ27_q1: 0 to 4 (truth 4).
