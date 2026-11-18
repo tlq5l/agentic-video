@@ -44,7 +44,7 @@ VIDEO_TAIL_READ_SEC = 10.0
 FRAME_DECODE_LEAD_SEC = 1.0
 END_TOLERANCE_SEC = 0.001
 # Bump when the frame_at selection or decode chain changes, so saved PNGs made by the old chain are not reused.
-FRAME_AT_CACHE_VERSION = 8
+FRAME_AT_CACHE_VERSION = 9
 
 
 def _fps_if_within_media(vpath: Path, timestamp_sec: float, cache: MediaCache) -> Optional[float]:
@@ -257,7 +257,7 @@ def _write_selected_frame(
             *seek_args,
             "-t", f"{read_sec:.6f}",
             "-i", str(vpath),
-            "-map", "0:v:0",
+            "-map", "0:V:0",
             "-vf", f"select='eq(pts,{pts})',{vf}",
             "-fps_mode", "passthrough", "-update", "1",
             str(tmp_file),

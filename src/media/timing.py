@@ -96,7 +96,7 @@ def probe_decoded_frame_timestamps(
         "-v",
         "error",
         "-select_streams",
-        "v:0",
+        "V:0",
         "-read_intervals",
         f"{start:.6f}%{end:.6f}",
         "-show_frames",
@@ -206,7 +206,7 @@ def read_stream_clock(video_path: str | Path) -> StreamClock:
     """The container start, the video stream's time base and the container duration, as ffprobe prints them."""
     path = Path(video_path).resolve()
     proc = subprocess.run(
-        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+        ["ffprobe", "-v", "error", "-select_streams", "V:0", "-show_entries",
          "format=start_time,duration:stream=time_base", "-of", "json", str(path)],
         capture_output=True, text=True, timeout=Config.SUBPROCESS_TIMEOUT_SEC, check=False,
     )
@@ -254,7 +254,7 @@ def probe_packet_ticks(
     interval = f"{start}%{end}"
     path = Path(video_path).resolve()
     proc = subprocess.run(
-        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-read_intervals", interval,
+        ["ffprobe", "-v", "error", "-select_streams", "V:0", "-read_intervals", interval,
          "-show_entries", "packet=pts,duration", "-of", "json", str(path)],
         capture_output=True, text=True, timeout=Config.SUBPROCESS_TIMEOUT_SEC, check=False,
     )
@@ -289,7 +289,7 @@ def probe_frame_ticks(
     command = ["ffmpeg", "-nostdin", "-v", "info", "-copyts"]
     if start_sec is not None:
         command += ["-ss", f"{start_sec:.6f}"]
-    command += ["-i", str(path), "-map", "0:v:0"]
+    command += ["-i", str(path), "-map", "0:V:0"]
     if end_sec is not None:
         command += ["-to", f"{end_sec:.6f}"]
     command += ["-vf", "showinfo", "-f", "null", "-"]

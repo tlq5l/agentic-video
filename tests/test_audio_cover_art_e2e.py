@@ -70,3 +70,45 @@ def test_album_track_audio_tools_work_and_visual_tools_explain_the_error(album_t
     assert json.loads(visual.stdout)["isError"] is True
     assert "audio only" in visual.stdout
     assert "pass a video file as source" in visual.stdout
+
+
+def mp4_atoms(data):
+    while data:
+        size = int.from_bytes(data[:4], "big")
+        assert 8 <= size <= len(data)
+        yield data[:size]
+        data = data[size:]
+
+
+def test_frame_at_reads_video_when_cover_stream_comes_first(tmp_path):
+    cover = tmp_path / "cover.jpg"
+    Image.new("RGB", (64, 64), "red").save(cover)
+    movie = tmp_path / "movie.mp4"
+    subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i", "color=blue:s=320x180:r=10:d=2",
+         "-i", str(cover), "-map", "1:v", "-map", "0:v", "-c:v:0", "copy", "-disposition:v:0", "attached_pic",
+         "-c:v:1", "libx264", str(movie)],
+        capture_output=True, check=True, timeout=30,
+    )
+    # FFmpeg's MP4 muxer writes the cover in udta after the tracks. Keep the
+    # atom sizes and offsets the same but put udta before the track entries.
+    atoms = []
+    for atom in mp4_atoms(movie.read_bytes()):
+        if atom[4:8] == b"moov":
+            children = sorted(mp4_atoms(atom[8:]), key=lambda item: {b"mvhd": 0, b"udta": 1}.get(item[4:8], 2))
+            atom = atom[:8] + b"".join(children)
+        atoms.append(atom)
+    movie.write_bytes(b"".join(atoms))
+    streams = subprocess.check_output(
+        ["ffprobe", "-v", "error", "-show_streams", "-of", "json", str(movie)], text=True, timeout=30,
+    )
+    assert json.loads(streams)["streams"][0]["disposition"]["attached_pic"] == 1
+
+    proc = call("frame_at", movie, tmp_path / "cache", time_sec=0.8)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    data = json.loads(proc.stdout)["structuredContent"]
+    assert (data["source_width"], data["source_height"]) == (320, 180)
+    assert data["frame_time_sec"] == pytest.approx(0.8)
+    with Image.open(data["file_path"]) as frame:
+        assert frame.size == (320, 180)
+        assert frame.getpixel((160, 90))[2] > 200
