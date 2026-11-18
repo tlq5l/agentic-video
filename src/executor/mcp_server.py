@@ -1373,9 +1373,8 @@ def tool_call_response(req_id: Any, name: Any, arguments: Any) -> str:
     return line
 
 
-# Versions this server meets. 2025-03-26 is not listed: it requires servers to accept JSON-RPC batches (arrays), which
-# this loop answers with Invalid Request. The newest entry is the answer when the client asks for a version not listed.
-SUPPORTED_PROTOCOL_VERSIONS = ("2024-11-05",)
+# Oldest first so an unknown version falls back to the newest supported one.
+SUPPORTED_PROTOCOL_VERSIONS = ("2024-11-05", "2025-03-26")
 
 
 def _negotiated_protocol_version(params: Any) -> str:
@@ -1384,96 +1383,57 @@ def _negotiated_protocol_version(params: Any) -> str:
     return requested if requested in SUPPORTED_PROTOCOL_VERSIONS else SUPPORTED_PROTOCOL_VERSIONS[-1]
 
 
+def _request_reply(req: Any) -> Optional[Dict[str, Any]]:
+    """Handle one request. Notifications have no reply."""
+    if not isinstance(req, dict):
+        return {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "Invalid Request"}}
+    if "id" not in req:
+        return None
+
+    req_id = req["id"]
+    method = req.get("method")
+    if method == "initialize":
+        result = {
+            "protocolVersion": _negotiated_protocol_version(req.get("params")),
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "agentic-video", "version": _package_version()},
+        }
+    elif method == "tools/list":
+        result = {"tools": TOOLS_MANIFEST}
+    elif method == "tools/call":
+        params = req.get("params", {})
+        return json.loads(tool_call_response(req_id, params.get("name"), params.get("arguments", {})))
+    elif method == "ping":
+        result = {}
+    else:
+        return {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32601, "message": "Method not found"}}
+    return {"jsonrpc": "2.0", "id": req_id, "result": result}
+
+
 def run_stdio_server():
     """Run JSON-RPC stdio loop for MCP clients (Executor, Claude, Cursor)."""
     # Force UTF-8 on Windows stdio
     sys.stdin.reconfigure(encoding="utf-8")
     sys.stdout.reconfigure(encoding="utf-8")
-    
-    while True:
-        line = sys.stdin.readline()
-        if not line:
-            break
-        line = line.strip()
-        if not line:
+
+    for line in sys.stdin:
+        if not line.strip():
             continue
-            
         try:
             req = json.loads(line)
-        except Exception:
-            # Never leave a caller waiting forever after malformed input.
-            # JSON-RPC parse errors are deliberately generic so malformed input
-            # cannot reflect arbitrary payloads back to the client.
-            resp = {
-                "jsonrpc": "2.0",
-                "id": None,
-                "error": {"code": -32700, "message": "Parse error"},
-            }
-            sys.stdout.write(json.dumps(resp) + "\n")
-            sys.stdout.flush()
-            continue
-
-        if not isinstance(req, dict):
-            resp = {
-                "jsonrpc": "2.0",
-                "id": None,
-                "error": {"code": -32600, "message": "Invalid Request"},
-            }
-            sys.stdout.write(json.dumps(resp) + "\n")
-            sys.stdout.flush()
-            continue
-            
-        req_id = req.get("id")
-        method = req.get("method")
-
-        if "id" not in req:
-            # A JSON-RPC notification (notifications/initialized, notifications/cancelled, ...) gets no reply, so none is written.
-            continue
-        
-        if method == "initialize":
-            resp = {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "result": {
-                    "protocolVersion": _negotiated_protocol_version(req.get("params")),
-                    "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "agentic-video", "version": _package_version()}
-                }
-            }
-            sys.stdout.write(json.dumps(resp) + "\n")
-            sys.stdout.flush()
-            
-        elif method == "tools/list":
-            resp = {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "result": {"tools": TOOLS_MANIFEST}
-            }
-            sys.stdout.write(json.dumps(resp) + "\n")
-            sys.stdout.flush()
-            
-        elif method == "tools/call":
-            params = req.get("params", {})
-            name = params.get("name")
-            arguments = params.get("arguments", {})
-            sys.stdout.write(tool_call_response(req_id, name, arguments) + "\n")
-            sys.stdout.flush()
-
-        elif method == "ping":
-            resp = {"jsonrpc": "2.0", "id": req_id, "result": {}}
-            sys.stdout.write(json.dumps(resp) + "\n")
-            sys.stdout.flush()
-
+        except (ValueError, RecursionError):
+            resp = {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}}
         else:
-            # Unknown methods must produce a bounded JSON-RPC response rather
-            # than silently consuming the request and causing a client timeout.
-            resp = {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "error": {"code": -32601, "message": "Method not found"},
-            }
-            sys.stdout.write(json.dumps(resp) + "\n")
-            sys.stdout.flush()
+            if isinstance(req, list) and req:
+                resp = [reply for item in req if (reply := _request_reply(item)) is not None]
+                if not resp:
+                    continue
+            else:
+                # An empty batch, like any other invalid request, gets one error object.
+                resp = _request_reply(req)
+                if resp is None:
+                    continue
+        print(json.dumps(resp), flush=True)
     return _finish_at_eof()
 
 
