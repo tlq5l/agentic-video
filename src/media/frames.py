@@ -468,7 +468,7 @@ def _has_no_video_stream(vpath: Path) -> bool:
     some other kind is not blamed on the file type."""
     try:
         proc = subprocess.run(
-            ["ffprobe", "-v", "error", "-select_streams", "v", "-show_entries", "stream=index",
+            ["ffprobe", "-v", "error", "-select_streams", "V", "-show_entries", "stream=index",
              "-of", "csv=p=0", str(vpath)],
             capture_output=True, text=True, timeout=Config.SUBPROCESS_TIMEOUT_SEC, check=False,
         )
