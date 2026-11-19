@@ -1416,21 +1416,28 @@ _BATCH_OVERFLOW_TEXT = "batch reply over the 8 MB MCP message limit; send this c
 def _reply_line(resp: Any) -> str:
     """One stdout line for a reply or a batch of replies, kept under MAX_RESPONSE_BYTES.
 
-    A batch is one array on one line, so replies that each fit can add up past the limit. A reply that would push the
-    array over is swapped for a small error with its own id, so every id still gets an answer. A line still over the
-    limit becomes one error with no id.
+    A batch is one array on one line, so replies that each fit can add up past the limit. Each reply is kept whole only if
+    the replies after it can still follow as their small errors (with their ids) inside the limit; otherwise it becomes its
+    small error. A line still over the limit after that becomes one error with no id.
     """
     if not isinstance(resp, list):
         return json.dumps(resp)
+    full = [json.dumps(reply) for reply in resp]
+    small = [json.dumps({"jsonrpc": "2.0", "id": reply.get("id"), "result": _error_result(_BATCH_OVERFLOW_TEXT)}) for reply in resp]
+    # reserve[i]: bytes the replies from i on take up as small errors, each with its comma.
+    reserve = [0] * (len(resp) + 1)
+    for i in range(len(resp) - 1, -1, -1):
+        reserve[i] = reserve[i + 1] + 1 + len(small[i])
     pieces = []
     total = 2  # the brackets
-    for reply in resp:
-        piece = json.dumps(reply)
+    for i, piece in enumerate(full):
         sep = 1 if pieces else 0  # the comma
-        if total + sep + len(piece) > MAX_RESPONSE_BYTES:
-            piece = json.dumps({"jsonrpc": "2.0", "id": reply.get("id"), "result": _error_result(_BATCH_OVERFLOW_TEXT)})
-        pieces.append(piece)
-        total += sep + len(piece)
+        if total + sep + len(piece) + reserve[i + 1] <= MAX_RESPONSE_BYTES:
+            pieces.append(piece)
+            total += sep + len(piece)
+        else:
+            pieces.append(small[i])
+            total += sep + len(small[i])
     line = "[" + ",".join(pieces) + "]"
     if len(line) > MAX_RESPONSE_BYTES:
         line = json.dumps({"jsonrpc": "2.0", "id": None, "error": {"code": -32603, "message": "batch response over the MCP message limit"}})
