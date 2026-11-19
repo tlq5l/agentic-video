@@ -3,7 +3,10 @@
 import base64
 import io
 import json
+import os
 import subprocess
+import sys
+from pathlib import Path
 
 import numpy as np
 from PIL import Image
@@ -129,3 +132,22 @@ def test_inspect_window_composes_sheet_from_dense_frames(tmp_path, monkeypatch):
     assert result.frames
     with Image.open(result.contact_sheet_path) as sheet:
         assert sheet.size[0] > 160
+
+def test_batch_of_big_replies_stays_under_the_message_limit_end_to_end(tmp_path):
+    """A JSON-RPC batch is one stdout line. Each reply here fits under MAX_RESPONSE_BYTES, but three of them added up
+    printed a 9 MB line. The batch line must stay under the limit and still answer every id."""
+    limit = 8_000_000
+    # An unknown tool name is echoed into its error reply, so each reply is about 3 MB on its own.
+    batch = [{"jsonrpc": "2.0", "id": i, "method": "tools/call", "params": {"name": "x" * 3_000_000 + str(i), "arguments": {}}}
+             for i in (1, 2, 3)]
+    home = tmp_path / "home"
+    home.mkdir()
+    env = {"PATH": os.environ["PATH"], "HOME": str(home), "LANG": "C.UTF-8"}
+    done = subprocess.run([sys.executable, "-m", "src.executor.mcp_server"], input=json.dumps(batch) + "\n", capture_output=True,
+                          text=True, cwd=Path(__file__).resolve().parents[1], env=env, timeout=600)
+    assert done.returncode == 0, done.stderr[-2000:]
+    lines = done.stdout.splitlines()
+    assert len(lines) == 1, len(lines)
+    assert len(lines[0].encode("utf-8")) <= limit, len(lines[0].encode("utf-8"))
+    replies = json.loads(lines[0])
+    assert [reply["id"] for reply in replies] == [1, 2, 3], replies

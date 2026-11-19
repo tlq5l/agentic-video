@@ -1410,6 +1410,33 @@ def _request_reply(req: Any) -> Optional[Dict[str, Any]]:
     return {"jsonrpc": "2.0", "id": req_id, "result": result}
 
 
+_BATCH_OVERFLOW_TEXT = "batch reply over the 8 MB MCP message limit; send this call alone or in a smaller batch"
+
+
+def _reply_line(resp: Any) -> str:
+    """One stdout line for a reply or a batch of replies, kept under MAX_RESPONSE_BYTES.
+
+    A batch is one array on one line, so replies that each fit can add up past the limit. A reply that would push the
+    array over is swapped for a small error with its own id, so every id still gets an answer. A line still over the
+    limit becomes one error with no id.
+    """
+    if not isinstance(resp, list):
+        return json.dumps(resp)
+    pieces = []
+    total = 2  # the brackets
+    for reply in resp:
+        piece = json.dumps(reply)
+        sep = 1 if pieces else 0  # the comma
+        if total + sep + len(piece) > MAX_RESPONSE_BYTES:
+            piece = json.dumps({"jsonrpc": "2.0", "id": reply.get("id"), "result": _error_result(_BATCH_OVERFLOW_TEXT)})
+        pieces.append(piece)
+        total += sep + len(piece)
+    line = "[" + ",".join(pieces) + "]"
+    if len(line) > MAX_RESPONSE_BYTES:
+        line = json.dumps({"jsonrpc": "2.0", "id": None, "error": {"code": -32603, "message": "batch response over the MCP message limit"}})
+    return line
+
+
 def run_stdio_server():
     """Run JSON-RPC stdio loop for MCP clients (Executor, Claude, Cursor)."""
     # Force UTF-8 on Windows stdio
@@ -1433,7 +1460,7 @@ def run_stdio_server():
                 resp = _request_reply(req)
                 if resp is None:
                     continue
-        print(json.dumps(resp), flush=True)
+        print(_reply_line(resp), flush=True)
     return _finish_at_eof()
 
 
