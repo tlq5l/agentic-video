@@ -1402,6 +1402,8 @@ def _request_reply(req: Any) -> Optional[Dict[str, Any]]:
         result = {"tools": TOOLS_MANIFEST}
     elif method == "tools/call":
         params = req.get("params", {})
+        if not isinstance(params, dict):
+            return {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32602, "message": "Invalid params"}}
         return json.loads(tool_call_response(req_id, params.get("name"), params.get("arguments", {})))
     elif method == "ping":
         result = {}
