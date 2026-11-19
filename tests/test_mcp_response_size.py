@@ -151,3 +151,28 @@ def test_batch_of_big_replies_stays_under_the_message_limit_end_to_end(tmp_path)
     assert len(lines[0].encode("utf-8")) <= limit, len(lines[0].encode("utf-8"))
     replies = json.loads(lines[0])
     assert [reply["id"] for reply in replies] == [1, 2, 3], replies
+
+def test_batch_first_reply_just_under_the_limit_keeps_it_and_answers_the_rest_end_to_end(tmp_path):
+    """Breaker repro for PR #141 (FAIL F1). Reply 1 is 7,999,912 bytes, so it fits on its own. Reply 2 (3 MB) is swapped for its
+    small error, and that small error was never checked against the batch total: the line went over the limit and the whole
+    batch became one id-null error. Every id must still get its own reply inside the limit."""
+    limit = 8_000_000
+    name_1 = "x" * 7_999_200
+    batch = [{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name_1, "arguments": {}}},
+             {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "x" * 3_000_000, "arguments": {}}}]
+    home = tmp_path / "home"
+    home.mkdir()
+    env = {"PATH": os.environ["PATH"], "HOME": str(home), "LANG": "C.UTF-8"}
+    done = subprocess.run([sys.executable, "-m", "src.executor.mcp_server"], input=json.dumps(batch) + "\n", capture_output=True,
+                          text=True, cwd=Path(__file__).resolve().parents[1], env=env, timeout=600)
+    assert done.returncode == 0, done.stderr[-2000:]
+    lines = done.stdout.splitlines()
+    assert len(lines) == 1, len(lines)
+    assert len(lines[0].encode("utf-8")) <= limit, len(lines[0].encode("utf-8"))
+    replies = json.loads(lines[0])
+    assert isinstance(replies, list), replies
+    assert [reply["id"] for reply in replies] == [1, 2], [reply.get("id") for reply in replies]
+    # Reply 1 (7,999,912 bytes) cannot sit beside reply 2's small error inside the limit, so it becomes its small error;
+    # reply 2 (3 MB) fits alone and stays whole.
+    assert "over the 8 MB MCP message limit" in replies[0]["result"]["content"][0]["text"]
+    assert "x" * 3_000_000 in replies[1]["result"]["content"][0]["text"]
