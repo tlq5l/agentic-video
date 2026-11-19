@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- MCP over stdio supports protocol 2025-03-26 and still accepts 2024-11-05. A JSON-RPC batch gets one array of replies. Notifications receive no reply.
+
 - Setup's `WHISPER_TINY_RETRY_WAITS` is bounded: one wait above a day, or waits that add up to more than a day, prints one warning and uses the default 15,30,60,120 s (before, `1e9` made setup wait for years and `1e308` ended it with an OverflowError).
 
 - `scripts/verify.sh --files <paths>` checks the named files in a copy with no `.git` (a box copy): it runs ruff, then only the tests that import them. Before, a copy with no `.git` exited with a git error and the full suite was the fallback.

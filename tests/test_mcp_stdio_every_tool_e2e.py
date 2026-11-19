@@ -285,8 +285,7 @@ def test_notifications_get_no_reply_and_ping_gets_an_empty_result(tmp_path):
 
 
 def test_initialize_echoes_supported_version_else_newest(tmp_path):
-    # The server supports only 2024-11-05: 2025-03-26 requires servers to accept JSON-RPC batches, and this one answers
-    # an array with Invalid Request. So 2024-11-05 is also the newest supported version here.
+    # Echo a supported version and use the newest for unknown or malformed versions.
     client = {"capabilities": {}, "clientInfo": {"name": "test", "version": "0"}}
     lines = [
         {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05", **client}},
@@ -296,8 +295,9 @@ def test_initialize_echoes_supported_version_else_newest(tmp_path):
         {"jsonrpc": "2.0", "id": 5, "method": "ping"},
     ]
     replies = {reply.get("id"): reply for reply in _talk(lines, tmp_path)}
-    for request_id in (1, 2, 3, 4):
-        assert replies[request_id]["result"]["protocolVersion"] == "2024-11-05", replies[request_id]
+    assert replies[1]["result"]["protocolVersion"] == "2024-11-05", replies[1]
+    for request_id in (2, 3, 4):
+        assert replies[request_id]["result"]["protocolVersion"] == "2025-03-26", replies[request_id]
     assert replies[5]["result"] == {}, replies[5]
 
 
