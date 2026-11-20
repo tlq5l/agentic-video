@@ -1418,23 +1418,24 @@ _BATCH_OVERFLOW_TEXT = "batch reply over the 8 MB MCP message limit; send this c
 def _reply_line(resp: Any) -> str:
     """One stdout line for a reply or a batch of replies, kept under MAX_RESPONSE_BYTES.
 
-    A batch is one array on one line, so replies that each fit can add up past the limit. Each reply is kept whole only if
-    the replies after it can still follow as their small errors (with their ids) inside the limit; otherwise it becomes its
-    small error. A line still over the limit after that becomes one error with no id.
+    A batch is one array on one line, so replies that each fit can add up past the limit. Each reply is kept whole when it
+    is no larger than its small error, or when the replies after it can still follow inside the limit (reserving the smaller
+    of each later reply's whole and small-error forms); otherwise it becomes its small error. A line still over the limit
+    after that becomes one error with no id.
     """
     if not isinstance(resp, list):
         return json.dumps(resp)
     full = [json.dumps(reply) for reply in resp]
     small = [json.dumps({"jsonrpc": "2.0", "id": reply.get("id"), "result": _error_result(_BATCH_OVERFLOW_TEXT)}) for reply in resp]
-    # reserve[i]: bytes the replies from i on take up as small errors, each with its comma.
+    # reserve[i]: minimum bytes the replies from i on need (smaller of full and small error), each with its comma.
     reserve = [0] * (len(resp) + 1)
     for i in range(len(resp) - 1, -1, -1):
-        reserve[i] = reserve[i + 1] + 1 + len(small[i])
+        reserve[i] = reserve[i + 1] + 1 + min(len(full[i]), len(small[i]))
     pieces = []
     total = 2  # the brackets
     for i, piece in enumerate(full):
         sep = 1 if pieces else 0  # the comma
-        if total + sep + len(piece) + reserve[i + 1] <= MAX_RESPONSE_BYTES:
+        if len(piece) <= len(small[i]) or total + sep + len(piece) + reserve[i + 1] <= MAX_RESPONSE_BYTES:
             pieces.append(piece)
             total += sep + len(piece)
         else:
