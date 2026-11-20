@@ -133,6 +133,33 @@ def test_inspect_window_composes_sheet_from_dense_frames(tmp_path, monkeypatch):
     with Image.open(result.contact_sheet_path) as sheet:
         assert sheet.size[0] > 160
 
+def _run_batch(batch, tmp_path):
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    env = {"PATH": os.environ["PATH"], "HOME": str(home), "LANG": "C.UTF-8"}
+    done = subprocess.run([sys.executable, "-m", "src.executor.mcp_server"], input=json.dumps(batch) + "\n", capture_output=True,
+                          text=True, cwd=Path(__file__).resolve().parents[1], env=env, timeout=600)
+    assert done.returncode == 0, done.stderr[-2000:]
+    lines = done.stdout.splitlines()
+    assert len(lines) == 1, len(lines)
+    return lines[0]
+
+
+def _reply_of_size(req_id, size):
+    base = {"jsonrpc": "2.0", "id": req_id, "result": {"data": ""}}
+    pad = size - len(json.dumps(base))
+    assert pad >= 0
+    reply = {"jsonrpc": "2.0", "id": req_id, "result": {"data": "a" * pad}}
+    assert len(json.dumps(reply)) == size
+    return reply
+
+
+def _ping_reply(req_id):
+    reply = {"jsonrpc": "2.0", "id": req_id, "result": {}}
+    assert len(json.dumps(reply)) == 41
+    return reply
+
+
 def test_batch_of_big_replies_stays_under_the_message_limit_end_to_end(tmp_path):
     """A JSON-RPC batch is one stdout line. Each reply here fits under MAX_RESPONSE_BYTES, but three of them added up
     printed a 9 MB line. The batch line must stay under the limit and still answer every id."""
@@ -140,17 +167,11 @@ def test_batch_of_big_replies_stays_under_the_message_limit_end_to_end(tmp_path)
     # An unknown tool name is echoed into its error reply, so each reply is about 3 MB on its own.
     batch = [{"jsonrpc": "2.0", "id": i, "method": "tools/call", "params": {"name": "x" * 3_000_000 + str(i), "arguments": {}}}
              for i in (1, 2, 3)]
-    home = tmp_path / "home"
-    home.mkdir()
-    env = {"PATH": os.environ["PATH"], "HOME": str(home), "LANG": "C.UTF-8"}
-    done = subprocess.run([sys.executable, "-m", "src.executor.mcp_server"], input=json.dumps(batch) + "\n", capture_output=True,
-                          text=True, cwd=Path(__file__).resolve().parents[1], env=env, timeout=600)
-    assert done.returncode == 0, done.stderr[-2000:]
-    lines = done.stdout.splitlines()
-    assert len(lines) == 1, len(lines)
-    assert len(lines[0].encode("utf-8")) <= limit, len(lines[0].encode("utf-8"))
-    replies = json.loads(lines[0])
+    line = _run_batch(batch, tmp_path)
+    assert len(line.encode("utf-8")) <= limit, len(line.encode("utf-8"))
+    replies = json.loads(line)
     assert [reply["id"] for reply in replies] == [1, 2, 3], replies
+
 
 def test_batch_first_reply_just_under_the_limit_keeps_it_and_answers_the_rest_end_to_end(tmp_path):
     """Breaker repro for PR #141 (FAIL F1). Reply 1 is 7,999,912 bytes, so it fits on its own. Reply 2 (3 MB) is swapped for its
@@ -160,19 +181,107 @@ def test_batch_first_reply_just_under_the_limit_keeps_it_and_answers_the_rest_en
     name_1 = "x" * 7_999_200
     batch = [{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name_1, "arguments": {}}},
              {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "x" * 3_000_000, "arguments": {}}}]
-    home = tmp_path / "home"
-    home.mkdir()
-    env = {"PATH": os.environ["PATH"], "HOME": str(home), "LANG": "C.UTF-8"}
-    done = subprocess.run([sys.executable, "-m", "src.executor.mcp_server"], input=json.dumps(batch) + "\n", capture_output=True,
-                          text=True, cwd=Path(__file__).resolve().parents[1], env=env, timeout=600)
-    assert done.returncode == 0, done.stderr[-2000:]
-    lines = done.stdout.splitlines()
-    assert len(lines) == 1, len(lines)
-    assert len(lines[0].encode("utf-8")) <= limit, len(lines[0].encode("utf-8"))
-    replies = json.loads(lines[0])
+    line = _run_batch(batch, tmp_path)
+    assert len(line.encode("utf-8")) <= limit, len(line.encode("utf-8"))
+    replies = json.loads(line)
     assert isinstance(replies, list), replies
     assert [reply["id"] for reply in replies] == [1, 2], [reply.get("id") for reply in replies]
     # Reply 1 (7,999,912 bytes) cannot sit beside reply 2's small error inside the limit, so it becomes its small error;
     # reply 2 (3 MB) fits alone and stays whole.
     assert "over the 8 MB MCP message limit" in replies[0]["result"]["content"][0]["text"]
     assert "x" * 3_000_000 in replies[1]["result"]["content"][0]["text"]
+
+
+def test_batch_large_reply_followed_by_ping_keeps_both_whole_end_to_end(tmp_path):
+    """A 7,999,900-byte reply followed by a 41-byte ping fits under the 8 MB limit and must keep both replies whole."""
+    limit = mcp_server.MAX_RESPONSE_BYTES
+    overhead = len(mcp_server.tool_call_response(1, "", {}))
+    name_1 = "x" * (7_999_900 - overhead)
+    assert len(mcp_server.tool_call_response(1, name_1, {})) == 7_999_900
+    batch = [
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name_1, "arguments": {}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "ping"},
+    ]
+    line = _run_batch(batch, tmp_path)
+    assert len(line.encode("utf-8")) <= limit, len(line.encode("utf-8"))
+    replies = json.loads(line)
+    assert isinstance(replies, list), replies
+    assert [reply["id"] for reply in replies] == [1, 2], [reply.get("id") for reply in replies]
+    assert name_1 in replies[0]["result"]["content"][0]["text"]
+    assert "over the 8 MB MCP message limit" not in replies[0]["result"]["content"][0]["text"]
+    assert replies[1] == {"jsonrpc": "2.0", "id": 2, "result": {}}
+
+
+def test_reply_line_reserves_smaller_form_for_later_replies():
+    limit = mcp_server.MAX_RESPONSE_BYTES
+
+    # [7,999,900 B, 41 B]: both fit whole (7,999,944 B <= 8,000,000 B).
+    batch_one_ping = [_reply_of_size(1, 7_999_900), _ping_reply(2)]
+    line = mcp_server._reply_line(batch_one_ping)
+    assert len(line.encode("utf-8")) <= limit
+    assert json.loads(line) == batch_one_ping
+
+    # [7,999,700 B, 41 B, 41 B]: all three fit whole (7,999,786 B <= 8,000,000 B).
+    batch_two_pings = [_reply_of_size(1, 7_999_700), _ping_reply(2), _ping_reply(3)]
+    line = mcp_server._reply_line(batch_two_pings)
+    assert len(line.encode("utf-8")) <= limit
+    assert json.loads(line) == batch_two_pings
+
+    # Exact limit boundary: 2 + 7,999,956 + 1 + 41 == 8,000,000 -> both whole.
+    batch_exact = [_reply_of_size(1, limit - 44), _ping_reply(2)]
+    line = mcp_server._reply_line(batch_exact)
+    assert len(line.encode("utf-8")) == limit
+    assert json.loads(line) == batch_exact
+
+
+def test_reply_line_swaps_first_reply_when_it_truly_cannot_fit():
+    limit = mcp_server.MAX_RESPONSE_BYTES
+
+    # 1 byte past the exact boundary with a 41-byte follower: reply 1 cannot fit and becomes its small error.
+    ping_2 = _ping_reply(2)
+    line = mcp_server._reply_line([_reply_of_size(1, limit - 43), ping_2])
+    assert len(line.encode("utf-8")) <= limit
+    replies = json.loads(line)
+    assert [reply["id"] for reply in replies] == [1, 2]
+    assert replies[0]["result"]["isError"] is True
+    assert mcp_server._BATCH_OVERFLOW_TEXT in replies[0]["result"]["content"][0]["text"]
+    assert replies[1] == ping_2
+
+    # Reply 2 is larger than its small error (1,000 B > 186 B), so reply 1 (7,999,900 B) cannot fit even beside
+    # reply 2's small error (2 + 7,999,900 + 1 + 186 = 8,000,089 > 8,000,000).
+    second = _reply_of_size(2, 1_000)
+    line = mcp_server._reply_line([_reply_of_size(1, 7_999_900), second])
+    assert len(line.encode("utf-8")) <= limit
+    replies = json.loads(line)
+    assert [reply["id"] for reply in replies] == [1, 2]
+    assert replies[0]["result"]["isError"] is True
+    assert mcp_server._BATCH_OVERFLOW_TEXT in replies[0]["result"]["content"][0]["text"]
+    assert replies[1] == second
+
+
+def test_reply_line_keeps_small_replies_whole_and_falls_back_when_still_over_limit(monkeypatch):
+    # Four 41-byte pings total 169 bytes (2 + 4*41 + 3). Under a 200-byte limit, each reply is smaller than its
+    # 186-byte small error, so all four must be kept whole rather than swapped and overflowing.
+    monkeypatch.setattr(mcp_server, "MAX_RESPONSE_BYTES", 200)
+    four_pings = [_ping_reply(i) for i in (1, 2, 3, 4)]
+    line = mcp_server._reply_line(four_pings)
+    assert len(line.encode("utf-8")) <= 200
+    assert json.loads(line) == four_pings
+
+    # A reply equal in size to its small-error form (186 B) is kept whole too (2 + 186 == 188 <= 200).
+    small_len = len(json.dumps({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": mcp_server._error_result(mcp_server._BATCH_OVERFLOW_TEXT),
+    }))
+    equal_reply = _reply_of_size(1, small_len)
+    line = mcp_server._reply_line([equal_reply])
+    assert len(line.encode("utf-8")) <= 200
+    assert json.loads(line) == [equal_reply]
+
+    # Five 41-byte pings total 211 bytes (> 200), so the batch still overflows into the single id-null error.
+    five_pings = [_ping_reply(i) for i in (1, 2, 3, 4, 5)]
+    line = mcp_server._reply_line(five_pings)
+    assert len(line.encode("utf-8")) <= 200
+    err = json.loads(line)
+    assert err["id"] is None and err["error"]["code"] == -32603
