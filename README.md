@@ -2,6 +2,8 @@
 
 <!-- mcp-name: io.github.tlq5l/agentic-video -->
 
+[![tlq5l/agentic-video MCP server](https://glama.ai/mcp/servers/tlq5l/agentic-video/badges/score.svg)](https://glama.ai/mcp/servers/tlq5l/agentic-video)
+
 agentic-video lets an AI agent that reads text and images, but not video, work with video files on your own machine. It is a Python library plus a stdio MCP server. The agent asks small, targeted questions ("show me 12 frames from 0:40 to 1:10", "when is 'launch' spoken?") and gets back measurements, transcripts and contact sheets: grids of frames, each with its timestamp burned into the pixels. Everything runs locally with FFmpeg, Whisper and optional local models, except two optional cloud tools (`watch_for`, `label_sounds`), which are switched off: they refuse every call and send nothing, because Cloudflare Workers AI is disabled in this release. The opt-in shadow transcription trial is switched off too. Cloud transcription is the one other exception: `transcribe` sends its audio to Cloudflare only on a host that `AGENTIC_VIDEO_CLOUD_ASR` names.
 
 **See it work:** https://agentic-video-gallery.infra-1b7.workers.dev (the gallery: real tasks, including the misses).
