@@ -5,7 +5,6 @@ An excursion touching either window edge is deliberately excluded.
 """
 from collections import OrderedDict
 from contextlib import contextmanager
-import fcntl
 import hashlib
 import json
 import math
@@ -16,7 +15,7 @@ import subprocess
 import tempfile
 import threading
 
-from src.core import jobs
+from src.core import filelock, jobs
 import time
 
 import numpy as np
@@ -381,14 +380,15 @@ def _locked_temp_dir(parent):
     lock_file = None
     try:
         lock_file = open(Path(temp.name) / ".lock", "a+b")
-        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        filelock.acquire(lock_file)
         yield temp.name
     finally:
         try:
-            temp.cleanup()
-        finally:
             if lock_file is not None:
+                # Close before cleanup: Windows cannot remove a directory holding an open file.
                 lock_file.close()
+        finally:
+            temp.cleanup()
 
 
 def _remove_orphaned_temp_dirs(parent):
@@ -400,9 +400,13 @@ def _remove_orphaned_temp_dirs(parent):
             if not path.is_symlink() and path.is_dir() and path.stat().st_mtime < cutoff:
                 with open(path / ".lock", "a+b") as lock_file:
                     try:
-                        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    except BlockingIOError:
+                        filelock.acquire(lock_file, blocking=False)
+                    except filelock.LockBusy:
                         continue
+                    if os.name == "nt":
+                        # Windows cannot remove a directory holding an open file.
+                        filelock.release(lock_file)
+                        lock_file.close()
                     shutil.rmtree(path)
         except FileNotFoundError:
             pass

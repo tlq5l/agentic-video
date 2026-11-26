@@ -1,6 +1,5 @@
 """Fast local speech-to-text using faster-whisper with subtitle fallback."""
 import hashlib
-import errno
 import json
 import os
 import re
@@ -10,7 +9,7 @@ import sys
 import tempfile
 import threading
 
-from src.core import jobs
+from src.core import filelock, jobs
 import time
 from pathlib import Path
 from typing import Optional, List, Tuple, Dict, Any
@@ -320,34 +319,19 @@ def _acquire_background_process_lock(
         cache_dir.mkdir(parents=True, exist_ok=True)
         lock_file = open(cache_dir / "asr-worker.lock", "a+b")
         if os.name == "nt":
-            import msvcrt
-
             lock_file.seek(0, os.SEEK_END)
             if lock_file.tell() == 0:
                 lock_file.write(b"\0")
                 lock_file.flush()
-            lock_file.seek(0)
-            try:
-                msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
-            except OSError as exc:
-                lock_file.seek(0)
-                owner = _read_background_lock_owner(lock_file)
-                lock_file.close()
-                if exc.errno in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
-                    return None, owner, None
-                return None, None, f"Could not lock the ASR worker slot: {exc}"
-        else:
-            import fcntl
-
-            try:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except OSError as exc:
-                lock_file.seek(0)
-                owner = _read_background_lock_owner(lock_file)
-                lock_file.close()
-                if exc.errno in {errno.EACCES, errno.EAGAIN}:
-                    return None, owner, None
-                return None, None, f"Could not lock the ASR worker slot: {exc}"
+        try:
+            filelock.acquire(lock_file, blocking=False)
+        except filelock.LockBusy:
+            owner = _read_background_lock_owner(lock_file)
+            lock_file.close()
+            return None, owner, None
+        except OSError as exc:
+            lock_file.close()
+            return None, None, f"Could not lock the ASR worker slot: {exc}"
 
         metadata_offset = 1 if os.name == "nt" else 0
         lock_file.seek(metadata_offset)
@@ -372,15 +356,7 @@ def _acquire_background_process_lock(
 
 def _release_background_process_lock(lock_file: Any) -> None:
     try:
-        if os.name == "nt":
-            import msvcrt
-
-            lock_file.seek(0)
-            msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
-        else:
-            import fcntl
-
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        filelock.release(lock_file)
     except OSError:
         pass
     finally:
@@ -1374,15 +1350,16 @@ def transcribe_video(
     worker_script = f"""
 import json, os, signal, subprocess, sys, tempfile, threading, wave
 decoder = None
-parent_pid = int(os.environ.get("AGENTIC_VIDEO_ASR_PARENT_PID", os.getppid()))
+parent_pid = int(os.environ.get("AGENTIC_VIDEO_ASR_PARENT_PID") or (os.getppid() if os.name == "posix" else -1))
 watchdog_stop = threading.Event()
 def stop_if_parent_exited():
+    if os.name != "posix":
+        return  # on Windows the Job Object kills this worker when the parent exits
     if os.getppid() != parent_pid:
-        if os.name == "posix":
-            try:
-                os.killpg(os.getpgrp(), signal.SIGKILL)
-            except Exception:
-                pass
+        try:
+            os.killpg(os.getpgrp(), signal.SIGKILL)
+        except Exception:
+            pass
         if decoder is not None:
             try:
                 decoder.terminate()

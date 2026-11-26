@@ -37,13 +37,8 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional
 
-from src.core import jobs
+from src.core import filelock, jobs
 from src.media import cloudflare
-
-try:
-    import fcntl
-except ImportError:  # Windows has no flock; the state lock is then skipped
-    fcntl = None
 
 MODEL = "@cf/openai/whisper-large-v3-turbo"
 FEATURE = "Shadow ASR"  # names the trial in credential errors
@@ -86,12 +81,9 @@ def _ensure_state_dir() -> Path:
 def _state_lock() -> Iterator[None]:
     directory = _ensure_state_dir()
     fd = os.open(directory / "shadow-cf-asr.lock", os.O_RDWR | os.O_CREAT, 0o600)
-    try:
-        if fcntl is not None:
-            fcntl.flock(fd, fcntl.LOCK_EX)
-        yield
-    finally:
-        os.close(fd)
+    with os.fdopen(fd, "r+b") as handle:
+        with filelock.locked(handle):
+            yield
 
 
 def _read_trial() -> Dict[str, Any]:
