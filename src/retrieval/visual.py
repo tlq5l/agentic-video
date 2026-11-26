@@ -5,8 +5,6 @@ No model downloads occur at tool runtime. Install the visual extra
 and pre-fetch the model explicitly. One build and one search worker run per process.
 """
 import heapq
-import errno
-import fcntl
 import importlib.util
 import math
 import os
@@ -25,7 +23,7 @@ from pathlib import Path
 
 import numpy as np
 
-from src.core import jobs
+from src.core import filelock, jobs
 from src.core.errors import VisualSetupError, as_dependency_error
 from src.core.types import FrameInfo, format_timestamp
 from src.media.contact_sheet import compose_contact_sheet
@@ -206,10 +204,10 @@ def build_index(engine, report=lambda data: None):
     entry = engine._cache.get_entry_dir(engine.metadata.fingerprint)
     with (entry / f"{INDEX_NAME}.lock").open("a+b") as lock_file:
         try:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError as exc:
-            if exc.errno not in (errno.EACCES, errno.EAGAIN):
-                raise
+            with filelock.locked(lock_file, blocking=False):
+                _remove_orphaned_temp_dirs(entry, include_chunks=True)
+                return _build_locked(engine, stamp, duration, report)
+        except filelock.LockBusy:
             conn = None
             try:
                 conn = _connect(engine, readonly=True)
@@ -221,11 +219,6 @@ def build_index(engine, report=lambda data: None):
                     conn.close()
             return {"status": "busy", "retry_after_seconds": 2,
                     "message": "Another process is building this visual index; retry shortly.", **progress}
-        try:
-            _remove_orphaned_temp_dirs(entry, include_chunks=True)
-            return _build_locked(engine, stamp, duration, report)
-        finally:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 _PTS = re.compile(r"pts_time:\s*([0-9.eE+-]+).*? s:(\d+)x(\d+)")
